@@ -4,7 +4,7 @@
 **Rôle** Référence unique pour la phase de correction : chaque problème, chaque manque et chaque recommandation y figure avec son identifiant stable, sa priorité globale, son niveau de certitude, ses conditions, ses relations, une validation et un lot de correction. Les fiches des rapports d'origine y sont **reprises sans perte** (rubrique « Détail d'origine ») : il n'est pas nécessaire de relire les phases 1 à 3 pour traiter une entrée.
 **Ce document ne corrige rien.** Aucun fichier du jeu, aucun asset, aucune configuration n'a été modifié ; aucun commit.
 
-**Sources** [PHASE1-AUDIT-TECHNIQUE.md](PHASE1-AUDIT-TECHNIQUE.md) (89 problèmes) · [PHASE2-AUDIT-EN-JEU.md](PHASE2-AUDIT-EN-JEU.md) (9 constats, dont 5 fusionnés avec la phase 1) · [PHASE3-AUDIT-COMPLETUDE.md](PHASE3-AUDIT-COMPLETUDE.md) (24 recommandations) · [../comprendre/](../comprendre/README.md) (documentation de compréhension, écarts doc ↔ code). Limites et lacunes de ces sources : annexe 1.
+**Sources** [PHASE1-AUDIT-TECHNIQUE.md](PHASE1-AUDIT-TECHNIQUE.md) (89 problèmes) · [PHASE2-AUDIT-EN-JEU.md](PHASE2-AUDIT-EN-JEU.md) (9 constats, dont 5 fusionnés avec la phase 1) · [PHASE3-AUDIT-COMPLETUDE.md](PHASE3-AUDIT-COMPLETUDE.md) (24 recommandations) · [../comprendre/](../comprendre/README.md) (documentation de compréhension, reprise en annexes 6 à 11 ; écarts doc ↔ code). Limites et lacunes de ces sources : annexe 1.
 
 ## Sommaire
 
@@ -19,6 +19,7 @@
 - [H. Tests et validation](#h-tests-et-validation)
 - [Vérification de la consolidation](#vérification-de-la-consolidation)
 - Annexes 1 à 5 (sources, méthode, synthèse de la phase 1, phase 2, anciens numéros)
+- Annexes 6 à 11 (documentation de compréhension : architecture, simulation, course, systèmes, interactions et zones sensibles)
 
 ## A. Vue d'ensemble
 
@@ -3068,6 +3069,7 @@ Contrôles effectués (voir le rapport de fin de phase pour les résultats chiff
 4. Les identifiants et références croisées (Relations, transversaux, lots) ont été contrôlés automatiquement : aucune référence orpheline.
 5. Les priorités sont explicites (F.2) ; les deux changements (TECH-030, COMPLETE-005) sont justifiés dans leurs entrées.
 6. Les entrées non confirmées sont isolées en H.4 et G.4.
+7. La documentation de compréhension est reprise sans perte en annexes 6 à 11 (contrôle automatique ligne à ligne).
 
 ## Annexe 1 — Sources, traçabilité et lacunes
 
@@ -3077,7 +3079,7 @@ Contrôles effectués (voir le rapport de fin de phase pour les résultats chiff
 | Phase 1 — `PHASE1-AUDIT-TECHNIQUE.md` | Retrouvé et repris en entier (89 fiches, synthèse en annexe 3). Les quatre sous-agents (éditeur ; persistance, en ligne et serveur ; multijoueur ; course, interface et rendu) ont rendu leurs rapports **dans la conversation uniquement** : ils ont été intégrés aux fiches ; leurs rapports bruts (par exemple les listes « examiné et trouvé correct ») ne sont conservés que dans la mesure où la phase 1 les a repris (annexe 3, § 7.7 à 7.9). |
 | Phase 2 — `PHASE2-AUDIT-EN-JEU.md` | Retrouvé et repris en entier. **Incomplet** : le parcours d'interface confié à un sous-agent (premières minutes, tous les écrans et boutons, réglages, anglais, téléphone, écrans hors ligne, éditeur en joueur novice) a été interrompu par la limite d'utilisation du compte. L'agent avait écrit 34 scripts et pris 95 captures, mais **n'a laissé aucune observation écrite** : rien n'en a été tiré (aucune conclusion inventée). |
 | Phase 3 — `PHASE3-AUDIT-COMPLETUDE.md` | Retrouvé et repris en entier (24 fiches ; analyse qualitative en D.5). |
-| `docs/comprendre/` (6 fichiers) | Retrouvé ; ses écarts documentation ↔ code (§ 5.7) deviennent DOC-001 à 010, ses deux constats de conception (§ 5.6, n° 5 et n° 10) RISK-001 et 002. |
+| `docs/comprendre/` (6 fichiers) | Retrouvé et **repris intégralement en annexes 6 à 11** ; ses écarts documentation ↔ code (§ 5.7) deviennent aussi DOC-001 à 010, ses deux constats de conception (§ 5.6, n° 5 et n° 10) RISK-001 et 002. |
 | Sondes et captures | Dossier temporaire de session, non conservé dans le dépôt (voir H.5). Elles seraient à recréer pour reproduire les fiches ; chaque fiche décrit la reproduction en clair. |
 | `ANALYSE-FONCTIONNELLE.md` (0.13.0) | Relu par la phase 3 ; ses urgences ont été traitées en 0.13.1 à 0.15.0 ; ce qui reste est repris dans COMPLETE-0xx. |
 
@@ -3267,3 +3269,827 @@ Classés par effet sur le joueur. Détail et références dans les fiches.
 | 11 | Boutons tactiles liés en dur à `KeyR`, `Escape`, `Enter` | [V] | 4.2 |
 | 12 | Minuterie du garage non annulée, écouteurs du salon non retirés | [V] | 4.5, 4.6 |
 | 13 | Déconnexion d'un compte : la session anonyme de l'invité est oubliée (ses publications restent sur un identifiant abandonné) | [V] / [D] | 4.7 |
+
+## Annexes 6 à 11 — Documentation de compréhension (`docs/comprendre/`, reprise intégrale)
+
+Ces six documents expliquent **comment le jeu est construit et comment ses systèmes se parlent** ; ils sont repris ici sans coupure, pour que ce fichier contienne tout le nécessaire à la correction. Les originaux restent dans `docs/comprendre/` ; en cas d'écart, ce sont eux qui font foi (les numéros de ligne cités datent de la 0.16.0). Les liens relatifs ont été réécrits ; les titres ont été décalés de deux niveaux.
+
+## Annexe 6 — Comprendre Trackigami — index et couverture de l'analyse (README)
+
+*Source : `docs/comprendre/README.md`*
+
+### Comprendre Trackigami : carte technique du jeu
+
+Documentation de **compréhension** (novembre 2026, bêta 0.16.0, `PHYS_VER` 38) : comment le jeu fonctionne réellement, comment ses systèmes se parlent, et ce qu'une modification risque de casser ailleurs. Elle complète, sans les répéter, [l'architecture](../ARCHITECTURE.md) (principes, procédures) et [l'index des modules](../MODULES.md) (rôle de chaque fichier, généré).
+
+Écrite pour un développeur ou une session d'IA qui reprend le projet : lire ce fichier, puis le document du domaine touché, **avant** de modifier le code.
+
+#### Les documents
+
+| Fichier | Contenu |
+| --- | --- |
+| [01-vue-ensemble.md](../comprendre/01-vue-ensemble.md) | le jeu, les technologies, le démarrage pas à pas, les couches, le motif des familles de méthodes, la carte des dossiers, les fichiers générés, les tests |
+| [02-simulation.md](../comprendre/02-simulation.md) | le noyau déterministe : son périmètre exact (42 fichiers), le contrat d'un pas, les **deux chemins de pas**, le pipeline de `CarPhysics`, la gravité, le circuit vu par la physique, les checkpoints, `PHYS_VER`, les clés de classement |
+| [03-course.md](../comprendre/03-course.md) | la boucle de l'application, `RaceSession` (états, image, pas, évènements → effets, rendu), fantômes, replay, Theater, l'arrivée, le retour |
+| [04-systemes.md](../comprendre/04-systemes.md) | une fiche par système : application et navigation, entrées, audio, langues, garage, multijoueur, persistance et comptes, en ligne et serveur, éditeur, rendu et caméra, progression et contenus |
+| [../audit/PHASE1-AUDIT-TECHNIQUE.md](../audit/PHASE1-AUDIT-TECHNIQUE.md) | **audit technique (phase 1)** : 89 problèmes identifiés (`TECH-001` à `TECH-089`), causes communes, risques de régression |
+| [05-interactions-et-zones-sensibles.md](../comprendre/05-interactions-et-zones-sensibles.md) | carte des dépendances, parcours transverses (chargement, retour au checkpoint, gravité, checkpoint, collisions, obstacles…), ce qui continue de tourner, zones sensibles, **« si tu modifies… regarde aussi »**, défauts constatés, écarts entre docs et code |
+
+Marques utilisées : **[V]** vérifié dans le code (avec `fichier:ligne`), **[D]** déduction raisonnable à partir du code, **[?]** incertain. Les numéros de ligne datent de la 0.16.0 : ils dérivent, les noms de fonctions restent.
+
+#### Réponses courtes
+
+- **Où sont les systèmes ?** Noyau : `js/simulation.js`, `js/physics.js` + `js/physics/`, `js/raceLogic.js`, `js/track.js` + `js/track/`, `js/pieces.js`, `js/ribbons.js`, `js/sim/`. Course : `js/race.js` + `js/race/`. Application : `js/main.js` + `js/app/`. Éditeur : `js/editor.js` + `js/editor/`, `js/inspector*`. Rendu : `js/trackMesh.js`, `js/trackGeometry.js`, `js/scenery*`. En ligne : `js/online*.js`, `js/account.js`, `js/cloudsave.js`, `supabase/`. Multijoueur : `js/net/`, `js/app/multi.js`.
+- **Comment le jeu démarre ?** `index.html` → `js/boot-guard.js` → `js/main.js` : langue, contrôle WebGL 2, écran d'accueil (qui fixe la portée du stockage), `new App`, `app.start()` (menu avec une course de démonstration en fond, boucle `requestAnimationFrame`) — `01-vue-ensemble.md` § 1.3.
+- **Comment marche le gameplay ?** À chaque image, `RaceSession.update` fait des pas fixes de 1/120 s : commandes → `Simulation.drive` (physique) → effets lus dans `phys.ev` → `Simulation.score` (checkpoints, arrivée, logique) → réapparitions — `03-course.md` § 3.2.
+- **Comment les systèmes communiquent ?** Appels directs depuis `App` et les sessions ; un **sac d'évènements par pas** (`CarPhysics.ev`) lu par la course ; un `Track` partagé en lecture par toutes les simulations ; des variables de module (portée du stockage, cache du profil, options de rendu) ; des évènements du salon multijoueur ; un crochet d'écriture du stockage pour la synchronisation ; et des **clés** (empreintes de circuits) qui relient records, médailles, classements et serveur — `05` § 5.1.
+- **Les systèmes les plus importants ?** Le noyau de simulation, le modèle `Track` (et sa sérialisation), `RaceSession`, la persistance locale (records = progression), la fonction serveur de vérification.
+- **Quelles mécaniques dépendent d'autres ?** Gravité → sol, volant, caméra, points de retour ; collisions → glisse et mini-turbo ; chrono → obstacles et pièces mobiles (qui reculent au retour au checkpoint) ; véhicule → réglages physiques et modèle 3D ; records → médailles → déblocage de la carrière — `05` § 5.2.
+- **Quels fichiers examiner pour une modification ?** Tableau « Si tu modifies… » — `05` § 5.5.
+- **Quels systèmes risquent d'être touchés ?** Tout ce qui est dans la fermeture de `verify.js` touche aussi replays, fantômes, classements et serveur ; tout ce qui change un code de circuit touche les clés — `05` § 5.4.
+- **Les chemins d'exécution importants ?** Démarrage, boucle de l'application, une image de course, un pas, l'arrivée, le retour au checkpoint, l'essai depuis l'éditeur, l'envoi d'un temps, la publication — `02`, `03`, `05` § 5.2.
+- **Ce qui reste insuffisamment compris ?** Voir « Couverture » ci-dessous.
+
+#### Couverture de cette analyse
+
+**Méthode.** Le noyau, la course, la boucle et les parcours principaux ont été lus directement dans le code. Cinq domaines périphériques (éditeur, rendu et caméra, interface / entrées / audio / langues / garage, persistance / en ligne / serveur / SQL, multijoueur) ont été explorés en parallèle par des sous-agents en lecture seule, puis **leurs constats importants ont été revérifiés à la main** dans le code (et par de petites sondes Node) avant d'être écrits ; ce qui n'a pas été revérifié est marqué [D]. La suite `npm test` a été exécutée sur une copie du dépôt : 124 fichiers, 1 755 vérifications, toutes réussies. Rien n'a été lancé dans un navigateur ; la sensation de conduite n'a pas été éprouvée.
+
+**Lu en détail** : `main.js`, `simulation.js`, `raceLogic.js`, `physics.js`, `physics/contact.js`, les parties gravité / entrée / sortie de `physics/ribbon.js`, `track.js`, `track/surfaces.js`, `replay.js`, `verify.js`, `race.js`, `race/finish.js`, `race/ghosts.js`, `race/replayMode.js`, `app/editorFlow.js`, `daily.js`, la construction des circuits de `tracks.js`, les verrous de `career.js` et `trackDescriptor.js`, `storage.js` (portée, records), `sim/logic.js` (`createLogic`), `sim/params.js`, l'outillage de test et la CI.
+
+**Exploré par délégation puis vérifié par sondage** : éditeur et inspecteur, `TrackView` et caméra, navigation et entrées, multijoueur, comptes, synchronisation, fonction serveur, grants SQL.
+
+**À approfondir** (non lu ou survolé) :
+- la géométrie analytique en détail (`pieces.js : sampleLocal` par type de pièce, `ribbons.js : frameLocal`, rubans roulés), `physics/walls.js` (sondes de bordure), les véhicules v2 ;
+- l'algorithme du pilote automatique (`autopilot.js`), dont dépendent le défi du jour, les médailles et le fantôme or ;
+- `trackGeometry.js` pièce par pièce, `decos.js` / `decoPack.js`, `carModel.js`, `customCar.js` ;
+- l'analyse (`analysis/reference.js`, `sectors.js`, `coach.js`), le HUD d'entraînement, le panneau du Theater ;
+- les 19 étapes SQL ligne à ligne, les politiques RLS, `submit-score/handler.js` en détail ;
+- la musique (`AudioEngine.js`), les dictionnaires, le wiki, les outils de level design (`tools/lab.mjs`, `contract.mjs`, `golden.mjs`, `medals.mjs`), le CSS.
+
+## Annexe 7 — Vue d'ensemble : le jeu, le démarrage, les couches, la carte des dossiers
+
+*Source : `docs/comprendre/01-vue-ensemble.md`*
+
+### 1. Vue d'ensemble : ce qu'est le jeu et comment il est construit
+
+#### 1.1 Le jeu en une page
+
+Jeu de course **contre-la-montre** low-poly dans le navigateur, avec **éditeur de circuits**. Le joueur pilote une voiture (qui peut devenir moto, bateau ou deltaplane sur des plaques) sur des circuits faits de **pièces posées sur une grille 3D** : routes, virages, pentes, loopings, vrilles, tubes, murs, plafonds, bifurcations, carrefours, plaques ; revêtements (glace, boost, rebond, aimant, eau, gravité, inversion…), obstacles animés, solides, pièces mobiles.
+
+Contenus : 72 circuits intégrés en 12 chapitres de carrière (médailles bronze → cristal, objectif bonus), défi du jour généré par la date, saisons hebdomadaires, Académie (leçons et exercices notés), modes de jeu, fantômes, replays et Replay Theater, classements en ligne **vérifiés par le serveur**, communauté (publication, likes, playlists, commentaires), comptes et sauvegarde cloud, duels et tournois asynchrones, multijoueur en direct (WebRTC), garage (apparence seulement), personnalisation de l'interface et des caméras, deux langues.
+
+Version : `bêta 0.16.0` ; physique `PHYS_VER = 38` ; protocole réseau `NET_VER = 4` (`js/version.js`).
+
+#### 1.2 Technologies
+
+| | |
+| --- | --- |
+| Langage | JavaScript, modules ES natifs, **aucune compilation** (`package.json` n'a aucune dépendance) |
+| Rendu | three.js r170 fourni dans `js/vendor/three.module.min.js` (WebGL 2 obligatoire), `TransformControls` pour l'éditeur |
+| Son | Web Audio, tout synthétisé (aucun fichier audio) |
+| Serveur | Supabase : PostgreSQL + RLS (`supabase/etape*.sql`, 19 étapes appliquées à la main), Auth, Realtime (présence, signalisation), deux fonctions Deno (`submit-score`, `ice`) |
+| Réseau de jeu | WebRTC pair à pair, maillage complet |
+| Hors ligne | service worker généré (`sw.js`), application installable (`manifest.webmanifest`) |
+| Outils | Node 22 (tests, outils), Deno 2.9 (même physique que le serveur), Playwright / Chromium, Firefox, WebKit (tests navigateur), PostgreSQL 16 (tests SQL), ESLint |
+| Hébergement | site statique (GitHub Pages), `npm start` en local (`tools/serve.mjs`) |
+
+#### 1.3 Le démarrage (vérifié)
+
+```
+index.html
+ ├─ <link rel=modulepreload> ×175  (bloc GÉNÉRÉ par tools/gen-sw.mjs : la fermeture des imports statiques de js/main.js)
+ ├─ js/boot-guard.js  (script classique) : si le graphe de modules échoue (fichiers de deux versions), recharge une fois sans cache
+ └─ js/main.js (module) — l’import lui-même charge et exécute ces 175 modules (données des pièces, 72 définitions de circuits…)
+      window.__copytrackBooted = true                (désarme la garde)
+      async () :
+        1. initI18n()                (js/i18n/boot.js : langue, dictionnaire anglais à la demande, traducteur DOM)
+        2. contrôle WebGL 2          (message clair sinon)
+        3. runWelcome()              (js/welcome.js : compte restauré, invité de cette session, ou formulaire ;
+                                      fixe la PORTÉE du stockage local : storage.setScope)
+        4. new App(identity)         (main.js:54) : réglages, WebGLRenderer, scène, caméra, matières du circuit, Scenery,
+                                      Particles, QualityManager, Input, Telemetry, ErrorReport, GameAudio, UI,
+                                      CONSTRUCTION DES 72 CIRCUITS INTÉGRÉS et de leurs clés (main.js:93), écouteurs globaux, _wire*()
+        5. app.start()               (main.js:393) : showMenu('menu') = course de DÉMONSTRATION en fond, banc d'essai graphique,
+                                      télémétrie, récompenses, vérification de mise à jour, tutoriel ; liens #t= (circuit), #g= (fantôme),
+                                      #salle= (salon) ; boucle requestAnimationFrame
+        6. account.sync()            (compte : fusion de la sauvegarde cloud)
+```
+
+Seuls l'éditeur (`app/editorFlow.js:17`, `import('../editor.js')`, environ un quart du code) et le dictionnaire anglais sont chargés à la demande.
+
+#### 1.4 Les couches
+
+```
+            ┌───────────────────────────── Application (navigateur) ─────────────────────────────┐
+ DOM ──────►│ App (main.js + app/*)  ──  UI (ui.js, ui/*)  ──  Input  ──  Audio  ──  i18n         │
+            │   │ une session à la fois : RaceSession (race.js + race/*, theater/*)                │
+            │   │                         EditorSession (editor.js + editor/*, inspector*) [lazy]  │
+            │   │                         GarageSession (garage.js + garage/*)                     │
+            │   ▼                                                                                  │
+            │ Rendu three.js : TrackView (trackMesh.js/trackGeometry.js), Scenery, carModel, effets │
+            └───────┬───────────────────────────────┬──────────────────────────────────────────────┘
+                    │ lit l'état                    │ appelle
+            ┌───────▼─────── Noyau déterministe (fermeture de js/verify.js, 42 fichiers) ──────────┐
+            │ Simulation · CarPhysics (+ physics/) · RaceLogic · sim/logic · sim/env · sim/params   │
+            │ Track (+ track/) · pieces · ribbons · solids · obstacles · dmath · tracks · daily …   │
+            └───────▲───────────────────────────────▲──────────────────────────────────────────────┘
+                    │ GhostRunner (fantômes,         │ verify.js (rejeu)
+                    │ analyse, outils)               │
+              tools/*.mjs (Node)            supabase/functions/submit-score (Deno, fichier groupé)
+
+ À côté : persistance (storage, profile, cloudsave, account), en ligne (online, online/community, config),
+          multijoueur (net/*, app/multi.js, race/net.js) — voir 04-systemes.md
+```
+
+Règle de dépendance (vérifiée par `tools/test-determinisme.mjs`) : **le noyau n'importe rien du rendu, du DOM ni du stockage**. Le sens inverse est libre : le rendu et l'application lisent le noyau.
+
+#### 1.5 Le motif « familles de méthodes »
+
+Les grosses classes (`App`, `RaceSession`, `EditorSession`, `Inspector`, `Scenery`, `Track`, `CarPhysics`, `GarageSession`) sont découpées en objets `export const xMethods = { … }` rangés dans un dossier du même nom et fusionnés par `Object.assign(Classe.prototype, …)` (par exemple `main.js:487`, `race.js:733`, `physics.js:866`, `track.js:529`).
+Conséquences pratiques :
+- une méthode peut être appelée depuis n'importe quel fichier de la famille : chercher `nomDeMethode(` dans tout `js/`, pas seulement dans le fichier de la classe ;
+- deux familles qui définissent la même méthode s'écrasent silencieusement : `tools/test-contrats.mjs` l'interdit ;
+- l'état est partagé par `this` : un champ `this._xxx` posé dans une famille est lu ailleurs.
+
+#### 1.6 Carte des dossiers
+
+| Dossier / fichier | Contenu | Doc |
+| --- | --- | --- |
+| `index.html`, `css/style.css` | toute la structure DOM (écrans, superpositions, HUD, éditeur, garage) ; un seul fichier CSS | — |
+| `js/main.js`, `js/app/` | `App` : orchestration, navigation, branchements, multijoueur, communauté, compétition, réglages, profil… | 4.1 |
+| `js/race.js`, `js/race/`, `js/theater/` | session de course, caméra, fantômes, replay, arrivée, HUD d'entraînement, Theater | 3 |
+| `js/simulation.js`, `js/physics.js`, `js/physics/`, `js/raceLogic.js`, `js/sim/` | noyau de simulation | 2 |
+| `js/track.js`, `js/track/`, `js/pieces.js`, `js/ribbons.js`, `js/solids.js`, `js/obstacles.js` | modèle de circuit et géométrie analytique | 2.4 |
+| `js/tracks.js`, `js/daily.js`, `js/seasons.js`, `js/career.js`, `js/academy.js`, `js/skills.js`, `js/rules*.js`, `js/variants.js`, `js/mutations.js` | contenus et règles de jeu | 4.11 |
+| `js/editor.js`, `js/editor/`, `js/inspector*.js`, `js/editorTools.js`, `js/connect.js`, `js/continuity.js`, `js/extend.js`, `js/orient.js`… | éditeur | 4.9 |
+| `js/trackMesh.js`, `js/trackGeometry.js`, `js/scenery*.js`, `js/decos.js`, `js/carModel.js`, effets | rendu | 4.10 |
+| `js/net/`, `js/remoteCar.js` | multijoueur | 4.6 |
+| `js/storage.js`, `js/profile.js`, `js/account.js`, `js/cloudsave.js`, `js/online.js`, `js/online/` | persistance, comptes, en ligne | 4.7, 4.8 |
+| `js/analysis/` | trace rejouée, référence de parcours, secteurs, coach, laboratoire, exercices | 3.3 |
+| `js/i18n*`, `js/ui*`, `js/input.js`, `js/audio.js`, `js/music.js` | interface, langues, entrées, son | 4.1-4.4 |
+| `supabase/` | étapes SQL, fonctions serveur, docs du serveur (`COMPTES.md`, `MULTI.md`, `MIGRATIONS.md`, `TELEMETRIE.md`) | 4.8 |
+| `tools/` | 126 fichiers `test-*.mjs` (dont 7 de navigateur) et 5 tests SQL `.sh`, outils de level design, générateurs, wiki | 1.8 |
+| `wiki/` | wiki **généré** (`npm run wiki`) | — |
+| `docs/` | architecture, index des modules (généré), audits, décisions | — |
+
+#### 1.7 Fichiers générés (ne pas modifier à la main)
+
+`sw.js` et le bloc `modulepreload` d'`index.html` (`npm run sw`), `supabase/functions/*/index.ts` (`npm run build:function`), `tools/phys-fingerprint.json`, `tools/golden-temps.json`, `tools/compat/corpus.json`, `docs/MODULES.md` (`npm run docs`, à partir de la **première phrase du commentaire de tête** de chaque module), `js/pieceFacts.js` et `docs/MATRICE-PIECES.md` (`node tools/matrice-pieces.mjs --update`), `docs/FICHE-ESSAI.md`, `wiki/`. Détail et contrôles : `docs/ARCHITECTURE.md`, « Fichiers générés ».
+
+Conséquence : **ajouter ou renommer un fichier `.js`** oblige à régénérer `sw.js` (sinon `npm test` échoue et le jeu hors ligne manque ce fichier), et à donner au fichier un commentaire de tête (sinon `docs/MODULES.md` ne peut être régénéré).
+
+#### 1.8 Tests et CI
+
+- `npm test` → `tools/run-tests.mjs` : chaque `tools/test-*.mjs` dans son processus, en parallèle, plus `check-generated`, `check-docs`, `phys-fingerprint`, `audit-pieces`, `sim` (les 72 circuits au pilote automatique). **État constaté lors de cette analyse : 124 fichiers, 1 755 vérifications, toutes réussies** (exécuté sur une copie du dépôt ; deux tests demandent un dépôt git et ont été relancés dans le dépôt).
+- Hors `npm test` : `npm run test:browser`, `test:deno`, `test:sql`, `lint`.
+- CI (`.github/workflows/test.yml`) : lint + tests + fichiers générés à jour, Deno, navigateurs, SQL, et une tâche « gate ». Deux autres tâches planifiées : `surveillance` (site et fonction en ligne, chaque jour) et `sauvegarde` (copie chiffrée de la base, chaque semaine).
+- Harnais commun : `tools/harness.mjs` (`test`, `finish`) ; un fichier de test qui n'exécute aucune vérification est compté comme un échec.
+
+## Annexe 8 — Le noyau de simulation
+
+*Source : `docs/comprendre/02-simulation.md`*
+
+### 2. Le noyau de simulation
+
+Ce qui décide d'un temps. Tout ici est **sans rendu, sans DOM, déterministe**, et tourne à l'identique dans le navigateur, sous Node (outils, tests) et sous Deno (fonction serveur `submit-score`).
+Toute ligne modifiée dans ce périmètre peut changer un temps, un replay, un fantôme ou un classement.
+
+#### 2.1 Le périmètre exact : la fermeture de `js/verify.js`
+
+Calculée à partir des imports (vérifié, 42 fichiers ; `tools/test-determinisme.mjs` la recalcule et la contrôle) :
+
+| Rôle | Fichiers |
+| --- | --- |
+| Pas de simulation | `simulation.js`, `raceLogic.js`, `replay.js` (GhostRunner, InputRecorder), `verify.js` |
+| Physique | `physics.js`, `physics/walls.js`, `physics/ribbon.js`, `physics/obstacles.js`, `physics/contact.js`, `physics/specs.js`, `physics/profiles.js`, `physics/vehicles/{moto2,boat2,glider2}.js` |
+| Géométrie analytique | `pieces.js`, `ribbons.js`, `solids.js`, `obstacles.js`, `constants.js`, `dmath.js`, `mathutil.js` |
+| Modèle de circuit | `track.js`, `track/surfaces.js`, `track/edit.js`, `track/shared.js` |
+| Paramètres et environnement | `sim/params.js`, `sim/env.js`, `sim/logic.js` |
+| Contenus et clés | `tracks.js` (72 circuits), `daily.js`, `seasons.js`, `variants.js`, `rulesCore.js`, `autopilot.js`, `ghostFormat.js`, `version.js` |
+| Données tirées par `track.js` | `themes.js`, `ambiance.js`, `scripts.js`, `decoData.js`, `decoPackData.js`, `customDeco.js` |
+
+Les six derniers sont des modules de **données** : ils ne changent pas la physique, mais ils sont exécutés par le serveur. Une erreur de syntaxe ou un import ajouté vers un module du navigateur y casse la fonction serveur (régénérée par `npm run build:function`).
+
+Règles (ESLint sur une liste partielle de ces fichiers, `tools/test-determinisme.mjs` sur toute la fermeture) : ni `Math.sin/cos/tan/atan/atan2/asin/acos/exp/log/pow/hypot/random`, ni `**` ; utiliser `dsin`, `dcos`, `datan2`, `dpow`, `dexp`, `hypot2`, `hypot3` de `js/dmath.js`. `Math.PI`, `sqrt`, `abs`, `min`, `max`, `floor`, `round`, `sign`, `imul` restent permis. Aucune horloge, sauf `verify.js`, `daily.js` et `seasons.js` qui lisent la date pour choisir une **clé** (jamais pour la physique).
+
+#### 2.2 Le contrat d'un pas (1/120 s)
+
+`DT = 1/120` (`js/constants.js:46`). Une commande par pas : `{ steer ∈ [-1,1] quantifié au centième, throttle, brake, respawn }` (`replay.js:12` `quantSteer`, `replay.js:17` `InputRecorder.push`).
+
+`Simulation` (`js/simulation.js:25`) possède **une** voiture (`CarPhysics`), ses règles (`RaceLogic`) et la logique du circuit (`createLogic`, ou `null`).
+
+```
+[respawn demandé]  sim.rewind()                       simulation.js:57   (RaceLogic.rewind + placeAtRespawn)
+drive(inp)         phys.clock = logic.steps (+ idle après l'arrivée)   simulation.js:67
+                   phys.step(inp)                    physics.js:341
+                   sank = ev.sink || ev.invalid
+score()            ev = logic.update(phys)           raceLogic.js:97   (checkpoints, tours, arrivée)
+                   lgc.onStep(ev)                    sim/logic.js      (règles ÉVÉNEMENT → ACTIONS)
+                   suivi du hors-piste : groundT += DT si phys.offTrack
+                   lost = finish ? '' : sank ? 'sink' : groundT > 0,5 s ? 'offTrack' : ''
+[lost]             sim.rewind()                       (fait par l'appelant)
+```
+
+`step(inp)` = `drive` + `score` (`simulation.js:94`). L'arrivée franchie l'emporte sur une réapparition du même pas.
+
+##### Deux chemins qui doivent rester équivalents (point sensible n° 1)
+
+| Chemin | Où | Utilisé par |
+| --- | --- | --- |
+| **A. `GhostRunner.step`** (`replay.js:119`) : `inp.respawn → rewind` ; `sim.step(inp)` ; `sim.lost → rewind` | | fantômes (or, importé), vérification serveur (`verify.js : replayRun`), analyse (`analysis/trace.js : TraceRunner`), défi du jour (`daily.js : botTime` utilise `sim.step` directement), outils |
+| **B. `RaceSession._stepOnce`** (`race.js:287`) : `_input()` (en replay : `inputAt` puis `respawn()` si drapeau) ; `recorder.push` ; `sim.drive` ; **effets** (sons, particules, HUD, à partir de `phys.ev`) ; `sim.score()` ; réapparition décidée **à nouveau** par la course (`race.js:426-429`, tests de `sank` et de `sim.groundT`) | | course en direct, replay en jeu, Replay Theater |
+
+Le chemin B ne lit pas `sim.lost` : il refait la même décision (`sank && state === 'racing'`, puis `groundT > offTrackLimit`), et `respawn()` ne fait rien si l'état n'est plus `racing` (arrivée du même pas). C'est équivalent aujourd'hui à la lecture du code. Les tests vérifient le chemin A (`tools/test-simulation.mjs:15` : `Simulation` et `GhostRunner` donnent la même course ; `tools/test-fantomes.mjs`, `tools/test-croises.mjs` : rejeu et `verifyRun`) et la cohérence interne du chemin B (Theater : un déplacement dans le temps redonne la lecture continue, `tools/test-browser.mjs:374`). Aucun test automatique ne termine une vraie course en direct (chemin B, avec des retours au checkpoint) puis la fait vérifier par le chemin A ; l'audit de phase 1 l'a fait à la main dans Chromium (pilote automatique bruité, trois retours au clavier, deux circuits dont un à obstacles) : **temps identiques au bit près** ([../audit/PHASE1-AUDIT-TECHNIQUE.md](../audit/PHASE1-AUDIT-TECHNIQUE.md) § 7.8). Toute modification de l'ordre ou des conditions doit être faite des deux côtés, et revérifiée de la même façon.
+
+Autres différences assumées du chemin B :
+- le retour au checkpoint demandé au clavier est exécuté **tout de suite** dans `update()` (`race.js:478` → `respawn(true)`), et le drapeau `respawn` est écrit avec la commande du **pas suivant** (`_pendingRespawn`, `race.js:292`) : au rejeu, `GhostRunner` fait le `rewind` au début de ce pas, donc au même moment ;
+- les réapparitions automatiques ne sont **jamais** enregistrées : elles se reproduisent d'elles-mêmes au rejeu ;
+- `tick` (index du replay, ne recule jamais) ≠ `logic.steps` (chrono, revient en arrière au checkpoint) ;
+- le décompte ne fait aucun pas de physique ; après l'arrivée la physique continue (`state 'finished'`) sans enregistrement ;
+- en championnat avec collisions, `_collide()` (`race.js:298`) modifie la voiture **avant** `drive` : cette course n'est pas rejouable, et en effet le multijoueur n'enregistre ni record ni classement (`race/finish.js:82-104`).
+
+#### 2.3 `CarPhysics.step` : le pipeline d'un pas
+
+`physics.js:349 _stepCore` :
+
+1. `_beginStep` (`:361`) : minuteries (`graceT`, `hazardGrace`), remise à zéro de **`this.ev`** (le sac d'évènements du pas : `wall`, `land`, `boostHit`, `loopIn/Out/Fall`, `transform`, `gravity`, `miniTurbo`, `landQ`, `sink`, `ring`, `flip`, `glass`, `spring`, `reverse`, `cut`, `spike`, `shock`, `wallOff`, `invalid`), `prev = pos`.
+2. `_controls` (`:373`) : volant inversé (revêtement `reverse`), moteur coupé (`cut`), volant progressif (`steerIn/steerOut`), minuteries boost / rebond / choc.
+3. `_driftState` (`:399`) : dérapage (frein + volant franc + vitesse), entretien, sortie, charge et libération du **mini-turbo**, transfert de charge d'un coup de volant.
+4. Modèles v2 (`moto2Idle`) si `track.vm === 2` ou profil `sim`.
+5. **Sur un ruban** (`this.rib`) : `_ribStep` (`physics/ribbon.js:232`) et fin du pas. **Sinon** :
+   - au sol : `_driveGround` (`:454`) — repère du sol, tapis / pièce mobile (vitesse d'entraînement), gravité projetée, coefficients du revêtement (`physics/specs.js : surfaceCoeffs`), eau et noyade (`sinkT > 1,2 s → ev.sink`), vent de pièce, adhérence et vent du circuit (`this.params`), pluie / givre / rafales (`this.env`), v2, moteur (`_longitudinal`, `:735`), pneus (`_tires`, modèle bicyclette, `:284`), assistance de glisse, dégagement d'un mur (`unstick`), verre (`_glassCheck`) ;
+   - en l'air : `_flyAir` (`:567`) — balistique, aucun gaz ni volant sauf un léger lacet (`airYaw`) et une bascule aux pédales (`airLean`) ; le frein est un aérofrein ; le deltaplane a son propre vol (`_glide`, `:780`).
+6. `_collide` (`:613`) : intégration de la position, **anneaux** turbo / checkpoints aériens (`_rings`), **entrée de ruban** (`_tryEnterRibbon`) ou **réception sur un ruban** (`_tryLandRibbon`), coque des tubes, **bordures** (`_walls`), toits de tunnel, dalles, dessous des solides, voiture plaquée sous un toit en gravité inversée (`pinT > 1 s → lost`), **obstacles** (`_obstacles`), seconde passe des bordures si un obstacle a poussé la voiture, **limites du monde** (`_bounds`).
+7. `_roadContact` (`:640`) : sol sous la voiture (`track.surfaceAt` ou `ceilingSurfaceAt` selon `gSign`), aimant, **décollage** (vitesse normale > `CAR.launch`), **réception** (`_landing` : qualité `perfect / ok / bad`, perte de vitesse), plaques à effet unique (rebond, inversion, ressort), voiture perdue dans le ciel.
+8. `step` (`:341`) : contrôle de cohérence `_sane()` (NaN, infini, valeurs démesurées → `ev.invalid` → traité comme une noyade) ; chute sous `floorY` → `lost`.
+
+`offTrack` (`:100`) = posée sur le terrain (`surfType 'ground'`) sans la règle `offroad`, ou `lost`.
+
+##### Les revêtements et plaques : où ils agissent
+
+`_setGround` (`physics.js:179`) est le point unique où une surface touchée déclenche son effet : `reverse`/`cut` (`_timedMods`), `spring`, `boost` (`_boostPad`), `gravity` (`_gravityPad`), `flip` (inverse `gSign`), plaques de **transformation** `moto/boat/glider` (`_transformPlate`, repasser sur la même plaque ramène la voiture). `plateLock` empêche qu'une suite de plaques collées compte plusieurs fois. Sur un ruban, `_ribStep` applique les mêmes fonctions (`_boostPad`, etc.).
+
+##### Gravité et orientation (comment elles s'influencent)
+
+- `gSign` (±1) : sens de la gravité. `gravMul` : intensité (plaque gravité, règle `g0`, action `grav` de la logique). `this.g = CAR.gravity × gravMul`.
+- Elle s'inverse par : plaque `flip` au sol (`_setGround`), ruban qui retourne la voiture (`ribbonInverts(tile)` ou revêtement `flip` sur le ruban, `ribbon.js:257`), règle de départ `flip0` / départ posé à l'envers (`raceLogic.js:27 spawnPoint`).
+- Elle commande : quelle requête de sol est utilisée (`surfaceAt` vs `ceilingSurfaceAt`), le « haut » local du volant (`_upSign`, au plafond la droite du pilote est la gauche du monde), la balistique, la perte dans le ciel (`skyY`), la caméra (`camflip.js`, `race/camera.js`), l'orientation visuelle (`race.js:247 _orient`).
+- Elle est **restaurée** au checkpoint : chaque point de retour garde `gs` (`respawnGs`, `raceLogic.js:11`), `grav` et `vehicle`.
+
+#### 2.4 Le circuit vu par la physique (`js/track.js`, `js/track/surfaces.js`, `js/pieces.js`, `js/ribbons.js`)
+
+- Grille : case `CELL = 32 m`, niveau `LEVEL_H = 6,4 m`, route de 24 m (`ROAD_HALF = 12`), `MAX_LEVEL = 60` (`constants.js`).
+- `Track.index` : `Map` case → pièces (`track.js:171 tilesAt`). `Track.cellsOf` (`:86`) inclut les cases **balayées** par une glissière ou une rotation ; `Track.range` (`:109`) les niveaux réservés (portiques, anneaux, murs, rubans roulés, ascenseurs).
+- `Track.version` est incrémenté par toute modification (`_insert`, `remove`, `setParams`, `setLogic`, `clear`, et les méthodes de `track/edit.js`) : il invalide les caches `obstacles`, `obstacleGrid`, `solidIndex`, `hasMovers`.
+- `sampleLocal(tile, lx, lz)` (`pieces.js:703`) est la **géométrie analytique** d'une pièce au sol : hauteur, normale, écart latéral `d`, dans l'emprise ou non. La même fonction sert à la physique, aux checkpoints et aux maillages (`trackGeometry.js`).
+- `ribbonOf(tile)` / `frameLocal(rib, u)` (`ribbons.js:30`, `:396`) : la géométrie des **rubans** (loopings, vrilles, tubes, murs, plafonds, rubans roulés `tile.o`). `isRibbon(tile)` décide si une pièce se parcourt en mode ruban.
+- Sol : `surfaceAt(x, y, z, out, step, broken, time, hidden)` (`track/surfaces.js:48`) — la surface la plus haute sous le point, parmi les pièces fixes, puis les pièces mobiles **à leur position au chrono `time`**, puis le dessus des solides. Plafond : `ceilingSurfaceAt` (`:18`), pièces posées à l'envers (jamais mobiles : `OPTION_CONFLICTS`, `pieces.js:472`).
+- Le circuit n'a **pas d'horloge** : chaque voiture interroge les pièces mobiles à son propre chrono (`phys.clock`). Le joueur, le fantôme or et un adversaire partagent le même `Track` sans interférer.
+
+##### État propre à chaque voiture (jamais dans le `Track`)
+
+Verre brisé (`phys.broken`, `glassTime`, restauré par `place()`), groupes cachés par la logique (`setLogicExclusion` → `phys.excl` et `logic.excluded`), `plateLock`, minuteries de grâce (`graceT` 1,5 s, `hazardGrace` 0,8 s après un (re)départ : ni verre, ni piques, ni obstacles), `glassSafe` (le verre sous un point de retour ne cède pas tant que la voiture ne l'a pas quitté). Cette séparation est ce qui permet plusieurs simulations sur un même circuit : **ne jamais ranger d'état de course dans `Track`**.
+
+#### 2.5 Règles de course (`js/raceLogic.js`)
+
+- `cps` : pièces checkpoint (`cpKind` : pièce checkpoint, option `cp` 1 portique / 2 anneau). `collected` : checkpoints pris. `splits` : pas de passage.
+- `update(phys)` (`:97`) : pour chaque pièce de la case de la voiture : anneau (franchissement du plan, cercle de rayon `RING_R`), portique (fenêtre verticale, emprise, `|d| ≤ ROAD_HALF + 1,5`), arrivée (`missing` s'il manque des checkpoints, `lap` s'il reste des tours, sinon `finish`). Les pièces cachées par la logique sont ignorées.
+- Chaque checkpoint pose un **point de retour** `respawn = { x, y, z, yaw, vehicle, grav, gs, snap }` ; `snap` (`_snap`, `:52`) garde `steps`, nombre de `splits`, `collected`, `lap` et l'état de la logique (`ext`). `rewind` (`:63`) restaure tout cela (sauf le chrono avec `keepClock`, en multijoueur).
+- Cas particuliers vérifiés : anneau aérien → retour au dernier sol stable (`lastGround`, relevé tous les 30 pas) avec le chrono de ce moment ; ligne d'arrivée franchie hors chaussée → point de retour ramené sur la route ; cap du retour retourné si la voiture passait à contresens.
+
+#### 2.6 Ce qui s'ajoute à la physique « derrière une donnée »
+
+Principe (vérifié dans le code) : à leur valeur par défaut, ces options ne font **aucune opération** de plus ; l'empreinte des scénarios existants ne bouge pas.
+
+| Donnée du circuit (`track.js : RULES`, `:32`) | Lue par | Effet |
+| --- | --- | --- |
+| `grip`, `wind`, `windDir` | `sim/params.js : paramsOf` → `phys.params` | adhérence et vent de tout le circuit |
+| `rain`, `frost`, `gust`, `envSeed`, `envVary` | `sim/env.js : envOf` → `phys.env` (`null` par défaut) | flaques, givre, rafales tirés d'une graine et du chrono |
+| `vm`, `pm` | `physics/profiles.js : specsOf`, `v2Of` | profils Arcade / Simulation, véhicules v2 |
+| `offroad`, `v0`, `g0`, `veh0`, `flip0` | `raceLogic.js : placeAtStart`, `CarPhysics.offTrack` | règles de départ |
+| `lg` (logique) | `sim/logic.js : createLogic` | montrer / cacher des groupes, gravité, compteurs, effets |
+
+Chacune entre dans la **signature** (`track.js:339 signatureText`) dès qu'elle quitte sa valeur par défaut, et force le format de code v4.
+
+#### 2.7 Obstacles, solides, logique
+
+- **Obstacles** (`obstacles.js`, `physics/obstacles.js`) : des décorations particulières (`OBST` : piques, balanciers, marteaux, murs coulissants, balayeurs, bumpers), mouvement fonction du **chrono seul** (`obstacleLocal(d, t)`). Index spatial de 20 m sur le circuit (`Track.obstacleGrid`), parcouru dans un ordre fixe : l'ordre compte, chaque contact corrige la position avant le suivant. Piques = contact létal (`ev.spike + ev.sink`).
+- **Solides** (`solids.js`) : décorations « en dur » (piliers, poutres, murs, blocs). Côtés = bordures (`walls.js : _probeSolids`), dessus = sol (`solidFloor` dans `surfaceAt`), dessous = toit (`_solidRoof`). Index de 16 m.
+- **Logique** (`sim/logic.js`) : état par simulation (groupes cachés, compteurs, déclenchements), isolé (ensembles créés dans `createLogic`). Ses effets visuels (`fx`) ne sont lus que par la course en direct (`race.js:126 _logicSync`) ; les fantômes et le serveur les ignorent (file plafonnée à 64).
+
+#### 2.8 Ce qui lie tout : `PHYS_VER`, empreinte, corpus
+
+- `PHYS_VER` (`js/version.js:17`, actuellement 38) est écrit dans chaque record (`pv`), fantôme partagé (`v`) et envoyé au serveur ; un écart rend les commandes non rejouables (`race.js:143`) et fait refuser le temps (`verify.js : versionError`).
+- `tools/phys-fingerprint.mjs` : 193 scénarios (pilote automatique et commandes pseudo-aléatoires sur les 72 circuits, défis du jour, cas spéciaux) hachés au bit près ; doit être identique sous Node, Deno et Chromium (CI).
+- `tools/compat/corpus.json` (`tools/test-compat.mjs`) : clés de classement, codes de tous formats, courses enregistrées avec leur temps exact.
+- Procédure de changement de physique : `docs/ARCHITECTURE.md`, « Changer la physique » (incrément de `PHYS_VER`, empreinte, temps de référence, médailles, corpus, fonction serveur **à redéployer à la main**).
+
+#### 2.9 Clés de classement (dépendent de ce périmètre)
+
+| Clé | Construite par | Dépend de |
+| --- | --- | --- |
+| `b-<id>-<hash>` | `main.js:95` : `hashString(buildBuiltin(def).encode())` | **tout** le code du circuit : script, nom, auteur (`BUILTIN_AUTHOR = 'Copytrack'`, ancien nom gardé exprès), décor, obstacles, paramètres |
+| `daily-AAAA-MM-JJ` | `daily.js : dailyChallenge` | la date seule : le circuit est **régénéré** (graine de la date, tentatives validées par le pilote automatique). Un changement du générateur, des pièces ou de la physique change le circuit d'un jour passé sans changer sa clé (gardé par le corpus et l'empreinte) |
+| `u-<signature>` | `track.js:362 userKey` | `signatureText()` : pièces, décorations physiques, **décor** (`this.decor` est en tête de la signature), tours, règles, logique et groupes ; pas le nom, la description, l'auteur, les couleurs, le thème de pièce `th`, l'ambiance, les scripts |
+| `<clé>~v1.<variante>` | `variants.js` | la clé de base + des règles appliquées à une copie (`rulesCore.js`) ; `sea-N`, `duel-N`, `tour-N`, `as-1` (aides) |
+| `e-<hash du code>` | `app/editorFlow.js:102` | essais depuis l'éditeur (jamais envoyés au serveur, mais enregistrés en local : voir zones sensibles) |
+
+## Annexe 9 — La course en direct : boucle, états, effets, arrivée
+
+*Source : `docs/comprendre/03-course.md`*
+
+### 3. La course en direct : boucle, états, effets, arrivée
+
+#### 3.1 La boucle de l'application (`js/main.js:393 start`)
+
+Une seule boucle `requestAnimationFrame` pour tout le jeu (`main.js:476 loop`), protégée : une exception est passée à `_loopError` (`:220`) et l'image suivante est **toujours** demandée.
+
+Chaque image (`frame`, `:435`) :
+1. `dt = min(0,1 s, écoulé)` ;
+2. `input.pollGamepad(mode)` ; navigation des menus à la manette (`_padNav`) si un menu ou une fenêtre est ouvert ;
+3. Échap : ferme la fenêtre, la fiche circuit ou revient au menu ;
+4. **`this.session.update(dt)`** — la session courante (course, démo du menu, éditeur, garage) ;
+5. rendu (`renderer.render`) plafonné : 30 i/s dans les menus, `fpsCap` du profil de qualité ;
+6. `quality.tick()`, banc d'essai au premier lancement ou surveillance (`quality.watch`, réduction automatique) ;
+7. `finally` : `input.clearHits()` (les touches « appuyées cette image » sont effacées).
+
+`App.session` est **toujours** une session : dans les menus c'est une course de **démonstration** (`app/screens.js:30`, `RaceSession(..., { demo: true })` sur un circuit intégré tiré au hasard, piloté par `Autopilot`). Tout code qui teste `this.session instanceof RaceSession` doit donc aussi tester `demo` (exemple : `main.js:146 _autoPause`).
+
+Changer d'écran passe par `App._dispose()` (`main.js:183`) : `session.dispose()`, fermeture de la fenêtre, du tableau de manche ; puis une nouvelle session (`playTrack`, `showMenu`, `openEditor`, `openGarage`).
+
+#### 3.2 `RaceSession` (`js/race.js:41`)
+
+Classe découpée en familles de méthodes (`Object.assign`, `race.js:733`) : `race/camera.js`, `race/ghosts.js`, `race/net.js`, `race/finish.js`, `race/replayMode.js`, `race/scriptsRun.js`, `race/training.js`, `theater/session.js`, `theater/cameras.js`.
+
+##### Construction (`race.js:42`)
+Dans cet ordre : aides à la conduite (`aids.js` : clé déplacée vers `~v1.as-1`, médailles retirées), `TrackView` (maillage, ajouté à `scenery.trackGroup`), `scenery.setTrack` (décor, ambiance), **`Simulation`**, `EnvFx`, modèle de la voiture (`createCar(profile().loadout)`), traces, voiture fantôme du record, pilote automatique (démo), replay (`decodeInputs`), fantômes simulés (`_setupGhosts` : or si la médaille d'or n'est pas gagnée et que le circuit a une ligne `track.path`, fantôme importé si même `PHYS_VER`), adversaires (multijoueur), mini-carte, rivaux, caméras, `loadRecord`, **`restart()`**, HUD d'entraînement, Theater.
+
+##### Machine à états (`this.state`)
+```
+countdown ──GO (1,65 s ; en multi : startLocal convenu)──► racing ──finish──► finished
+    ▲                                                      │  ▲
+    └──────────── restart() (T / Entrée) ◄─────────────────┘  │
+racing ⇄ paused (Échap / pause ; jamais en multijoueur ; aussi _autoPause : onglet masqué, portrait, contexte WebGL perdu)
+demo, replay : démarrent directement en 'racing'
+```
+- `restart()` (`:151`) : `sim.start(spawn)` (grille de départ en championnat), nouvel `InputRecorder`, `tick = 0`, stats, particules, traces, HUD.
+- `respawn(fromInput)` (`:215`) : `sim.rewind({ keepClock: multi })`, historique du fantôme enregistré tronqué, stats ramenées à l'instantané du checkpoint (`statsSnap`), voiture et caméra recalées (`_camCut`), en multijoueur compteur de téléportation et 2 s de protection.
+
+##### Une image de course (`update`, `:461`)
+1. Commandes de session : pause, recommencer, retour au checkpoint, caméra, klaxon.
+2. Décompte (aucun pas de physique, son du moteur au point mort).
+3. `acc += dt` puis `while (acc >= DT) { _stepOnce(); _cameraTick(); acc -= DT }` : **pas fixe**, la caméra avance au même pas.
+4. `render(dt, acc / DT)` : interpolation `prev → pos` de la voiture, du fantôme et de la caméra.
+
+##### Un pas (`_stepOnce`, `:287`) — voir aussi `02-simulation.md` § 2.2
+`_input()` → `quantSteer` → `recorder.push` (seulement en `racing`, hors démo et replay) → `tick++` → collisions douces (championnat) → **`sim.drive`** → `_orient` (orientation visuelle lissée) → envoi réseau (multi) → contrôle du « mauvais sens » → **effets lus dans `phys.ev`** → **`sim.score()`** → échantillon du fantôme tous les `GHOST_EVERY` pas → `_event(res)` → réapparition automatique.
+
+##### Évènement physique → effets (tous dans `_stepOnce`, `race.js:303-413`)
+
+| `phys.ev` | Son (`app.audio`) | Particules / caméra / manette | Message (`hudMessages.js`) |
+| --- | --- | --- | --- |
+| `boostHit`, `miniTurbo` | `boost`, `miniTurbo` | coup de champ de vision (`_feel.punchT`), étincelles | — |
+| `wall > 3` | `thud` | étincelles, secousse, vibration | — |
+| `land > 4`, `landQ` | `land`, `perfectLanding` | poussière, tassement de caméra | `badLanding` |
+| `transform` | `transform` | éclat de la couleur du revêtement, `car.setVehicle` | véhicule |
+| `sink` / `spike` / `invalid` | `thud` | éclats | `sink`, `spikes`, `invalid` |
+| `glass` | `thud` | éclats de verre | `glass` |
+| `flip`, `gravity` | — | secousse | `flip`, `gravity` |
+| `reverse`, `cut`, `spring`, `bounce`, `ring`, `loopIn`, `loopFall` | divers | divers | divers |
+
+Ces effets **ne modifient jamais** l'état physique : ils lisent `phys` et écrivent dans l'audio, les particules, la caméra (`shake`), la manette et le HUD. `Math.random` n'y sert qu'au visuel.
+
+Compteurs de course (`this.stats` : chocs, réapparitions, réceptions parfaites, turbos, anneaux, mauvais sens) : lus par l'objectif bonus de carrière, l'expérience, la télémétrie, le coach.
+
+##### Rendu d'une image (`render`, `:541`)
+Synchronisation de la logique du circuit (`_logicSync` : visibilité des groupes, effets), pièces mobiles et obstacles au chrono interpolé (`view.updateMoving(obsT)`), lampes, dalles brisées (`view.setBroken` quand `phys.brokenVer` change), voiture interpolée (`slerp` de `prevQuat → quat`), roues, roulis, flammes, traces de pneus, étincelles, traînée, sillage, fantômes (`_renderGhost`, `_renderSimGhosts`, `_renderRivals`), **caméra** (`_cameraRender`), mini-carte, voitures distantes, `scenery.update`, ressenti (`_feelUpdate` : aspiration, croisements, vibrations), scripts de circuit, **moteur et musique** (`audio.engine`, `music.setSpeed`), **HUD** (chrono, vitesse, lignes de vitesse).
+
+#### 3.3 Fantômes, replay, Theater, analyse
+
+| Quoi | Source | Comment il roule |
+| --- | --- | --- |
+| Fantôme du record | `record.ghost` (poses tous les 4 pas, format compact `G2`) | **relu** au chrono du joueur (`race/ghosts.js : _drawRecorded`) |
+| Fantôme or | `GhostRunner({ bot: true })` : pilote automatique, **simulé en direct** sur le même `Track` | `poseAt(logic.steps)` : historique ; un retour au checkpoint relit une ligne plus ancienne |
+| Fantôme importé (`SHG1:`) | `GhostRunner({ inputs })` | idem |
+| Rivaux du classement | poses téléchargées (`setRivals`) | relus comme le fantôme du record |
+| Replay en jeu | `opts.replay.inputs` | **`RaceSession` elle-même** rejoue ses commandes par `_stepOnce` (`race/replayMode.js:8`), vitesse ×0,25 à ×4, export vidéo |
+| Replay Theater | `opts.theater` | construit sur le replay ; se déplacer en arrière = recommencer et rejouer sans image ni son (`NOOP`, `theater/session.js`) |
+| Analyse, coach, Académie, laboratoire | `analysis/trace.js : traceFromInputs` (un `GhostRunner` qui prend des notes) | hors temps réel |
+
+Seuls les circuits **scriptés** (intégrés, défi du jour, Académie) ont une ligne `track.path` : les circuits d'éditeur et de la communauté n'ont donc ni fantôme or, ni pilote automatique, ni avertissement de mauvais sens (`race.js:95 wayTrack`).
+
+#### 3.4 L'arrivée (`race/finish.js:66 _finish`)
+
+Ordre vérifié, avec des **sorties anticipées** qui excluent des pans entiers :
+
+1. `state = 'finished'`, moteur coupé.
+2. Replay → message, fin. Académie → `app.onAcademyFinished`. Mode de jeu → `app.onModeFinished`. Championnat → temps envoyé au salon. Multijoueur libre → temps envoyé, « R : nouvel essai ». **Aucun de ces cas n'écrit de record ni ne touche au classement.**
+3. Course classable : `lastRun = { inputs, time }` ; record si meilleur que l'ancien de même `PHYS_VER` (et pas un essai depuis le curseur) → **`saveRecord(trackKey, …)`** avec fantôme, commandes, `pv`, temps intermédiaires.
+4. `pushRun` (10 dernières courses) pour les clés `b-`, `daily-`, `u-` hors éditeur.
+5. Médaille (`medalFor`), série du défi du jour (`rewards.js : noteRace`), télémétrie, pièces (`profile.js : rewardCoins`), objectif bonus (`career.js : goalMet`, `completeGoal`), expérience et niveaux (`progression.js : awardRace`), récompenses (`app.checkRewards`).
+6. Vérification depuis l'éditeur → `app.onEditorTestFinished` (`app/editorFlow.js:110` : `track.setVerified`, preuve `authorProof.saveProof`).
+7. `ui.showFinish(...)`, coach (`app._finishCoach`).
+8. **`app.onRaceFinished`** (`main.js:288`) : si clé `b-|daily-|u-`, record, envoi permis, pas d'éditeur ni de replay → `online.submitScore` (le serveur rejoue la course) ; au retour, `_ensureLocalRecord` et message. Le test `this.session !== session` après chaque `await` protège contre un changement d'écran pendant l'envoi.
+
+#### 3.5 Quitter une course (`main.js:267 quitRace`)
+
+Retour selon l'origine, dans cet ordre de priorité : salon multijoueur, Académie, modes, **éditeur** (`openEditor(this.editorState)`), fiche du circuit (`_backToHub` si `opts.fromHub` et même clé), liste des circuits (intégré ou défi), mes circuits, communauté, menu.
+
+## Annexe 10 — Les systèmes, un par un
+
+*Source : `docs/comprendre/04-systemes.md`*
+
+### 4. Les systèmes, un par un
+
+Chaque fiche dit : rôle, fichiers, points d'entrée, dépendances, données, déclencheurs, et ce qu'une modification risque de toucher.
+Le noyau de simulation et la course en direct ont leurs propres documents (`02-simulation.md`, `03-course.md`).
+Marques : **[V]** vérifié dans le code, **[D]** déduction raisonnable, **[?]** incertain.
+
+---
+
+#### 4.1 Application, écrans et navigation
+
+**Rôle.** Une seule instance `App` (`js/main.js:52`), créée après l'écran d'accueil, porte toute l'orchestration ; ses méthodes sont réparties en familles dans `js/app/*.js` (ajoutées au prototype, `main.js:487`).
+
+**État.** [V]
+- `App.mode` ∈ `null | 'menu' | 'race' | 'editor' | 'garage'` ; le replay et le Theater tournent en `'race'`.
+- `App._screen` : écran DOM affiché (`app/screens.js:38 showScreen`) ; liste des écrans dans `js/ui.js:13` (`loading, menu, tracks, race-hub, mytracks, community, profile`). Le garage n'est pas un écran : c'est l'élément `#garage`.
+- `ui.setMode` (`ui.js:132`) bascule `body.in-race`, `#hud`, `#editor`, `#touch`. Les superpositions pause / arrivée (`showOverlay`) et la fenêtre (`ui.modal`, `ui.modalOpen`) sont lues **dans le DOM** (classes `hidden`) par la boucle (`main.js:442`).
+- Une quarantaine de drapeaux `this._xxx` répartis sur `App` (`_hub`, `_lastDesc`, `_replayBack`, `_lastPanel`, `_editorKeep`, `_openingEditor`, `_glLost`…).
+
+**Accueil.** Six tuiles ; chaque tuile ouvre un panneau `.menu-panel` (`app/wiring.js:132 _menuSub`) ; un délégué de clics unique sur `document` (`wiring.js:17`) dispatche les `data-action` vers `_action` (`wiring.js:151-229`).
+
+**Lancement d'une course** [V] : sélection → **descripteur** (`js/trackDescriptor.js` : `describeBuiltin`, `describeDaily`, `describeUser`, `describeCommunity`, `describeVariant`) → **fiche du circuit** (`app/raceHub.js:57 openRaceHub`) → « Jouer » → `launchDesc(desc, extra)` (`raceHub.js:50`) → `playTrack(track, opts)` (`main.js:201`) → `new RaceSession`.
+
+Champs de `opts` selon la source [V] :
+
+| Source | Champs |
+| --- | --- |
+| carrière | `trackKey, medals, difficulty, hasNext, builtinIndex, seed, goal, goalKey` |
+| défi du jour | `trackKey, medals, difficulty: 3, seed, daily` |
+| mes circuits | `trackKey: userKey, userEntry, userMap, medals (dérivées si vérifié), difficulty: 2` |
+| communauté | idem + `community` (médailles seulement si l'auteur a vérifié) |
+| catégorie de record | `trackKey: <clé>~v1.…, variant, officialTrack, mutation?` (perd `builtinIndex`, `hasNext`, `goal`…) |
+| depuis la fiche | `fromHub`, `rivals` |
+| mode de jeu | `mode, trackKey: null` ; Académie : `academy, trackKey: null` ; Theater : `replay, theater, trackKey: null` |
+| éditeur | `fromEditor, verify, spawn, trackKey: 'e-…'` (`app/editorFlow.js:102`) ; multijoueur : `multi, trackKey: null` |
+
+**Impact d'une modification.** Ajouter une source de course = un descripteur + ses champs `opts` + une branche de `quitRace` (`main.js:267`) + ce que lit `race/finish.js`. Les écrans se retrouvent par des **identifiants DOM en dur** (`$('hub-play')`, `fin-*`, `pq-*`…) répartis dans de nombreux fichiers : renommer un `id` de `index.html` demande une recherche globale (`tools/test-menu.mjs` garde la structure de l'accueil).
+
+**Observations.** [V] Échap dans la boucle revient au menu sans rouvrir `_lastPanel` (le bouton « Retour », lui, le fait) ; avec les aides à la conduite, `canHub` compare la clé `…as-1` à `_lastDesc.key` et masque le bouton « Fiche du circuit » (`race/finish.js:194`) ; `opts.variant` et `opts.modeTrack` sont écrits mais jamais lus.
+
+---
+
+#### 4.2 Entrées (`js/input.js`, `js/app/wiring.js`, `js/aids.js`)
+
+**Rôle.** Clavier (codes physiques `e.code`, donc QWERTY et AZERTY), manette, tactile, vers deux API : `hit(code)` / `act(action)` (appuyé **cette image**), `held`, et `drive()` (commandes de conduite).
+
+- [V] `pressed` ne garde que les vrais appuis (pas la répétition) ; la saisie dans un `INPUT`, `TEXTAREA`, `SELECT` est ignorée (y compris curseurs et cases : un curseur de la pause qui a le focus fait ignorer Échap et P [D]).
+- [V] `clearHits()` est appelé à **chaque image** dans le `finally` de la boucle (`main.js:478`) : une action non lue dans l'image est perdue.
+- [V] Manette : `pollGamepad(mode)` (fronts par table `EDGE`), navigation spatiale des menus `_padNav` (`wiring.js:345-386`).
+- [V] Tactile : les boutons retour / pause / recommencer **injectent** `KeyR`, `Escape`, `Enter` dans `pressed` (`wiring.js:289-291`) ; si le joueur réassigne ces actions à d'autres touches, `act()` ne les reconnaît plus [D].
+- [V] Réassignation : `captureKey(cb)` ; une capture en attente survit à un changement d'écran.
+
+**Chaîne des commandes en course** [V] (`race.js:274 _input`) : `input.drive()` → `steerCurve` (réponse du volant, `aids.js:35`) → `aids.apply` (aides : gaz auto, anti-tête-à-queue… ; seulement en `racing`) → `quantSteer` → **enregistrement**. Les commandes **effectives** sont enregistrées : le rejeu ne relance pas les aides. Une course aidée va dans la catégorie `~v1.as-1`, sans médailles ; les aides sont coupées en saison, duel, tournoi (`aidedKey` renvoie `null`).
+
+**Impact.** Changer `drive()` ou `steerCurve` ne casse pas les replays (on enregistre la sortie) mais change le ressenti ; changer `quantSteer` ou le format `InputRecorder` casse **tous** les replays, fantômes et la vérification serveur.
+
+---
+
+#### 4.3 Audio (`js/audio.js`, `js/music.js`, `js/AudioEngine.js`)
+
+- [V] `GameAudio` crée l'`AudioContext` au premier geste (`unlock`, écouteurs `pointerdown` / `keydown` jamais retirés, `main.js:104-106`) : sons synthétisés (moteur, glisse, vent, pluie, chocs…), aucun fichier audio.
+- [V] `engine(state)` est appelé à chaque image de course **y compris la démo du menu** (`race.js:661`) ; coupé en pause, à l'arrivée, à la fermeture.
+- [V] `Music` : `'menu'` (house) ou `'game'` (chill), fondu de 450 ms ; `AudioEngine` séquence par `setInterval` (25 ms) et écrit directement vers `ctx.destination` (le volume des effets ne touche pas la musique).
+- [V] Onglet masqué : contexte suspendu (`main.js:150`). [D] Une reprise de la musique (minuterie) peut le réveiller dans un onglet masqué.
+- Musique par écran : menu / éditeur → menu ; course → ambiance du circuit ou chill ; multijoueur et Académie → toujours chill (`main.js:212`).
+
+---
+
+#### 4.4 Langues (`js/i18n.js`, `js/i18n/boot.js`, `js/i18n/dom.js`, `js/i18n/en/*.js`)
+
+- [V] Le **français est la source et la clé**. `initI18n()` tourne avant l'accueil (`main.js:504`) ; le dictionnaire anglais est chargé à la demande (`import('./en.js')`, assemblage de 10 fichiers ; à clé égale, le dernier gagne).
+- [V] Entrées exactes + **modèles à trous** (`{x}`, `{x:t}`, `{x:w}`), triés par longueur ; `t()` ne fait que la recherche exacte.
+- [V] En anglais, `DomTranslator` parcourt toute la page puis observe le document entier (`MutationObserver` : texte, `title`, `placeholder`, `aria-label`, `alt`) et réécrit ce que le jeu écrit en français.
+- **Risques.** [V] Seul `#opt-lang` est marqué `data-i18n="off"` : [D] les contenus des joueurs (noms de circuits, pseudos, commentaires) passent aussi par le dictionnaire (un circuit nommé « Jouer » s'afficherait « Play ») ; un modèle trop général peut capturer un autre texte (raison pour laquelle `logicText.js` a sa propre table). Ajouter un texte français dans le code : ajouter sa traduction dans `js/i18n/en/<domaine>.js` (`tools/test-i18n.mjs`, `tools/i18n-scan.mjs`).
+
+---
+
+#### 4.5 Garage, cosmétiques, codes de partage (`js/garage.js`, `js/garage/studio.js`, `js/cosmetics.js`, `js/custom.js`, `js/customCar.js`, `js/mods.js`, `js/rules.js`)
+
+- [V] **100 % visuel** : la physique ne lit jamais l'équipement (`cosmetics.js`, en-tête ; `tools/test-cosmetics-physics.mjs`).
+- [V] Flux : `profile().loadout` → `createCar(loadout)` (`race.js:70`) ; la voix et le klaxon du joueur viennent aussi du profil. Le garage édite un brouillon (`GarageSession.draft`) et ne l'enregistre (`setLoadout`) que si tout est possédé.
+- Codes : `SHC1:` voiture (`custom.js`), `SHX1:` paquet « mod » (voiture, interface, caméras, pièces déco, modes : `mods.js`), `SHM1:` mode de jeu (`rules.js`). [V] Deux politiques différentes pour les objets non possédés : l'atelier les garde en aperçu avec achat, le paquet les remplace par les valeurs d'origine.
+- `rules.js` (modes, objectifs, descriptions) s'appuie sur `rulesCore.js` (noyau pur **dans la fermeture serveur**, car les catégories de record sont des règles).
+- **Observations.** [V] La minuterie `_studioT` (`garage/studio.js:19`) n'est pas annulée par `GarageSession.dispose` (`garage.js:283`) : [D] quitter le garage dans les 120 ms qui suivent une modification peut reconstruire une voiture dans la scène suivante. [V] La règle de salon `sameCars` ne change que la voiture locale (`race.js:69`) ; les voitures distantes gardent l'apparence annoncée (`race/net.js:16`).
+
+---
+
+#### 4.6 Multijoueur en direct (`js/net/*.js`, `js/app/multi.js`, `js/race/net.js`, `js/remoteCar.js`, `supabase/MULTI.md`)
+
+**Architecture** [V]
+- **Supabase Realtime** ne sert qu'à se trouver : un canal par salle (`realtime:copytrack-room-<CODE>`, protocole Phoenix écrit à la main, `net/signaling.js`), présence `{ name, host, ready, racing, v: PHYS_VER, net: NET_VER, car, want, mode }`, et relais des messages WebRTC (`signal`).
+- **WebRTC en maillage complet** (`net/transport.js`) : par paire, un canal `state` (non ordonné, sans retransmission) et un canal `ctl` (ordonné, fiable) ; 8 joueurs au plus ; STUN + TURN à identifiants temporaires fournis par la fonction serveur `ice` (`net/ice.js`).
+- **L'hôte** (créateur ; sinon le plus petit identifiant) décide du circuit (code envoyé par morceaux de 12 Ko pour un circuit de joueur), des règles, du départ, du championnat (grille, clôture des manches, points). La physique, les temps et les collisions restent **chez chaque joueur**.
+- Versions : un arrivant de `PHYS_VER` / `NET_VER` différents est refusé ; les paquets d'état ont leur propre version (`SNAP_VERSION = 2`).
+
+**En course** [V]
+- Paquet d'état de 40 octets (`net/snapshot.js`) envoyé 20 fois par seconde (`SEND_EVERY_STEPS = 6`, `race.js:301`), plus à chaque réapparition, nouvel essai, arrivée.
+- Réception : tampon d'interpolation (`net/interp.js` : rendu 100 ms dans le passé, Hermite, extrapolation ≤ 0,25 s) → `RemoteCar` (fantôme translucide en course libre, vraie voiture en championnat).
+- Classement en direct : `ProgressTracker` sur `track.path` (sinon les checkpoints).
+- Départ commun : `startLocal = maintenant + délai − rtt/2` ; le décompte de `RaceSession` lit cette heure.
+- Pas de pause (Échap propose de quitter), retour au checkpoint **sans** remise du chrono (`keepClock`), aucun record, aucun classement, aucune télémétrie (`race/finish.js:82-104`).
+
+**Collisions douces** [V] (`net/collide.js`, appelées par `RaceSession._collide` **avant** `sim.drive`) : chaque joueur applique sa moitié du choc à sa voiture, d'après la position extrapolée de l'autre. Elles modifient directement `phys.pos` / `phys.vel` : c'est la seule écriture dans l'état physique qui ne passe pas par `Simulation` (course non rejouable, ce qui est assumé). La poussée de pénétration est plafonnée ; [V] l'impulsion de vitesse peut atteindre 8 m/s **en un pas** (`collide.js:44`), contrairement à ce que laisse entendre `supabase/MULTI.md`.
+
+**Reconnexion** [V] (`net/resume.js`, NET_VER 4) : place gardée 20 s, retentatives, état renvoyé par l'hôte, migration d'hôte au départ définitif (`hostover`). [V] Le jeton de reconnexion est stocké mais **jamais comparé** (`room.js:302`).
+
+**Observations** [V] sauf mention :
+- `_setupRemotes` (`race/net.js:10`) n'ajoute que les joueurs présents au départ : un arrivant pendant la course n'apparaît pas.
+- `Room.started` n'est jamais remis à faux (`room.js:70, 315, 375`) : [D] un invité resté dans le salon est relancé chaque fois que l'hôte choisit un autre circuit.
+- [D] Les écouteurs de `multiLobby` ne sont retirés que par ses boutons (Échap ou un départ les laissent) ; une voiture distante dont le lien est mort reste figée, et collisionnable en championnat.
+- `net/rollback.js` est un **prototype non branché** (tests et banc seulement ; décision : `docs/ROLLBACK.md`).
+- [D] Un départ de salle appelle `playTrack` quel que soit l'écran, éditeur compris.
+
+---
+
+#### 4.7 Persistance locale et comptes (`js/storage.js`, `js/profile.js`, `js/account.js`, `js/cloudsave.js`, `js/welcome.js`)
+
+**Portée du stockage** [V] (`storage.js:10-27`) : une variable de module `PREFIX` choisie **une fois, avant la construction d'`App`**, par l'écran d'accueil (`welcome.js : runWelcome` → `setScope`) :
+- invité : `shardway.<clé>` (nom d'origine du projet, gardé pour ne pas perdre les sauvegardes) ;
+- compte : `shardwayacct.<uid>.<clé>` ;
+- hors portée : `copytrack.<clé>` (`copytrack.account` avec les jetons, `copytrack.lang`…) et `sessionStorage` `copytrack.guest`.
+
+**Clés principales** (dans la portée) [V] : `settings`, `profile` (pièces, objets, équipement, médailles, statistiques, favoris…), `rec3.<clé de classement>` (record : `{ time, splits, ghost, ghostVeh, inputs, pv, date, name, bt? }`), `runs.<clé>` (10 dernières courses), `tracks` / `tracksBad` (quarantaine) / `tracksDel` (pierres tombales), `recReset`, `ghostImp.<clé>`, `draft` (brouillon de l'éditeur), `prefabs`, `cdecos`, `modes`, `vproof` (preuve de vérification d'un circuit, propre à l'appareil), `online.session`, `online.player`, files de télémétrie et d'erreurs.
+
+**Règles** [V]
+- `profile()` est un **cache de module** (`profile.js:24`) : après un changement de portée ou une restauration, `reloadProfile()` est obligatoire.
+- `saveRecord` (`storage.js:246`) : record valide seulement (`validRecord`), garde `bt` (meilleur temps toutes physiques confondues : c'est lui qui donne médailles et déblocages, `medalTime`), copie en mémoire (`memRec`) si l'écriture échoue, et en cas de stockage plein `makeRoom` compacte puis **retire fantômes et commandes des records les plus anciens** (le temps n'est jamais perdu). Un record sans commandes ne peut plus être revu ni envoyé au classement.
+- Chaque écriture réussie appelle `writeHook` → synchronisation du compte (`account.js`, attente de 4 s).
+
+**Comptes et synchronisation** [V]
+- Pseudo + mot de passe (le pseudo devient une adresse `…@accounts.copytrack.invalid`, `account.js:18`) via Supabase Auth ; l'option « confirmer l'adresse » doit être désactivée côté Supabase.
+- `_doSync` : lit `cloud_saves`, **fusionne** (`cloudsave.js`), réécrit localement, renvoie avec contrôle de révision (`rev`, jusqu'à 4 essais). Clés synchronisées : `profile`, `tracks`, `tracksDel`, `recReset`, `rec3.*`, `daily.*`, `ghostImp.*`, `runs.*` ; jamais les réglages, le brouillon, `vproof`, `online.*`. Au-delà de 6 Mo, la copie du cloud part sans fantômes.
+- Fusion : record de `pv` plus récent, sinon le plus rapide ; circuits par identifiant et date ; profil : médailles au meilleur niveau, objets réunis, pièces jamais plus que l'un des deux côtés, équipement local.
+- [V] La déconnexion (`online.useGuest`, `online.js:69`) efface la session anonyme de l'invité sur l'appareil ; [D] les circuits publiés et temps de cet invité restent liés à un identifiant anonyme qui ne sera plus jamais utilisé.
+
+**Impact.** Ajouter une donnée de progression : la ranger dans `profile` ou sous une clé synchronisée **et** écrire sa règle de fusion dans `cloudsave.js` (sinon deux appareils s'écrasent). Toute nouvelle clé lourde pèse sur le quota (quelques Mo) et sur `makeRoom`.
+
+---
+
+#### 4.8 Services en ligne et serveur (`js/config.js`, `js/online.js`, `js/online/community.js`, `js/app/community.js`, `js/app/competition.js`, `js/ui/leaderboardPanel.js`, `supabase/`)
+
+**Trois façons d'appeler Supabase** [V] (`online.js`) :
+- **REST sur les tables** (`/rest/v1/…`, avec une session : toute lecture crée au besoin un joueur anonyme) : `players`, `accounts`, `cloud_saves`, `tracks`, `scores`, `track_likes`, `follows`…
+- **Fonctions SQL** (`/rest/v1/rpc/…`) : `get_ghost`, `trending_tracks`, `toggle_like`, `publish_track` (via la fonction serveur), saisons, duels, tournois, communauté 2 (`online/community.js`), `log_runs` / `log_errors` / `submit_feedback` (sans session, seulement avec l'accord du joueur).
+- **Fonctions serveur** (Deno) : `submit-score` (scores et publication) et `ice` (serveurs STUN/TURN).
+
+**Envoi d'un temps** [V] : `RaceSession._finish` → `App.onRaceFinished` (`main.js:288`) → `online.submitScore({ trackKey, code (circuits u- : le code du circuit d'origine), inputs, time, physVer })` → `supabase/functions/submit-score/handler.js` : taille, identité (jeton), limite de débit (en base, **refus si la base de limitation manque**), forme des champs, **`verifyRun`** (`js/verify.js` : circuit retrouvé par sa clé, course **rejouée**, temps comparé à 0,5 ms), fenêtre des duels et tournois, empreinte forte du circuit (`track_binds`, SHA-256 de `signatureText`), puis `submit_best` en base. Le serveur ne garde que **son** temps rejoué, ses temps intermédiaires et son fantôme.
+
+**Publication d'un circuit** [V] : l'auteur termine la vérification dans l'éditeur (`onEditorTestFinished` → `track.setVerified(time)`, preuve rangée dans `vproof`) → `online.publish` envoie le code et la preuve → `verifyPublish` rejoue la preuve sur **ce** code et exige `vt` égal au temps rejoué (1 ms près) → `publish_track`.
+
+**Couplage de versions** [V] : un seul `PHYS_VER` accepté à la fois par le serveur (égalité stricte). La fonction est un **fichier groupé** (`npm run build:function` → `supabase/functions/submit-score/index.ts`, empreinte de build en dernière ligne) qui doit être **redéployée à la main** après toute modification de la fermeture de `verify.js` (physique, circuits intégrés, générateur du défi, variantes, saisons, lecture des codes, signature). Le site (GitHub Pages) se met à jour seul : entre les deux déploiements, les temps sont refusés. `node tools/check-deployed.mjs` compare l'empreinte en ligne à celle du dépôt.
+
+**Logique dupliquée entre le jeu et la base** [V] (toute modification doit être faite des deux côtés) : début des saisons (`seasons.js` / `etape11-saisons.sql`), forme des clés de duel (`etape12`), liste des variantes et des titres, domaine des adresses et règles des pseudos (`account.js` / `etape4-comptes.sql`), limites (taille des clés, des codes, des commandes, durée maximale d'une course : 600 s côté jeu, 3 600 s côté SQL).
+
+**Observations**
+- [V] `online.leaderboard` (`online.js:320`) demande d'abord la colonne `ghost_veh` ; les étapes SQL du dépôt n'accordent sa lecture ni à `anon` ni à `authenticated` (`etape5`, `etape7`, `etape9` : seulement `track_key, player, time, phys_ver, track_name, updated_at, has_ghost, splits`). [D] Les deux premières requêtes échouent alors et la troisième, sans `has_ghost` ni titre, est utilisée : boutons de fantôme et titres absents du classement mondial. **À confirmer sur la base de production** (`supabase/verify-prod.sql` vérifie que la colonne existe, pas qu'elle est lisible).
+- [V] Le message « serveur d'une autre version » est reconnu par une expression régulière sur le texte français (`main.js:314`), pas par le drapeau `versionMismatch` renvoyé par le serveur.
+- [V] Le commentaire de tête de `js/verify.js` (et donc `docs/MODULES.md`) dit que la fonction serveur « le charge depuis le site du jeu » : elle l'embarque en réalité (`tools/build-function.mjs`).
+
+---
+
+#### 4.9 Éditeur de circuits (`js/editor.js`, `js/editor/*.js`, `js/inspector.js`, `js/inspector/*.js`, `js/editorTools.js`, `js/editorPick.js`, `js/app/editorFlow.js`)
+
+**Cycle de vie** [V]
+- Chargé à la demande : `App.openEditor(state)` (`app/editorFlow.js:13`) → `import('../editor.js')` → `_dispose()` → `new EditorSession(app, state)` (`editor.js:32`). Sans état : le brouillon (`getEditorDraft`).
+- La session possède un `Track` (décodé depuis `state.code`), un `TrackView` (avec toutes les décorations), des maillages d'aide (aperçu, surbrillance, grille, emprise, sélection…), l'historique, l'`Inspector` (créé avant `_bind` pour que le gizmo reçoive les clics en premier). Elle **emprunte** `app.camera`. Familles : `editor/{tools,pointer,palette,selection,history,groups,prefabs,cdeco,logicUi,scriptsUi}.js`.
+- `update(dt)` (`editor.js:172`) : cascade d'Échap, actions `ed.*`, caméra, puis `_render` qui appelle `view.rebuild()` **seulement si `needsRebuild`**.
+- `dispose()` (`editor.js:280`) : retire ses écouteurs, enregistre le brouillon, libère l'inspecteur, la vue et les aides.
+
+**Modifier le circuit** [V] : toujours par les méthodes de `Track` (`add` → `normalize` → `_insert`, `remove`, `conflicts`, `Track.placeable`, `track/edit.js` : `setSurface`, `toggleFlag`, `setMover`, `addDeco`…), qui incrémentent `version`. Puis **le point central** `_changed(rebuild = true)` (`editor/history.js:119`) : `needsRebuild` (le `TrackView` ne reconstruit que les tronçons dont la signature a changé), inspecteur, badge des problèmes (`continuityIssues` + `checkTrack`, mis en cache par `track.version`), brouillon enregistré 400 ms plus tard ; et `_commit()` (`:89`) qui empile un instantané.
+Exception [V] : l'inspecteur, le gizmo et le déplacement vertical (Maj + souris) modifient les **décorations directement** (`d.x = v; track.version++`, `inspector/bodies.js`, `inspector/gizmo.js`, `editor/pointer.js`), sans le nettoyage d'`addDeco`.
+
+**Annuler / rétablir** [V] (`history.js:52 _snapshot`) : une chaîne JSON par état (pièces en lignes `TILE_FIELDS`, décorations, noms de groupes, logique, tours, nom, description, décor, ambiance, scripts, règles), 200 au plus. Non capturés : l'auteur, les calques masqués / verrouillés, la caméra, l'outil, le presse-papiers. `_restore` garde `vt` / `vh` (revenir à un état vérifié le redonne vérifié).
+
+**Essai, vérification, publication** [V]
+1. `test(verify)` (`history.js:304`) → `app.testTrack(state, spawn, verify)` (`editorFlow.js:99`) : l'état de l'éditeur est mis de côté (`_editorKeep` : historique, presse-papiers, options, calques), le circuit est **re-décodé** depuis son code, `playTrack(track, { fromEditor, verify, spawn, trackKey: 'e-<hash du code>' })`.
+2. Course : pas de fantômes, `Simulation({ partial: !!spawn })` (test depuis le curseur : sans checkpoints ni arrivée obligatoire), logique en mode « annonce ».
+3. Vérification terminée → `onEditorTestFinished` (`editorFlow.js:110`) : `track.setVerified(time)` (`vt` au millième, `vh = signature()`), preuve rangée (`authorProof.saveProof`, 8 au plus, liée à `PHYS_VER`) → publier (`publishTrack`, puis `verifyPublish` côté serveur) ou revenir.
+4. Retour : `quitRace` → `openEditor(this.editorState)` ; l'état mis de côté n'est restauré que si le premier instantané de la nouvelle session est **identique** au dernier de l'ancienne (`editor.js:133`).
+- Ce qui invalide la vérification : tout ce qui entre dans `signatureText()` (voir `02-simulation.md` § 2.9) ; un changement de `PHYS_VER` invalide aussi la preuve.
+
+**Partagé avec le serveur / propre à l'éditeur** [V] : `Track.normalize`, `range`, `cellsOf`, `conflicts`, `addDeco`, `signature`, `encode` / `decode`, `flagAllowed`, `surfaceAllowed`, `rollFits` sont **les mêmes** dans l'éditeur et sur le serveur (fermeture de `verify.js`). Propres à l'éditeur : `connect.js`, `continuity.js` (+ `pieceFacts.js` généré), `extend.js`, `orient.js`, `spill.js`, `families.js`, `tileInfo.js`, `editorTools.js`, `prefabs.js`, `logicText.js`, `editorPick.js`, `authorProof.js`, `customDecoBuild.js`. `joins.js` n'est plus importé que par des tests et outils.
+
+**Entrées** [V] : actions réassignables `ed.*` (`input.js:18-42` : R pivoter, E/C niveau, Tab pièce suivante, P prolonger, T tester, F2 vérifier, F3 paramètres, F4 groupes, F6 logique…) lues dans `update` (ignorées si une fenêtre est ouverte) ; raccourcis Ctrl (Z, Y, S, C, X, V, A, D) par un écouteur `keydown` séparé (`editor/pointer.js:46-59`) qui [D] ne vérifie pas si une fenêtre est ouverte.
+
+**Observations** (défauts constatés, non corrigés)
+- [V] **La pose calcule les conflits sur la pièce brute**, avec les options armées, avant normalisation (`editor/tools.js:136`), puis supprime ces conflits (`:147`). Une option que la normalisation retire (par exemple « mur » sur une pièce qui ne le permet pas) agrandit la plage de niveaux réservée (`Track.range` : `t.o ? 2 : 0`) : [D] des pièces voisines au-dessus et au-dessous peuvent être supprimées alors que la pièce posée ne les touche pas (le message « Option ignorée » apparaît). L'aperçu fait le même calcul (`pointer.js:496`).
+- [V] **Retour d'essai** : les coordonnées des décorations ne sont pas arrondies en mémoire, `encode()` les arrondit (2 décimales pour x, y, z, s ; 3 pour ry ; sonde : `10.123456 → 10.12`). [D] Dès qu'une décoration posée librement a des coordonnées non arrondies, la comparaison exacte échoue et l'historique d'annulation, le presse-papiers et les calques sont perdus après chaque essai.
+- [V] « Prolonger » (`tools.js:169`) ajoute la pièce sans la règle « un seul départ » appliquée par la pose ordinaire (`:148`).
+- [V] La réservation des bords de pente posée au mur (`spill.js`) n'est contrôlée que par la pose, l'aperçu, le collage, le déplacement de sélection et « Prolonger » ; pas par l'inspecteur, le gizmo, le changement d'option ou de type, le remplissage, la duplication, ni à la lecture d'un code.
+- [D] `extend.js` (dit « pur ») ajoute puis retire des pièces du circuit pendant sa planification, sans `try/finally` dans `widthBridge`.
+- [V] Chaque essai enregistre un record local sous `e-<hash du code>` (`race/finish.js:107-123`, aucune exclusion de `fromEditor`) ; ces records sont synchronisés avec le compte (`cloudsave.js:20` : `rec3.*`) et rien ne les purge. [D] Ils grossissent la sauvegarde et peuvent, stockage plein, faire retirer les fantômes et commandes des vrais records par `makeRoom`.
+
+---
+
+#### 4.10 Rendu, scène et caméra (`js/trackMesh.js`, `js/trackGeometry.js`, `js/geo.js`, `js/scenery.js`, `js/scenery/*`, `js/decos.js`, `js/carModel.js`, `js/quality.js`, `js/renderOptions.js`, `js/race/camera.js`, `js/camrig.js`, `js/camflip.js`, effets)
+
+**Qui possède quoi** [V]
+- `App`, une fois pour toutes (`main.js:61-73`) : `WebGLRenderer` (antialias fixé à la création : en changer demande un rechargement), `Scene`, `PerspectiveCamera`, matières du circuit (`createTrackMaterials`, partagées par toutes les vues), `Scenery` (ciel, lumières, brouillard, terrain, décor, météo), `Particles` (400 instances), `QualityManager`.
+- Chaque session ajoute ses objets et les retire dans `dispose()` : course (`TrackView` dans `scenery.trackGroup`, voiture, traces, fantômes, voitures distantes, traînée, `EnvFx`), éditeur (vue + aides ; un second contexte WebGL pour l'aperçu des pièces perso), garage.
+- Le terrain et le décor restent dans la scène jusqu'au prochain `scenery.setTrack`.
+
+**`TrackView`** [V] (`trackMesh.js`)
+- Maillage **statique fusionné par tronçons** de 4 × 4 cases ; signature par tronçon = options de rendu + lignes `tileToRow` des pièces + pièces d'un anneau d'une case autour + décorations. `rebuild()` ne refait que les tronçons dont la signature a changé.
+- **Toujours recréés** à chaque reconstruction : pièces mobiles, verre, obstacles, plaques, lampes, maillages par groupe (`tile.g`, `d.g`).
+- Par image : `updateMoving(t)` (même `track.moverOffset` que la physique, avec `Math.cos` au lieu de `dcos` : visuel), `updateLights` (lumières réparties sur les lampes proches), `setBroken` (quand `phys.brokenVer` change), `setGroupVisible` (logique, calques).
+- Géométrie : `trackGeometry.js` reprend les fonctions analytiques de la physique (`sampleLocal`, `arcParams`, `sbendPoint`, `roadHalf`, `ribbonOf` + `frameLocal`, coupe des tubes). Écarts assumés : polylignes (erreur de corde de quelques centimètres), eau décalée selon la normale au lieu de la verticale, **piliers et collines du terrain purement visuels** (la physique n'a pas de terrain : le sol est à y = 0).
+- `geo.js : GeoBuilder` : triangles non indexés, couleurs par sommet, ombrage facetté.
+
+**Décor** [V] (`scenery.js`) : 12 thèmes, ambiance (moment de la journée, brume, musique : `ambiance.js`), terrain et décor tirés d'une graine (pas de `Math.random`), fosses pour les pièces enterrées (`scenery/pits.js`), météo décorative estompée sous abri (`cover.js`). Les scripts de circuit peuvent changer le décor en pleine course.
+
+**Caméra** [V] (`race/camera.js`)
+- Modes : poursuite, proche, capot, lointaine, jusqu'à 6 caméras du joueur (`camprefs.js`) ; replays : TV, orbite ; Theater : libre, cinématique (`theater/cameras.js`).
+- `_cameraTick` au **pas de la physique** (deux poses A et B), `_cameraRender` les interpole par `alpha` : la caméra est aussi déterministe que la voiture qu'elle suit (à ×4 en replay, jusqu'à 48 pas de caméra par image).
+- Aides de poursuite `camrig.js` (lecture seule ; en l'air, jusqu'à 60 appels de `surfaceAt` par pas pour viser la réception) ; plafonds : 5 sondes `track.ceilingAt` le long de la perche ; inversion de gravité : `CamFlip` (roulis animé 0,45 s) ; animations réduites : secousses et effets de ressenti coupés.
+
+**Qualité** [V] (`quality.js`) : profils Ultra → Ultra Potato, banc d'essai invisible au premier lancement (sur la démo du menu), **réduction automatique en course** sous 42 i/s pendant 5 s (jamais de remontée), `fpsCap` (Ultra Potato : une image sur deux). Ce qui reconstruit : décor masqué ou budget de lumières → `view.rebuild()` ; maillage du terrain → `scenery.setTrack` (lourd : terrain, décor, carte d'environnement, météo) ; daltonisme → à la course suivante ; antialias → rechargement.
+
+**Effets** [V] : particules, traces, traînée, `envFx.js` (flaques, givre, pluie, rafales : visuel et sonore de `sim/env.js`). `Math.random` n'apparaît que dans le visuel (particules, météo, caméra TV, choix du circuit de démonstration), jamais dans le noyau.
+
+**Observations** (défauts constatés, non corrigés)
+- [V] **Verre brisé qui réapparaît** : `setGroupVisible` rend visibles tous les objets du groupe, dalles brisées comprises (`trackMesh.js:228-232`, `:159`) ; et une réduction automatique de qualité en course reconstruit la vue (`quality.js:254`), dalles visibles, sans réappliquer `setBroken` (`race.js:552` ne réagit qu'à un changement de `brokenVer`). La physique, elle, n'a plus de collision : [D] le joueur voit une dalle qu'il traverse.
+- [V] **Solides inclinés** : l'inspecteur propose inclinaison et roulis à toute décoration non-obstacle, solides compris (`inspector/bodies.js:244-248`) ; le rendu les applique, la physique (`solids.js:73 solidEntry`) les ignore ; `addDeco` ne les retire qu'à l'ajout ou à la lecture d'un code : [D] dans l'éditeur, un solide incliné s'affiche incliné mais arrête la voiture comme s'il était droit, jusqu'au prochain essai.
+- [D] La réduction automatique en course déclenche des reconstructions lourdes (terrain, décor) au moment même où les images manquent.
+- [D] Profils Potato : les peintures nacrée, pailletée, givrée, bonbon deviennent presque noires (`quality.js:189-190` utilise l'émissif comme couleur ; intensité 0,12-0,3 dans `carModel.js:98-100`).
+- [D] Le fantôme du record est dessiné environ un pas en avance sur la voiture du joueur (`race/ghosts.js:55` contre `race.js:546`).
+- [V] Fuites mineures : `SpriteMaterial` des étiquettes de nom, `InstancedMesh` d'`EnvFx` et du terrain non libérés explicitement, matières d'origine gardées par `swapMaterials` (impact faible et borné).
+
+---
+
+#### 4.11 Progression et contenus (`js/tracks.js`, `js/career.js`, `js/medals.js`, `js/profile.js`, `js/progression.js`, `js/rewards.js`, `js/app/rewards.js`, `js/daily.js`, `js/mutations.js`, `js/seasons.js`, `js/academy.js`, `js/skills.js`, `js/rules.js`, `js/app/modes.js`)
+
+**Circuits intégrés** [V] : 72 définitions dans `tracks.js` (script « tortue » interprété par `track.js : scriptTrack`, obstacles posés le long de la ligne centrale, médailles, objectif bonus, réglage du pilote automatique), **triées en bas du fichier** (décor selon `CAREER_ORDER`, puis difficulté) : l'index d'un circuit n'est jamais sa position dans le texte. Ils sont tous construits au démarrage (`main.js:93`) avec leur clé `b-<id>-<hash(encode())>`.
+
+**Médailles et déblocages** [V]
+- `medalFor(time, medals)` (`medals.js`) ; cristal ≤ or ≤ argent ≤ bronze.
+- Chapitres de 6 ; un chapitre s'ouvre avec 4 médailles dans le précédent (`career.js:107 chapterUnlocked`), l'Atelier bonus avec le premier.
+- **Le verrou se calcule à partir des records locaux** : `trackDescriptor.js : chapterLock` → `getRecord(b.key)` → `medalTime(rec)` (le meilleur temps toutes physiques confondues, `bt`) → `medalFor`. `profile().medals[trackKey]` (meilleur niveau déjà payé) ne sert qu'aux pièces (`profile.js:83 rewardCoins`).
+- Conséquence vérifiée : **la clé d'un circuit intégré dépend de tout son code** (nom, auteur, décor, script, obstacles, paramètres) et **aucune migration de clé n'existe** pour les circuits intégrés (il en existe une pour les circuits de joueur : `trackDescriptor.js:93`). Modifier un circuit intégré, même son nom, rend invisibles les records de ce circuit (médaille, fantôme, replay), peut **reverrouiller** un chapitre, et vide son classement en ligne (et ses duels ou tournois en cours).
+
+**Récompenses** : pièces ◆ (`rewardCoins` : 120 / 60 / 30 / 15 selon la médaille, doublées pour une nouvelle médaille, réduites sur un circuit de joueur), objectif bonus (`career.js : completeGoal`), expérience et niveaux, licences, défis de maîtrise (`progression.js : awardRace`), titres, exclusifs du garage, collections (`rewards.js`, rassemblés par `app/rewards.js : checkRewards`), séries du défi du jour (`rewards.js : noteRace`). Tout est visuel ou monétaire : rien ne touche à la physique.
+
+**Défi du jour** [V] (`daily.js:63 dailyChallenge`) : graine = date UTC ; jusqu'à 40 tentatives de génération par blocs de jetons, chacune validée par **deux courses du pilote automatique** (`botTime`, physique complète) qui fixent aussi les médailles ; mis en cache par jour. Coût : plusieurs simulations complètes au premier affichage du jour (navigateur) et au rejeu serveur. Mutation du jour et séries : `mutations.js`.
+
+**Saisons** [V] (`seasons.js`) : semaines depuis le 9 novembre 2026 UTC, trois circuits de la carrière tirés du numéro, clé `b-…~v1.sea-N` acceptée par le serveur seulement pendant la semaine (+10 min). Points et divisions calculés en base (`etape11-saisons.sql`) : la date de départ y est **dupliquée**.
+
+**Académie** (`academy.js` : six leçons ; `skills.js` + `analysis/drill.js` : exercices notés, mesurés en rejouant la course) et **modes** (`rules.js` : règles appliquées à une copie du circuit ; `trackKey: null`, donc ni record ni classement) : leurs arrivées sortent de `_finish` avant les records (`race/finish.js:72-80`).
+
+**Impact.** Rééquilibrer des médailles : `tools/medals.mjs`, `tools/golden.mjs`, `tools/test-niveaux.mjs` (contrat des 72 circuits). Modifier un circuit intégré : voir ci-dessus, et l'empreinte de physique, le corpus de compatibilité, la fonction serveur. Changer l'ordre ou le contenu de `BUILTIN_TRACKS` change aussi les circuits des saisons.
+
+## Annexe 11 — Interactions entre systèmes, zones sensibles, conséquences d'une modification
+
+*Source : `docs/comprendre/05-interactions-et-zones-sensibles.md`*
+
+### 5. Interactions entre systèmes, zones sensibles, conséquences d'une modification
+
+Marques : **[V]** vérifié dans le code, **[D]** déduction raisonnable, **[?]** incertain.
+
+#### 5.1 Carte des dépendances
+
+Nature : **directe** (appel), **état partagé** (même objet ou variable de module), **évènement** (sac `phys.ev`, évènements du salon, `writeHook`), **indirecte** (par une clé, une empreinte, un texte).
+
+| Système | Dépend de | Nature | Ce qui circule |
+| --- | --- | --- | --- |
+| `CarPhysics` | `Track` (surfaces, index, obstacles, solides), `pieces.js`, `ribbons.js`, `specs`, `params`, `env`, logique | directe + état partagé (`Track` en lecture seule) | requêtes de sol, de plafond, de rubans, au chrono `phys.clock` |
+| `RaceLogic` | `CarPhysics` (position, `prev`, `grounded`, `rib`, `gSign`, `vehicle`, `gravMul`), `Track` | directe | checkpoints, points de retour |
+| Logique du circuit | `RaceLogic`, `CarPhysics` | état partagé (`phys.excl`, `logic.excluded`, `logic.ext`, `phys.gravMul`) | groupes cachés, gravité, effets |
+| `RaceSession` | `Simulation`, `TrackView`, `Scenery`, `Input`, `Audio`, `UI`, `Particles`, `storage`, `profile` | directe ; **évènement** (lit `phys.ev` à chaque pas) | commandes, effets, HUD, records |
+| Caméra | état de `CarPhysics` (pose, normale, `gSign`, `rib`), `track.ceilingAt`, `surfaceAt` | directe (lecture) | aucune écriture vers la physique |
+| `TrackView` | `Track` (pièces, décorations, groupes), `phys.broken`, état de la logique, `renderOptions` | état partagé (variable de module `renderOptions`) | maillages, visibilité |
+| Fantômes simulés | une seconde `Simulation` sur **le même** `Track` | état partagé en lecture | poses par pas |
+| Records, médailles, déblocages | clés de classement (`b-`, `daily-`, `u-`) | **indirecte** (empreinte du code du circuit) | `rec3.<clé>` |
+| Classements en ligne | `PHYS_VER`, clés, code du circuit, fonction serveur **déployée** | indirecte | course rejouée |
+| Synchronisation du compte | toute écriture locale d'une clé synchronisée | **évènement** (`storage.onWrite`) | sauvegarde fusionnée |
+| Multijoueur | `Room` (Realtime + WebRTC), `RaceSession` | évènements (`room.on('snapshot'…)`) ; **écriture directe** dans `phys` (collisions douces) | positions, temps, départ |
+| Interface traduite | tout texte écrit dans le DOM | **indirecte** (le traducteur observe le document) | textes français → anglais |
+| Hors ligne | liste des fichiers | indirecte (`sw.js` généré) | cache |
+
+#### 5.2 Parcours transverses (vérifiés)
+
+##### Chargement d'un circuit : qui s'initialise, dans quel ordre
+`launchDesc` → `playTrack` (`main.js:201`) : `track.validate` → `_dispose()` (ancienne session) → `mode = 'race'`, `ui.setMode('race')` → `new RaceSession` (`race.js:42`) : aides → **`TrackView`** (tous les tronçons construits d'un coup) → **`scenery.setTrack`** (terrain, décor, ambiance) → **`Simulation`** (`CarPhysics` : `paramsOf`, `envOf`, `specsOf`, `v2Of`, `setBounds`, `place` ; `RaceLogic` ; logique) → `EnvFx` → voiture, traces, fantômes, mini-carte, caméras → `loadRecord` → **`restart()`** (`sim.start`, enregistreur, HUD) → HUD d'entraînement, Theater → puis la musique (`main.js:212`).
+Les caches du circuit (`obstacleGrid`, `solidIndex`, `hasMovers`) sont construits à la première requête, par version du circuit.
+
+##### Retour au checkpoint (touche R, hors-piste, noyade, piques, état incohérent)
+1. Déclencheur : `input.act('respawn')` (`race.js:478`) → `respawn(true)` ; ou automatique après `sim.score()` (`race.js:426-429`) ; en replay, drapeau `respawn` de la commande (`race.js:276`).
+2. `sim.rewind({ keepClock: multi })` → `RaceLogic.rewind` (chrono, temps intermédiaires, checkpoints, tour, **état de la logique** revenus à l'instantané) → `placeAtRespawn` → `phys.place` (vitesse nulle, **verre restauré**, `graceT` 1,5 s, `hazardGrace` 0,8 s, ruban quitté, plaques réarmées), puis véhicule, gravité et sens de gravité du point de retour, `glassSafe`.
+3. **Le chrono revient** (sauf multijoueur) : `phys.clock = logic.steps` au pas suivant → **pièces mobiles et obstacles reviennent à leur position de ce moment-là**.
+4. `RaceSession` : fantôme enregistré tronqué, statistiques ramenées à l'instantané du checkpoint (les réceptions parfaites d'après ne comptent plus pour l'objectif bonus), aides réinitialisées, HUD, orientation et caméra recalées (`_camCut`), traînée et particules effacées ; en multijoueur, compteur de téléportation + 2 s sans collision + envoi immédiat.
+5. Fantômes simulés : rien n'est rejoué, on relit leur historique à l'ancien chrono.
+
+##### Inversion de gravité
+Plaque `flip` touchée → `_setGround` inverse `gSign` (`physics.js:199`) → `_roadContact` projette la voiture vers le nouveau « bas » (`flipKick`) ; ou ruban qui retourne la voiture (`ribbon.js:257`). Ensuite : sol cherché par `ceilingSurfaceAt` (pièces à l'envers seulement) ; volant inversé par rapport au monde (`_upSign`) ; voiture perdue au-dessus de `skyY` ; `ev.flip` → message et secousse (`race.js:412`) ; caméra : roulis animé `CamFlip` ; orientation visuelle (`_orient`) ; le point de retour du checkpoint suivant garde le sens (`respawnGs`).
+
+##### Checkpoint
+`RaceLogic.update` → nouveau point de retour + instantané → évènement `checkpoint` → `Simulation.score` : règles de la logique sur l'évènement `cp`, puis instantané de la logique **après** elles (`simulation.js:84`) → `RaceSession._event` (`race/finish.js:16`) : instantané des statistiques, écart avec le record (`record.splits`), HUD, son, particules.
+
+##### Collisions et mouvement
+Bordures, solides, plaques à bordure et parois de rubans passent par **une seule règle** (`physics/contact.js`) : choc inélastique, frottement de Coulomb proportionnel à la vitesse d'approche. Effets secondaires : `ev.wall` → le pas suivant, `_driftState` casse la glisse et **annule le mini-turbo en charge** (`wallT`) ; `stunT` (encaissement) réduit adhérence et traction ; voiture plaquée à l'arrêt → `unstick` la fait pivoter. Un obstacle qui pousse la voiture déclenche une **seconde passe** des bordures (`physics.js:634`).
+
+##### Obstacles mobiles et moteur physique
+Position = fonction du chrono seul (`obstacleLocal(d, phys.clock × DT)`), donc identique au rejeu et au serveur ; le rendu les place au chrono interpolé (`race.js:546`, à un pas près) ; après l'arrivée, l'horloge continue (`Simulation.idle`) ; au retour au checkpoint, elle recule (voir plus haut). Une voiture sur un ruban subit aussi les obstacles (`ribbon.js : _ribObstacles`).
+
+##### Changement d'état → contrôles et animations
+- Plaque de transformation → `phys.vehicle` → **`this.k`** (réglages du véhicule) change au pas suivant ; `ev.transform` → `car.setVehicle(veh)` (animation), son, message ; le fantôme enregistré mémorise le changement (`ghostVeh`).
+- Arrivée → `_input` renvoie « frein » (`race.js:281`), moteur coupé, plus d'enregistrement, la physique continue.
+- Pause → aucun pas, moteur coupé, rendu figé (particules, traces, flammes) ; le shader de l'eau tourne encore (horloge murale).
+- Démo du menu → mêmes boucles qu'une course, pilotées par `Autopilot`, sans HUD ni messages.
+
+##### Essai depuis l'éditeur, vérification, publication
+Voir `04-systemes.md` § 4.9 : état mis de côté → circuit re-décodé → course (`e-<hash>`) → `onEditorTestFinished` → `setVerified` + preuve → publication (le serveur rejoue la preuve) → retour à l'éditeur (`quitRace` → `openEditor`).
+
+##### Envoi d'un temps
+Voir `03-course.md` § 3.4 et `04-systemes.md` § 4.8.
+
+#### 5.3 Ce qui tourne alors qu'on pourrait le croire arrêté
+
+| Quoi | Pourquoi | Statut |
+| --- | --- | --- |
+| Course de démonstration dans tous les menus (physique, pilote automatique, audio du moteur, rendu) | `showMenu` crée toujours une `RaceSession({ demo: true })` | [V] voulu ; la boucle de rendu est plafonnée à 30 i/s, pas la physique |
+| Fantôme or | simulé en direct **dans le rendu** (`poseAt` → `seek`), un grand saut dans le temps fait de nombreux pas d'un coup | [V] |
+| Physique après l'arrivée | la voiture roule encore, horloge des obstacles comprise | [V] voulu |
+| `AudioEngine` (séquenceur 25 ms), surveillance des animations réduites (2 s), vérification de mise à jour (30 min), files de télémétrie | minuteries globales de l'application | [V] voulu |
+| Minuterie `_studioT` du garage | non annulée par `GarageSession.dispose` | [V] défaut mineur |
+| Écouteurs du salon multijoueur (`multiLobby`) | retirés seulement par ses boutons | [V] |
+| Reconnexion à la signalisation qui expire | sa WebSocket n'est pas fermée | [D] |
+| Capture de touche en attente | survit à un changement d'écran | [V] |
+| Écouteurs globaux (fenêtre, document, `Input`, i18n) | jamais retirés | [V] sans conséquence : `App` est unique |
+
+#### 5.4 Zones sensibles (par ordre de risque)
+
+1. **Le noyau déterministe** (fermeture de `verify.js`, 42 fichiers, `02-simulation.md` § 2.1). Toute modification change potentiellement temps, replays, fantômes, empreinte, défis du jour passés, et exige un redéploiement manuel de la fonction serveur. Règles de calcul imposées (`dmath`).
+2. **Les deux chemins de pas** : `GhostRunner.step` / `Simulation.step` d'un côté, `RaceSession._stepOnce` de l'autre (décision de réapparition refaite à la main). Non couverts par un test de bout en bout commun [V].
+3. **Les clés de classement et ce qui en dépend** : `b-<hash(encode())>` (nom, auteur `'Copytrack'`, décor, script…), `u-<signature>` (décor compris), `daily-<date>` (circuit régénéré, sans empreinte). Elles portent les records locaux, donc **les médailles et le déverrouillage de la carrière**, les classements, les saisons, les duels. Aucune migration pour les circuits intégrés [V].
+4. **Les registres de sérialisation qui n'acceptent que des ajouts en fin** : `PIECE_ORDER`, `SURFACE_CODES`, `DECO_ORDER`, `TILE_FIELDS`, `RULES` (ordre de la signature et du code) [V] — réordonner casse tous les codes partagés (`tools/test-registres.mjs`, corpus de compatibilité).
+5. **`Track.normalize` / `flagAllowed` / `OPTION_CONFLICTS` / `Track.range` / `cellsOf`** : partagés par l'éditeur, la lecture des codes et le serveur. Un changement modifie ce qu'un code relu contient (`track.lost`).
+6. **État de module partagé** [V] : `storage.js : PREFIX` (portée invité / compte), cache `profile()`, `renderOptions`, `rollFitHook` (`pieces.js:444`, rempli par un effet de bord de l'import de `ribbons.js`), tampons de calcul de module (`ribbons.js`, `track/surfaces.js`, `race/shared.js : tmpV, tmpV2, tmpM`, `physics/*`), réutilisés à chaque appel : une fonction qui garde une référence à l'un d'eux d'un appel à l'autre lit une valeur écrasée.
+7. **`App` et ses ~40 drapeaux `this._xxx`**, navigation lue en partie dans les classes CSS du DOM, identifiants DOM en dur dans de nombreux fichiers.
+8. **Logique dupliquée entre le jeu et la base SQL** (`04-systemes.md` § 4.8) et entre fichiers (deux recherches d'extrémités : `editorTools.endpoints` et `connect.js` ; plage de niveaux approchée dans `trackMesh.js`).
+9. **Familles de méthodes** : un nom de méthode peut être défini dans n'importe quel fichier du dossier (contrôle anti-doublon : `tools/test-contrats.mjs`).
+10. **Traducteur DOM** : agit sur tout le document, contenus des joueurs compris.
+
+#### 5.5 Si tu modifies… regarde aussi
+
+| Modification | À vérifier / refaire |
+| --- | --- |
+| Physique (`physics*`, `pieces.js`, `ribbons.js`, `solids.js`, `obstacles.js`, `sim/*`, `raceLogic.js`, `simulation.js`) | incrémenter `PHYS_VER` ; `node tools/phys-fingerprint.mjs --update`, `node tools/golden.mjs`, `node tools/medals.mjs --check`, `node tools/compat-gen.mjs --update` ; `npm run build:function`, `npm run sw`, `npm test` ; **redéployer `submit-score`** ; `node tools/check-deployed.mjs` (procédure : `docs/ARCHITECTURE.md`) |
+| Un circuit intégré (`tracks.js`) | sa clé `b-` change : records locaux, médailles, verrous de chapitre, classement, saisons, duels ; empreinte, temps de référence, contrat (`tools/test-niveaux.mjs`), fonction serveur |
+| `Track.encode`, `signatureText`, `hashString` | toutes les clés `b-` et `u-`, `track_binds` côté serveur, corpus de compatibilité, vérification des circuits publiés (`vh`) |
+| Le générateur du défi du jour | circuits des jours passés sous la même clé ; empreinte ; serveur |
+| Une nouvelle pièce | ajouter **à la fin** de `PIECE_ORDER` ; `PIECES` (géométrie analytique), `trackGeometry.js` (maillage), familles et palette, `flagAllowed`, `Track.range`, `spill.js`, `connect.js`, matrice (`tools/matrice-pieces.mjs --update`), textes et traductions, `tools/audit-pieces.mjs`, empreinte |
+| Un nouveau revêtement | **à la fin** de `SURFACE_CODES` ; `SURFACES`, `surfaceCoeffs`, `_setGround` et `_ribStep`, couleurs du maillage, `surfaceAllowed`, traductions |
+| Une nouvelle décoration / un obstacle / un solide | **à la fin** de `DECO_ORDER` ; obstacle ou solide = physique (signature, empreinte, serveur) ; simple décoration = rendu seulement |
+| `RaceSession._stepOnce` ou `GhostRunner.step` | faire la même chose dans l'autre ; rejouer une vraie course enregistrée et comparer le temps |
+| Une donnée de progression ou une clé de stockage | règle de fusion dans `cloudsave.js`, liste `DEVICE_ONLY_KEYS`, export des données (`dataExport.js`), quota |
+| Un texte affiché | sa traduction dans `js/i18n/en/<domaine>.js` (`tools/test-i18n.mjs`) |
+| Un fichier `.js` ajouté ou renommé | commentaire de tête, `npm run docs`, `npm run sw` ; un nouveau dossier doit être cité dans `docs/ARCHITECTURE.md` (`tools/check-docs.mjs`) |
+| Un `id` ou un `data-action` d'`index.html` | recherche dans tout `js/` ; `tools/test-menu.mjs`, `tools/test-browser.mjs` (qui pilote `window.copytrack`) |
+| Une règle partagée avec la base (saisons, duels, variantes, titres, pseudos, limites) | l'étape SQL correspondante, à appliquer à la main (`supabase/MIGRATIONS.md`) |
+| Le protocole multijoueur | `NET_VER`, `SNAP_VERSION`, `supabase/MULTI.md`, `tools/test-net.mjs` |
+
+#### 5.6 Défauts et fragilités constatés (aucun n'a été corrigé)
+
+Classés par effet sur le joueur. Détail et références dans les fiches.
+
+| # | Constat | Statut | Fiche |
+| --- | --- | --- | --- |
+| 1 | Classement mondial : les requêtes demandent `ghost_veh`, jamais accordée en lecture dans les étapes SQL du dépôt ; repli sans fantômes ni titres | [V] code et SQL du dépôt ; [?] production | 4.8 |
+| 2 | Éditeur : la pose calcule les conflits avant normalisation et peut supprimer des pièces voisines quand une option armée est ignorée | [V] mécanisme | 4.9 |
+| 3 | Éditeur : retour d'essai qui perd historique, presse-papiers et calques dès qu'une décoration a des coordonnées non arrondies | [V] mécanisme | 4.9 |
+| 4 | Verre brisé de nouveau visible (logique « montrer », réduction de qualité en course) alors qu'il n'a plus de collision | [V] mécanisme | 4.10 |
+| 5 | Modifier un circuit intégré efface en pratique la progression du joueur sur ce circuit (clé changée, aucune migration) | [V] | 4.11 |
+| 6 | Records d'essai `e-…` jamais purgés, synchronisés avec le compte | [V] | 4.9 |
+| 7 | Multijoueur : `started` jamais remis à faux (relance d'un invité resté au salon), arrivants en cours de course invisibles, jeton de reconnexion jamais comparé, impulsion de collision jusqu'à 8 m/s en un pas | [V] | 4.6 |
+| 8 | Solides inclinés à l'affichage, droits pour la physique (dans l'éditeur) | [V] mécanisme | 4.10 |
+| 9 | « Prolonger » peut poser un second départ | [V] | 4.9 |
+| 10 | Traducteur anglais appliqué aux contenus des joueurs | [V] mécanisme | 4.4 |
+| 11 | Boutons tactiles liés en dur à `KeyR`, `Escape`, `Enter` | [V] | 4.2 |
+| 12 | Minuterie du garage non annulée, écouteurs du salon non retirés | [V] | 4.5, 4.6 |
+| 13 | Déconnexion d'un compte : la session anonyme de l'invité est oubliée (ses publications restent sur un identifiant abandonné) | [V] / [D] | 4.7 |
+
+#### 5.7 Écarts entre la documentation existante et le code
+
+| Document | Affirmation | Code actuel |
+| --- | --- | --- |
+| `docs/ARCHITECTURE.md` (« Physique : règles communes ») | sur les routes roulées et les loopings, la route guide le cap (`headingGuided`) | retiré depuis `PHYS_VER` 37 (`pieces.js:435`, `physics/ribbon.js:276`) : il faut braquer |
+| `docs/ARCHITECTURE.md` | 182 scénarios (« Déterminisme ») et 161 (« Limites connues ») | 193 dans `tools/phys-fingerprint.json` |
+| `docs/ARCHITECTURE.md` (« Limites connues ») | Firefox et Safari pas essayés ; STUN seulement | tâche CI `moteurs` (Firefox, WebKit) ; fonction `ice` qui fournit un relais TURN |
+| `docs/ARCHITECTURE.md` (« Données et formats ») | la signature ignore le thème | le **décor** (`this.decor`) est en tête de `signatureText` ; seul le thème de pièce `th` est ignoré |
+| `docs/ARCHITECTURE.md` (« Serveur ») | tables dans `etape1…5` | 19 étapes |
+| `docs/ARCHITECTURE.md` | records sous `shardway.rec3.*` | vrai pour l'invité ; compte : `shardwayacct.<uid>.rec3.*` |
+| `js/verify.js` (en-tête) et donc `docs/MODULES.md` | la fonction serveur « le charge depuis le site du jeu » | elle l'embarque (`tools/build-function.mjs`) |
+| `js/joins.js` (en-tête) | utilisé par l'éditeur | importé seulement par des tests et outils |
+| `supabase/MULTI.md` | collisions plafonnées à ~4 g ; deux modes de salon | seule la poussée de pénétration est plafonnée ; trois modes (course, championnat, libre) |
+| `supabase/COMPTES.md` (fin) | le temps de l'auteur est « vérifié par le jeu à la publication mais pas rejoué par la base » | la fonction serveur le rejoue avant d'appeler `publish_track` (`verify.js : verifyPublish`) |
