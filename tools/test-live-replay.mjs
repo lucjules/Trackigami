@@ -68,6 +68,11 @@ async function boot() {
     const { profile, saveProfile } = await import('/js/profile.js');
     profile().eggs = { ...(profile().eggs || {}), unlockAll: true }; saveProfile();       // (tous les chapitres jouables : « Laminoir » est au chapitre suivant)
   });
+  // La fenêtre de bienvenue est programmée 700 ms après le démarrage (main.js : start) quand le tutoriel n'était pas fait À CE MOMENT-LÀ : poser tutorialDone
+  // ensuite ne l'annule pas. Elle s'ouvrait donc pendant la première course, qui passait en pause (une fenêtre ouverte met la course en pause, TECH-017) :
+  // on l'attend (3 s au plus), puis on la ferme.
+  await page.waitForFunction(() => window.copytrack.ui.modalOpen, null, { timeout: 3000, polling: 50 }).catch(() => {});
+  await page.evaluate(() => window.copytrack.ui.closeModal());
 }
 
 // Lance un circuit et prend la main : la session n'avance plus que par nos appels (« tenue »), avec le pilote automatique bruité comme source des commandes.
