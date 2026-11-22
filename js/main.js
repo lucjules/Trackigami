@@ -579,6 +579,7 @@ const NO_WEBGL = 'Ce navigateur n’a pas pu démarrer la 3D (WebGL 2). Active l
     const app = new App(identity);
     window.copytrack = app;      // accès de débogage et des tests navigateur (tools/test-browser.mjs)
     app.start();
+    account.onNotice = (msg) => app.ui.flash(msg, 6);      // l'espace de l'appareil ne suffit pas à la sauvegarde du compte (TECH-007) : le joueur le sait
     if (identity.kind === 'account') account.sync().catch(() => { /* hors ligne : reprise plus tard */ });
   } catch (err) {
     console.error(err);

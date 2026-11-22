@@ -221,9 +221,11 @@ export const profileMethods = {
         <button class="btn" data-a="sync">Synchroniser maintenant</button>
         <button class="btn" data-a="out">Se déconnecter</button>
         <button class="btn danger" data-a="del">Supprimer le compte</button>
-      </div>`;
-    const st = box.querySelector('#acct-st');
-    const paint = () => { st.textContent = label(); };
+      </div>
+      <div class="meta" id="acct-note"></div>`;
+    const st = box.querySelector('#acct-st'), note = box.querySelector('#acct-note');
+    // (la note : copie locale allégée faute de place, TECH-007 ; en erreur, le message d'erreur dit déjà tout)
+    const paint = () => { st.textContent = label(); note.textContent = account.status === 'ok' ? account.note : ''; };
     paint();
     box.querySelector('[data-a="sync"]').onclick = () => {
       paint(); st.textContent = 'synchronisation…';

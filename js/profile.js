@@ -21,6 +21,7 @@ const DEFAULT = () => ({
 });
 
 let cache = null;
+let quietLoad = false;       // true pendant reloadProfile : la remise en forme du profil relu n'est pas une modification du joueur (elle ne relance pas la synchronisation)
 export function profile() {
   if (!cache) {
     const raw = getJSON('profile', {});
@@ -30,7 +31,7 @@ export function profile() {
     cache.medals = cache.medals && typeof cache.medals === 'object' ? cache.medals : {};
     cache.stats = { races: 0, earned: 0, ...(cache.stats || {}) };
     if (!cache.id) cache.id = newPlayerId();
-    setJSON('profile', cache);
+    setJSON('profile', cache, { quiet: quietLoad });
   }
   return cache;
 }
@@ -39,9 +40,12 @@ export function saveProfile() {
   if (cache) setJSON('profile', cache);
 }
 
+// Relit le profil depuis le stockage (après une restauration, une synchronisation, un changement de compte). Ne déclenche JAMAIS de synchronisation : elle écrit le profil remis en forme
+// sans prévenir le compte (TECH-007 : avant, chaque synchronisation réécrivait le profil, donc en relançait une 4 s plus tard, sans fin quand la restauration échouait).
 export function reloadProfile() {
   cache = null;
-  return profile();
+  quietLoad = true;
+  try { return profile(); } finally { quietLoad = false; }
 }
 
 export const owns = (cat, id) => (itemCost(cat, id) === 0 && !exclusiveOf(cat, id)) || !!profile().owned[cat + ':' + id];

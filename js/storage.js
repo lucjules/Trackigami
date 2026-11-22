@@ -49,10 +49,10 @@ function read(key, fallback) {
 // refabrique pas (un circuit qu'on enregistre) s'en servent pour le dire au joueur au lieu d'annoncer un succès.
 let lastWriteOk = true;
 export const wroteOk = () => lastWriteOk;
-function write(key, value) {
+function write(key, value, quiet = false) {
   try {
     localStorage.setItem(PREFIX + key, JSON.stringify(value));
-    if (writeHook) writeHook(key);
+    if (writeHook && !quiet) writeHook(key);
     lastWriteOk = true;
     return true;
   } catch {
@@ -79,7 +79,8 @@ function listPrefixedKeys() {
 
 // Accès bruts (profil, sauvegarde complète).
 export function getJSON(key, fallback) { return read(key, fallback); }
-export function setJSON(key, value) { return write(key, value); }
+// quiet : écriture qui NE relance PAS la synchronisation du compte (le profil relu après une synchronisation : sinon chaque synchronisation en rappelait une autre, TECH-007).
+export function setJSON(key, value, { quiet = false } = {}) { return write(key, value, quiet); }
 
 // Clés qui n'appartiennent qu'à CET appareil et ne doivent JAMAIS voyager dans un code joueur, une sauvegarde partagée ou une restauration : la session en ligne
 // de l'invité (jeton d'accès et de renouvellement = son identité en ligne : classements, circuits publiés) et son profil en ligne. Un code joueur se copie, se
@@ -137,6 +138,68 @@ export function restoreAll(data, keep = false) {
     }
     return false;
   }
+}
+
+// Restauration qui s'ADAPTE au quota (TECH-007) : comme restoreAll(data, true), mais si tout ne tient pas, on écrit une version ALLÉGÉE plutôt que rien (et on le dit à l'appelant).
+// Ordre de la politique, du moins coûteux au plus coûteux ; chaque étape est atomique (restoreAll) et la plus légère qui tient est gardée (recherche dichotomique) :
+//   0. les essais de l'éditeur (jetables) sont retirés, puis tout est écrit tel quel ('full') ;
+//   1. sans fantômes, des plus anciens records aux plus récents, uniquement ceux qui GROSSISSENT ce qui est déjà sur l'appareil ('noGhost') ;
+//   2. puis sans leurs commandes, des plus anciens aux plus récents ('noInputs') ;
+//   3. puis, seuls le profil, les circuits et les records de l'appareil comptent : les records absents d'ici ne sont écrits que dans la limite de la place, les plus récents d'abord ('partial') ;
+//   4. si même le profil et les circuits ne tiennent pas : rien n'est écrit ('failed'), l'appareil est exactement comme avant.
+// Le cloud, lui, garde tout : seule la copie locale est allégée. Renvoie { ok, level, lightened (records sans fantôme ni commandes), dropped (records non écrits ici) }.
+const CORE_KEYS = ['profile', 'tracks', 'tracksDel', 'recReset'];
+export function restoreFitting(data) {
+  const res = (level, lightened = 0, dropped = 0) => ({ ok: level !== 'failed', level, lightened, dropped });
+  if (restoreAll(data, true)) return res('full');
+  if (purgeEditorTrials() && restoreAll(data, true)) return res('full');
+  const cur = (k) => { try { return localStorage.getItem(PREFIX + k); } catch { return null; } };
+  const changed = Object.entries(data || {}).filter(([k, v]) => typeof v === 'string' && v !== cur(k));
+  const parsed = new Map();         // clé de record -> { obj, grows, isNew }
+  for (const [k, v] of changed) {
+    if (!k.startsWith(REC)) continue;
+    let obj = null; try { obj = JSON.parse(v); } catch { /* abîmé : écrit tel quel */ }
+    const old = cur(k);
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) parsed.set(k, { obj, grows: v.length > (old ? old.length : 0), isNew: old == null });
+  }
+  const byDate = (a, b) => (parsed.get(a).obj.date || 0) - (parsed.get(b).obj.date || 0);
+  const growing = [...parsed.keys()].filter((k) => parsed.get(k).grows).sort(byDate);      // (seuls les records qui grossissent la copie locale ont besoin d'être allégés)
+  const gList = growing.filter((k) => parsed.get(k).obj.ghost), iList = growing.filter((k) => parsed.get(k).obj.inputs);
+  const build = (ghostN, inputsN, skip = new Set()) => {
+    const out = {};
+    const noGhost = new Set(gList.slice(0, ghostN)), noInputs = new Set(iList.slice(0, inputsN));
+    for (const [k, v] of changed) {
+      if (skip.has(k)) continue;
+      out[k] = !noGhost.has(k) && !noInputs.has(k) ? v : JSON.stringify({ ...parsed.get(k).obj, ...(noGhost.has(k) ? { ghost: null } : {}), ...(noInputs.has(k) ? { inputs: null } : {}) });
+    }
+    return out;
+  };
+  // Cherche le plus petit k de [1, n] pour lequel make(k) tient (make(n) d'abord ; make(k) écrit à chaque succès, ce qui reste sur le disque est toujours le dernier succès).
+  const smallest = (n, make) => {
+    if (n < 1 || !restoreAll(make(n), true)) return 0;
+    let lo = 0, hi = n;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (restoreAll(make(mid), true)) hi = mid; else lo = mid; }
+    return hi;
+  };
+  const gN = gList.length, iN = iList.length;
+  let k = smallest(gN, (g) => build(g, 0));
+  if (k) return res('noGhost', k);
+  k = smallest(iN, (i) => build(gN, i));
+  if (k) return res('noInputs', new Set([...gList, ...iList.slice(0, k)]).size);
+  // 3. Seuls le cœur (profil, circuits…) et les records déjà présents ici (allégés) sont sûrs ; les records nouveaux, du plus récent au plus ancien, dans la limite de la place.
+  const fresh = [...parsed.keys()].filter((x) => parsed.get(x).isNew).sort((a, b) => byDate(b, a));
+  const partial = (m) => { const skip = new Set(fresh.slice(m)); for (const [x] of changed) if (!CORE_KEYS.includes(x) && !x.startsWith(REC)) skip.add(x); return build(gN, iN, skip); };
+  const m = smallestDown(fresh.length, (j) => restoreAll(partial(j), true));
+  if (m >= 0) return res('partial', new Set([...gList, ...iList]).size, fresh.length - m);
+  return res('failed');
+}
+// Plus grand m de [0, n] pour lequel ok(m) réussit (le dernier succès reste écrit) ; -1 si même ok(0) échoue.
+function smallestDown(n, ok) {
+  if (ok(n)) return n;
+  if (!ok(0)) return -1;
+  let lo = 0, hi = n;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (ok(mid)) lo = mid; else hi = mid; }
+  return lo;
 }
 
 export const DEFAULT_SETTINGS = {

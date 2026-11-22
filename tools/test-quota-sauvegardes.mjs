@@ -75,6 +75,88 @@ async function newCloudAccount(name, data) {
   return uid;
 }
 
+console.log('TECH-007 : synchronisation sous quota insuffisant');
+await test('cloud de 120 records + 777 ◆, quota de 600 Ko : la progression s\'affiche (version allégée), le dit, et ne relance rien (une seule lecture complète en 15 s virtuelles)', async () => {
+  await newCloudAccount('Quo_01', bigCloud());
+  const d = boot('Q');
+  setQuota(d, 600_000);
+  srv.calls.length = 0;
+  const r = await account.signIn('Quo_01', 'motdepasse1');
+  assert.equal(r.kind, 'account');
+  await advance(15_000);
+  assert.equal(profile().coins, 777, 'les 777 ◆ du compte s\'affichent');
+  const n = Object.keys(storage.dumpAll()).filter((k) => k.startsWith('rec3.')).length;
+  assert.equal(n, 120, '120 records affichés');
+  assert.equal(storage.getRecord('b-t5-x').time, 20.5);
+  assert.ok(usedOf(d) <= 600_000);
+  assert.equal(account.status, 'ok');
+  assert.ok(account.note && /allégée|alleg/i.test(account.note), 'la version allégée est dite : ' + account.note);
+  assert.equal(gets(), 1, 'une seule lecture complète du cloud sur 15 s virtuelles (avant : une toutes les ~4 s)');
+  assert.equal(timers.size, 0, 'aucune synchronisation en attente');
+});
+await test('quota si petit que même le profil ne tient pas : statut « erreur » visible avec message, aucune relance automatique, une seule lecture complète, rien écrit à moitié', async () => {
+  await newCloudAccount('Quo_02', bigCloud());
+  const d = boot('Q3');
+  // Plus de place du tout pour la progression du compte : toute valeur de plus de 60 caractères refusée dans sa portée (le profil de 777 ◆, un circuit, même un record allégé).
+  const real = d.local.setItem.bind(d.local);
+  d.local.setItem = (k, v) => { if (k.startsWith('shardwayacct.') && String(v).length > 60) throw new Error('QuotaExceededError'); real(k, v); };
+  const notices = [];
+  account.onNotice = (m) => notices.push(m);
+  srv.calls.length = 0;
+  await account.signIn('Quo_02', 'motdepasse1').catch(() => {});
+  await advance(15_000);
+  account.onNotice = null;
+  assert.equal(account.status, 'error', 'état « erreur » (avant : « ok », « à jour »)');
+  assert.ok(/espace insuffisant/i.test(account.lastError), 'message : ' + account.lastError);
+  assert.equal(notices.length, 1, 'le joueur est prévenu, une seule fois');
+  assert.equal(gets(), 1, 'aucune lecture répétée');
+  assert.equal(timers.size, 0, 'aucune synchronisation en attente');
+  assert.ok(![...d.local.m.keys()].some((k) => k.includes('rec3.')), 'aucun record écrit à moitié');
+  assert.notEqual(profile().coins, 777, 'le profil du cloud n\'a pas été écrit');
+  // « Synchroniser maintenant » après avoir libéré de la place : la progression arrive.
+  d.local.setItem = real;
+  await account.sync();
+  assert.equal(account.status, 'ok'); assert.equal(profile().coins, 777); assert.equal(account.note, '');
+});
+await test('la progression du compte ne se perd pas dans le cloud : une copie locale allégée ne réécrit JAMAIS le cloud avec moins (fantômes et commandes du cloud intacts)', async () => {
+  const data = bigCloud();
+  const uid = await newCloudAccount('Quo_03', data);
+  const d = boot('Q4');
+  setQuota(d, 600_000);
+  await account.signIn('Quo_03', 'motdepasse1');
+  assert.equal(account.status, 'ok'); assert.ok(account.note);
+  storage.saveRecord('b-nouveau', rec(5, 5000));      // une vraie partie : le prochain envoi part
+  await account.sync();
+  const cloud = srv.saves.get(uid).data;
+  assert.equal(Object.keys(cloud).filter((k) => k.startsWith('rec3.')).length, 121);
+  assert.equal(cloud['rec3.b-t7-x'].ghost.length, 6000, 'le fantôme du cloud est intact');
+  assert.equal(cloud['rec3.b-t7-x'].inputs.length, 2500, 'les commandes du cloud sont intactes');
+  assert.equal(cloud['rec3.b-nouveau'].time, 5);
+});
+await test('plusieurs niveaux d\'allègement : sans fantômes d\'abord ; si cela ne suffit pas, sans commandes des plus anciens ; puis records absents d\'ici (les plus récents d\'abord) ; le profil et les circuits passent avant tout', async () => {
+  const mk = (n) => { const x = bigCloud(); for (const k of Object.keys(x)) if (k.startsWith('rec3.')) x[k] = rec(20 + +k.split('-t')[1].split('-')[0] * 0.1, 1000 + +k.split('-t')[1].split('-')[0], { ghost: 'g'.repeat(6000), inputs: 'i'.repeat(n) }); x.tracks = [{ id: 'c1', name: 'C', code: 'SHW3:abc', updated: 5 }]; return x; };
+  const levels = [];
+  for (const quota of [500_000, 100_000, 10_000]) {
+    await newCloudAccount('Quo_L' + quota, mk(2500));
+    const d = boot('QL' + quota);
+    setQuota(d, quota);
+    await account.signIn('Quo_L' + quota, 'motdepasse1');
+    assert.equal(account.status, 'ok', quota + ' : ' + account.lastError);
+    assert.equal(profile().coins, 777, quota + ' : le profil est là');
+    assert.equal(storage.listMyTracks().length, 1, quota + ' : le circuit est là');
+    assert.ok(usedOf(d) <= quota);
+    levels.push([...d.local.m.keys()].filter((k) => k.includes('rec3.')).length + ':' + (account.note.match(/\d+/) || [''])[0]);
+    const best = storage.getRecord('b-t0-x');
+    if (best) assert.equal(best.time, 20, quota + ' : les temps affichés sont exacts');
+  }
+  assert.equal(levels[0].split(':')[0], '120', 'quota large : les 120 records, allégés');
+  assert.ok(+levels[2].split(':')[0] < 120, 'quota étroit : seuls les plus récents tiennent : ' + levels.join(' | '));
+  const d3 = device('QL10000');
+  assert.ok(d3.local.m.has(`shardwayacct.${account.uid}.rec3.b-t119-x`), 'le plus récent est gardé');
+  assert.ok(!d3.local.m.has(`shardwayacct.${account.uid}.rec3.b-t0-x`), 'le plus ancien est le premier à ne pas tenir (le cloud le garde)');
+  assert.ok(/n’y sont pas écrits/.test(account.note), account.note);
+});
+
 console.log('TECH-078 : clés propres à l\'appareil');
 const { exportCode, parseCode, applySave } = await import('../js/profile.js');
 const { buildExport, readableLocal } = await import('../js/dataExport.js');

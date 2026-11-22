@@ -9,7 +9,7 @@
 // au lieu d'écraser : aucune progression perdue si deux appareils ont joué.
 import { online, OnlineError } from './online.js';
 import {
-  getGlobal, setGlobal, setScope, getSessionFlag, setSessionFlag, dumpAll, restoreAll, onWrite, loadSettings, saveSettings, removeKeys,
+  getGlobal, setGlobal, setScope, getSessionFlag, setSessionFlag, dumpAll, restoreAll, restoreFitting, onWrite, loadSettings, saveSettings, removeKeys,
 } from './storage.js';
 import { toCloud, fromCloud, mergeSaves, sameData, pickSynced, withoutGhosts, isSyncKey } from './cloudsave.js';
 import { reloadProfile } from './profile.js';
@@ -18,6 +18,12 @@ import { reloadProfile } from './profile.js';
 const ACCOUNT_EMAIL_DOMAIN = 'accounts.copytrack.invalid';
 const FORBIDDEN_NAMES = ['player', 'pilote'];
 const MAX_CLOUD_BYTES = 6_000_000;     // au-delà, les fantômes enregistrés ne partent pas dans le cloud
+
+// Messages quand la copie locale du compte ne tient pas dans le stockage de l'appareil (le cloud, lui, garde tout).
+const FIT_FAILED = 'Espace insuffisant sur cet appareil : la sauvegarde du compte n’a pas pu y être écrite (le cloud la garde). Libère de la place sur l’appareil, puis « Synchroniser maintenant ».';
+const fitNote = (fit) => (fit.level === 'partial'
+  ? `Espace insuffisant sur cet appareil : ${fit.dropped} records du compte n’y sont pas écrits (le cloud les garde en entier).`
+  : `Espace insuffisant sur cet appareil : copie du compte allégée (${fit.lightened} records sans fantôme ni commandes ; le cloud les garde en entier).`);
 
 export const accountEmail = (name) => String(name).trim().toLowerCase() + '@' + ACCOUNT_EMAIL_DOMAIN;
 
@@ -49,6 +55,10 @@ class Account {
     this.status = 'idle';         // idle | syncing | ok | offline | error
     this.lastSync = 0;
     this.lastError = '';
+    this.note = '';               // information (pas une erreur) sur la dernière synchronisation : copie locale allégée faute de place (TECH-007)
+    this.onNotice = null;         // (message) => … : l'application le montre au joueur quand une synchronisation touche à l'espace de l'appareil
+    this._lastNotice = '';
+    this._storageFull = false;
     this._timer = null;
     this._running = null;
     this._dirty = false;
@@ -225,39 +235,60 @@ class Account {
     this._running = this._doSync()
       .then((r) => { this.status = 'ok'; this.lastSync = Date.now(); this.lastError = ''; this._dirty = false; return r; })
       .catch((e) => { this.status = e.code === 'offline' ? 'offline' : 'error'; this.lastError = e.message; throw e; })
-      .finally(() => { this._running = null; });
+      .finally(() => { this._running = null; this._notify(); });
     return this._running;
+  }
+
+  // Ce qui touche à l'ESPACE de l'appareil se dit au joueur, une fois par message (le bloc « compte » du profil l'affiche en permanence).
+  _notify() {
+    const msg = this.status === 'error' && this._storageFull ? this.lastError : this.status === 'ok' ? this.note : '';
+    if (!msg) { this._lastNotice = ''; return; }
+    if (msg === this._lastNotice) return;
+    this._lastNotice = msg;
+    if (this.onNotice) { try { this.onNotice(msg); } catch { /* l'affichage ne doit jamais casser la synchronisation */ } }
   }
 
   async _doSync() {
     const uid = this.state.uid;
+    this._storageFull = false;
     for (let attempt = 0; attempt < 4; attempt++) {
       const rows = await online.rest(`/rest/v1/cloud_saves?select=data,rev&user_id=eq.${encodeURIComponent(uid)}`);
       const row = rows && rows[0];
       const local = toCloud(dumpAll());
       const merged = row ? mergeSaves(local, row.data) : local;
-      // Le résultat fusionné devient aussi la version locale (sans déclencher de nouvelle synchronisation).
+      // Le résultat fusionné devient aussi la version locale (sans déclencher de nouvelle synchronisation). Si l'appareil n'a pas la place (TECH-007), on écrit une version ALLÉGÉE
+      // (storage.restoreFitting : sans fantômes, puis sans commandes…) ; si même cela ne tient pas, rien n'est écrit, la synchronisation finit en ERREUR visible, jamais en « à jour ».
+      let fit = null;
       if (!sameData(merged, local)) {
-        restoreAll(fromCloud(merged), true);
         // Ce que la fusion a ÉCARTÉ doit aussi quitter cet appareil : les records d'avant un « Effacer les records » fait ailleurs. Avant 0.9.59 ils restaient sur le
-        // disque (restoreAll ajoute et remplace, ne retire rien) : effacés sur un appareil, toujours affichés sur l'autre, pour toujours.
+        // disque (restoreAll ajoute et remplace, ne retire rien) : effacés sur un appareil, toujours affichés sur l'autre, pour toujours. (Avant l'écriture : cela libère de la place.)
         const dropped = Object.keys(local).filter((k) => !(k in merged));
         if (dropped.length) removeKeys(dropped);
-        reloadProfile();
+        fit = restoreFitting(fromCloud(merged));
+        if (fit.ok) reloadProfile();
       }
-      if (row && sameData(merged, row.data)) return 'à jour';
+      const finish = (result) => {
+        this.note = '';
+        if (fit && !fit.ok) {
+          this._storageFull = true; this._dirty = false;      // (rien à relancer tout seul : la place ne reviendra pas d'elle-même ; « Synchroniser maintenant » ou une nouvelle écriture réessaie)
+          throw new OnlineError(FIT_FAILED, 'storage-full');
+        }
+        if (fit && fit.level !== 'full') this.note = fitNote(fit);
+        return result;
+      };
+      if (row && sameData(merged, row.data)) return finish('à jour');
       let data = merged;
       if (JSON.stringify(data).length > MAX_CLOUD_BYTES) data = withoutGhosts(data);
       if (!row) {
         try {
           await online.rest('/rest/v1/cloud_saves', { method: 'POST', body: { user_id: uid, data }, headers: { Prefer: 'return=minimal' } });
-          return 'envoyé';
+          return finish('envoyé');
         } catch (e) { if (e.code === 'duplicate' || /23505|duplicate/i.test(e.message)) continue; throw e; }
       }
       const done = await online.rest(`/rest/v1/cloud_saves?user_id=eq.${encodeURIComponent(uid)}&rev=eq.${row.rev}`, {
         method: 'PATCH', body: { data }, headers: { Prefer: 'return=representation' },
       });
-      if (Array.isArray(done) && done.length) return 'envoyé';
+      if (Array.isArray(done) && done.length) return finish('envoyé');
       // Un autre appareil a écrit entre-temps : on relit et on refusionne.
     }
     throw new OnlineError('Synchronisation interrompue (conflit répété) : réessaie dans un instant.', 'conflict');
