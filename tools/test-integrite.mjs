@@ -167,6 +167,51 @@ test('un circuit dont des pièces se recouvrent est relu AVEC la perte comptée 
   assert.equal(back.lost.overlap, 1); assert.ok(!lossBlocking(back)); assert.equal(back.tiles.length, t.tiles.length);
 });
 
+// ---- TECH-060 (phase 7) : les décorations perdues à la lecture bloquent comme les pièces et les options ----------------------------------------------------------------------------
+const { MAX_DECOS } = await import('../js/constants.js');
+const decoCode = (mut) => {
+  const t = scriptTrack('x', 'start S3 finish');
+  for (let i = 0; i < 3; i++) t.addDeco({ k: 'cone', x: 40 + i * 5, y: 0, z: -20, ry: 0, s: 1 });
+  const data = dataOf(t.encode());
+  mut(data);
+  return codeOf(data);
+};
+test('TECH-060 : une décoration INCONNUE (version plus récente), illisible ou en trop est comptée dans lost.decos et BLOQUE (avant : lossBlocking ne regardait que les pièces et les options)', () => {
+  const unknown = Track.decode(decoCode((d) => { d.o[1][0] = 9999; }));
+  assert.equal(unknown.lost.decos, 1); assert.ok(lossBlocking(unknown));
+  assert.match(lossText(unknown), /^Ce code contient 1 décoration\(s\) que ce jeu ne peut pas lire\.$/);
+  assert.equal(unknown.decos.length, 2, 'les deux autres sont gardées');
+  // une décoration connue mais refusée par addDeco (position illisible : le code abîmé garde du texte à la place d'un nombre) est PERDUE aussi, et comptée
+  const unreadable = Track.decode(decoCode((d) => { d.o[0][1] = 'abc'; }));
+  assert.equal(unreadable.lost.decos, 1); assert.ok(lossBlocking(unreadable)); assert.equal(unreadable.decos.length, 2);
+  // plus de décorations que le jeu n'en garde
+  const many = Track.decode(decoCode((d) => { d.o = Array.from({ length: MAX_DECOS + 3 }, (_, i) => [d.o[0][0], 40 + (i % 50), 0, -20 - Math.floor(i / 50), 0, 1, 0, 0]); }));
+  assert.equal(many.lost.decos, 3); assert.ok(lossBlocking(many)); assert.equal(many.decos.length, MAX_DECOS);
+  // plusieurs sortes de pertes dans la même phrase, dans l'ordre d'affichage
+  const mixed = Track.decode(decoCode((d) => { d.o[1][0] = 9999; d.t.push(9999, 0, -40, 1, 0, 0, 100, 0); }));
+  assert.equal(lossText(mixed), 'Ce code contient 1 pièce(s) d\'une version plus récente du jeu, 1 décoration(s) que ce jeu ne peut pas lire.');
+});
+test('TECH-060 : un circuit SANS perte ne bloque pas (circuits intégrés, circuit riche, décorations de toutes sortes) ; seule la perte de pièces qui se recouvrent ne bloque toujours pas', () => {
+  const ok = Track.decode(decoCode(() => {}));
+  assert.deepEqual(ok.lost, { unknown: 0, overlap: 0, options: 0, decos: 0 }); assert.ok(!lossBlocking(ok)); assert.equal(lossText(ok), '');
+  for (const d of BUILTIN_TRACKS) { const t = Track.decode(buildBuiltin(d).encode()); assert.ok(!lossBlocking(t), d.id); }
+});
+test('TECH-060 : le texte est traduit (anglais) et identique à lossText en français, ainsi que les phrases qui le suivent (ouverture dans l\'éditeur, import, lien) ; le parcours de l\'éditeur est vérifié dans Chromium (tools/test-browser-editeur.mjs)', async () => {
+  const I = await import('../js/i18n.js');
+  const { lossMessage, lossNote } = await import('../js/lossMessage.js');
+  const { default: en } = await import('../js/i18n/en.js');
+  const t = Track.decode(decoCode((d) => { d.o[1][0] = 9999; }));
+  try {
+    I.resetDictionary(); I.setLang('fr');
+    assert.equal(lossMessage(t), lossText(t));
+    I.register(en); I.setLang('en');
+    assert.equal(lossMessage(t), 'This code contains 1 decoration(s) that this game cannot read.');
+    assert.match(lossNote.detached(), /^The original track stays untouched/); assert.match(lossNote.incomplete(), /incomplete copy/); assert.match(lossNote.updateToImport(), /^Update the game/); assert.match(lossNote.updateToEdit(), /save or edit/);
+    I.setLang('fr');
+    assert.match(lossNote.detached(), /^Le circuit d'origine reste intact/);
+  } finally { I.resetDictionary(); I.setLang('fr'); }
+});
+
 console.log('\n3. Sauvegardes locales');
 await test('enregistrer → fermer la page → rouvrir : le circuit 3D est intact (code, nom, identifiant), dans la liste et rejouable', async () => {
   reset();

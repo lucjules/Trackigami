@@ -6533,6 +6533,21 @@ var COLOR_KEYS = [
   "rail"
 ];
 var HEX3 = /^#[0-9a-f]{6}$/i;
+var TAU2 = Math.PI * 2;
+var QUARTER = Math.PI / 4;
+var HALF_MILLI = 5e-4;
+var milli = (v) => +v.toFixed(3) || 0;
+function normalizeAngle(v) {
+  if (!Number.isFinite(v)) return 0;
+  let w = (v % TAU2 + TAU2) % TAU2;
+  if (w > Math.PI + HALF_MILLI) w -= TAU2;
+  return milli(w);
+}
+function normalizeRoll(v) {
+  if (!Number.isFinite(v)) return 0;
+  const k = (Math.round(v / QUARTER) % 8 + 8) % 8;
+  return milli((k > 4 ? k - 8 : k) * QUARTER);
+}
 function cleanColors(c) {
   if (!c || typeof c !== "object") return null;
   const out = {};
@@ -6746,7 +6761,6 @@ var surfaceMethods = {
 };
 
 // js/track/edit.js
-var TAU2 = Math.PI * 2;
 var editMethods = {
   // Revêtement (avec paramètre en %). Renvoie true si quelque chose a changé.
   setSurface(tile, s, p = 0) {
@@ -6904,23 +6918,15 @@ var editMethods = {
       if (!Number.isFinite(deco.x) || !Number.isFinite(deco.y) || !Number.isFinite(deco.z) || !Number.isFinite(deco.ry)) return null;
     }
     if (isObstacle(deco.k)) {
-      let v = +d.rz;
-      if (Number.isFinite(v) && v) {
-        v = (v % TAU2 + TAU2) % TAU2;
-        if (v > Math.PI + 1e-6) v -= TAU2;
-        v = Math.round(v / (Math.PI / 4)) * (Math.PI / 4);
-        if (Math.abs(v) > 1e-4) deco.rz = +v.toFixed(3);
-      }
+      const r = normalizeRoll(+d.rz);
+      if (r) deco.rz = r;
     } else if (!solid) {
       for (const a of [
         "rx",
         "rz"
       ]) {
-        let v = +d[a];
-        if (!Number.isFinite(v) || !v) continue;
-        v = (v % TAU2 + TAU2) % TAU2;
-        if (v > Math.PI) v -= TAU2;
-        if (Math.abs(v) > 1e-4) deco[a] = +v.toFixed(3);
+        const r = normalizeAngle(+d[a]);
+        if (r) deco[a] = r;
       }
     }
     if (typeof d.cc === "string" && HEX3.test(d.cc)) deco.cc = d.cc.toLowerCase();
@@ -8366,7 +8372,7 @@ var Track = class _Track {
           continue;
         }
         const u = typeof o[7] === "string" && /^https?:\/\//i.test(o[7]) ? o[7] : "";
-        tr.addDeco({
+        if (!tr.addDeco({
           k,
           x: o[1],
           y: o[2],
@@ -8381,7 +8387,7 @@ var Track = class _Track {
           g: o[11] | 0,
           rx: +o[12] || 0,
           rz: +o[13] || 0
-        });
+        })) lost.decos++;
       }
     }
     tr.laps = Math.max(1, Math.min(9, data.lp | 0 || 1));
@@ -20303,4 +20309,4 @@ Deno.serve(createHandler({
   serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   allowedOrigin: Deno.env.get("ALLOWED_ORIGIN") ?? "*"
 }));
-globalThis.__COPYTRACK_BUILD__ = "c517df1a7a9592b8";
+globalThis.__COPYTRACK_BUILD__ = "30a192c736672767";

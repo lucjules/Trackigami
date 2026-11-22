@@ -73,7 +73,13 @@ test('les codes de circuit de tous les formats se relisent (pièces, signature, 
     assert.equal(tr.userKey, e.userKey, `${e.label} : clé`);
     assert.deepEqual([tr.tiles.length, tr.decos.length, tr.laps, !!tr.verified], [e.tiles, e.decos, e.laps, e.verified], e.label);
     assert.equal(Track.decode(e.reencoded).encode(), e.reencoded, `${e.label} : relecture stable`);
+    // (phase 7, TECH-002 : lire → écrire → lire redonne la MÊME signature, la même clé et la même marque « vérifié », à chaque génération)
+    let g = tr;
+    for (let i = 1; i <= 3; i++) { g = Track.decode(g.encode()); assert.deepEqual([g.signature(), g.userKey, !!g.verified], [e.signature, e.userKey, e.verified], `${e.label} : lecture n° ${i}`); }
   }
+  const roll = C.codes.find((e) => /obstacle roulé de π/.test(e.label));
+  assert.ok(roll && roll.verified, 'le corpus contient un circuit vérifié avec un obstacle roulé de π');
+  assert.match(roll.code, /^SHW3:/);
 });
 
 test('les courses enregistrées redonnent leur temps exact (rejeu du serveur)', () => {

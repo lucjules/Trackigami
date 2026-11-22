@@ -3,7 +3,8 @@
 import { medalIcon } from '../ui.js';
 import { $, esc } from '../dom.js';
 import { MEDALS, medalFor } from '../medals.js';
-import { Track, lossText, lossBlocking } from '../track.js';
+import { Track, lossBlocking } from '../track.js';
+import { lossMessage, lossNote } from '../lossMessage.js';
 import { replayTime } from '../verify.js';
 import { PHYS_VER } from '../version.js';
 import { thumbnail } from '../editorTools.js';
@@ -536,8 +537,8 @@ export const communityMethods = {
       try {
         const t = Track.decode(ta.value);
         // Phase 4 : un code qui perdrait des pièces ou des options à la lecture (version plus récente du jeu) n'est pas réenregistré en silence : il est refusé, avec la raison.
-        if (lossBlocking(t)) { this.ui.flash(lossText(t) + ' Mets le jeu à jour avant de l’importer.', 6); return null; }
-        if (lossText(t)) this.ui.flash(lossText(t), 5);
+        if (lossBlocking(t)) { this.ui.flash(lossMessage(t) + ' ' + lossNote.updateToImport(), 6); return null; }
+        if (lossMessage(t)) this.ui.flash(lossMessage(t), 5);
         return t;
       } catch { this.ui.flash('Code de circuit invalide.'); return null; }
     };

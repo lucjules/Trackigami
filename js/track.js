@@ -512,7 +512,8 @@ export class Track {
         const k = DECO_ORDER[o[0]];
         if (!k) { lost.decos++; continue; }
         const u = typeof o[7] === 'string' && /^https?:\/\//i.test(o[7]) ? o[7] : '';
-        tr.addDeco({ k, x: o[1], y: o[2], z: o[3], ry: o[4], s: o[5], c: o[6], u, ph: +o[8] || 0, cc: typeof o[9] === 'string' && o[9] ? '#' + o[9] : '', cp: k === 'custom' ? unpackDecoParts(o[10]) : undefined, g: o[11] | 0, rx: +o[12] || 0, rz: +o[13] || 0 });
+        // (TECH-060 : une décoration que addDeco refuse — position illisible, pièce perso vide ou en trop — est PERDUE, comme une décoration inconnue : elle est comptée)
+        if (!tr.addDeco({ k, x: o[1], y: o[2], z: o[3], ry: o[4], s: o[5], c: o[6], u, ph: +o[8] || 0, cc: typeof o[9] === 'string' && o[9] ? '#' + o[9] : '', cp: k === 'custom' ? unpackDecoParts(o[10]) : undefined, g: o[11] | 0, rx: +o[12] || 0, rz: +o[13] || 0 })) lost.decos++;
       }
     }
     tr.laps = Math.max(1, Math.min(9, data.lp | 0 || 1));
@@ -543,19 +544,30 @@ function tileExtras(t) {
   return e;
 }
 
-// Phrase qui dit ce que la lecture d'un code n'a pas pu garder (voir Track.decode, `lost`), '' si rien n'a été perdu. `blocking` : vrai quand ENREGISTRER ce circuit effacerait de
-// l'information qu'une version plus récente du jeu saurait lire (pièces inconnues, options inconnues) : l'importeur refuse alors plutôt que de réécrire un circuit tronqué.
-export function lossText(track) {
+// Ce que la lecture d'un code n'a pas pu garder (voir Track.decode, `lost`), en données : [[catégorie, nombre], …] dans l'ordre d'affichage ; [] si rien n'a été perdu.
+// Catégories : unknown (pièces d'une version plus récente), options (options de pièce inconnues), overlap (pièces qui en recouvrent une autre), decos (décorations inconnues,
+// en trop, ou refusées à la lecture). Le texte, lui, se fabrique de ce côté (lossText, en français) ou dans la langue du joueur (js/lossMessage.js : le noyau n'importe pas i18n).
+export function lossParts(track) {
   const l = track && track.lost;
-  if (!l) return '';
-  const parts = [];
-  if (l.unknown) parts.push(`${l.unknown} pièce(s) d'une version plus récente du jeu`);
-  if (l.options) parts.push(`${l.options} option(s) de pièce inconnues de cette version`);
-  if (l.overlap) parts.push(`${l.overlap} pièce(s) qui en recouvrent une autre`);
-  if (l.decos) parts.push(`${l.decos} décoration(s)`);
+  if (!l) return [];
+  return [['unknown', l.unknown], ['options', l.options], ['overlap', l.overlap], ['decos', l.decos]].filter(([, n]) => n);
+}
+
+// Phrase qui dit ce que la lecture d'un code n'a pas pu garder (voir Track.decode, `lost`), '' si rien n'a été perdu. `blocking` : vrai quand ENREGISTRER ce circuit effacerait de
+// l'information qu'une version plus récente du jeu saurait lire (pièces, options ou décorations inconnues) : l'importeur refuse alors plutôt que de réécrire un circuit tronqué.
+const LOSS_FR = {
+  unknown: (n) => `${n} pièce(s) d'une version plus récente du jeu`,
+  options: (n) => `${n} option(s) de pièce inconnues de cette version`,
+  overlap: (n) => `${n} pièce(s) qui en recouvrent une autre`,
+  decos: (n) => `${n} décoration(s)`,
+};
+export function lossText(track) {
+  const parts = lossParts(track).map(([k, n]) => LOSS_FR[k](n));
   return parts.length ? 'Ce code contient ' + parts.join(', ') + ' que ce jeu ne peut pas lire.' : '';
 }
-export const lossBlocking = (track) => !!(track && track.lost && (track.lost.unknown || track.lost.options));
+// (TECH-060 : les décorations perdues bloquent comme les pièces et les options : avant, éditer puis enregistrer le code d'une version plus récente les effaçait sans avertissement.
+// Un circuit qui ne perd que des pièces qui en recouvrent une autre (overlap) ne bloque pas : rien d'une version plus récente n'est perdu.)
+export const lossBlocking = (track) => !!(track && track.lost && (track.lost.unknown || track.lost.options || track.lost.decos));
 
 export function b64encode(str) {
   const bytes = new TextEncoder().encode(str);

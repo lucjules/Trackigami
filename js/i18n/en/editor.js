@@ -1,6 +1,16 @@
 // Dictionnaire anglais — l'éditeur de circuits : barre d'outils, palette, options, niveau, sélection, prefabs, raccourcis, messages.
 
 export default {
+  // Phase 7 (0.16.6, TECH-060) : ce que la lecture d'un code n'a pas pu garder (js/lossMessage.js ; texte français : track.js, lossText).
+  '{n:w} pièce(s) d\'une version plus récente du jeu': '{n} piece(s) from a newer version of the game',
+  '{n:w} option(s) de pièce inconnues de cette version': '{n} piece option(s) unknown to this version',
+  '{n:w} pièce(s) qui en recouvrent une autre': '{n} piece(s) that overlap another one',
+  '{n:w} décoration(s)': '{n} decoration(s)',
+  'Ce code contient {list} que ce jeu ne peut pas lire.': 'This code contains {list} that this game cannot read.',
+  'Le circuit d\'origine reste intact dans « Mes circuits » ; ce que tu enregistres ici en fait une copie.': 'The original track stays untouched in “My tracks”; what you save here becomes a copy.',
+  'Ce que tu enregistres sera une copie incomplète.': 'What you save will be an incomplete copy.',
+  'Mets le jeu à jour avant de l’importer.': 'Update the game before importing it.',
+  'Mets le jeu à jour pour l’enregistrer ou l’éditer.': 'Update the game to save or edit it.',
   // Phase 1 (après l'audit 0.9.59) : prolonger, fenêtre des problèmes, aide à la pose.
   'Prolonger': 'Extend',
   'Prolonger : pose la pièce choisie au bout de la dernière pièce, raccordée (P)': 'Extend: places the chosen piece at the end of the last piece, connected (P)',

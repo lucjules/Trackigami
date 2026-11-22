@@ -2,7 +2,8 @@
 // Ces méthodes s'ajoutent au prototype de EditorSession (voir editor.js) : `this` est l'instance.
 import { CELL, MAX_TRACK_CODE_CHARS } from '../constants.js';
 import { PIECES } from '../pieces.js';
-import { Track, tileToRow, rowToTile, lossText, lossBlocking } from '../track.js';
+import { Track, tileToRow, rowToTile, lossBlocking } from '../track.js';
+import { lossMessage, lossNote } from '../lossMessage.js';
 import { setEditorDraft, saveMyTrack, newId, wroteOk } from '../storage.js';
 import { centerlineWorld } from '../ribbons.js';
 export const historyMethods = {
@@ -247,7 +248,7 @@ export const historyMethods = {
     this._commit();
     this._changed();
     this._autoSaveNote(r);
-    if (lossBlocking(t)) this.app.ui.flash(lossText(t) + ' Ce que tu enregistres sera une copie incomplète.', 7);
+    if (lossBlocking(t)) this.app.ui.flash(lossMessage(t) + ' ' + lossNote.incomplete(), 7);
   },
 
   recenter() {

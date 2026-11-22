@@ -3,7 +3,8 @@
 import * as THREE from './vendor/three.module.min.js';
 import { CELL, LEVEL_H, ROAD_TOP } from './constants.js';
 import { PIECES, SURFACES } from './pieces.js';
-import { Track, lossText, lossBlocking } from './track.js';
+import { Track, lossBlocking } from './track.js';
+import { lossMessage, lossNote } from './lossMessage.js';
 import { DEFAULT_DECOR } from './themes.js';
 import { TrackView } from './trackMesh.js';
 import { DECO_LABELS } from './decoData.js';
@@ -37,7 +38,7 @@ export class EditorSession {
     if (state.code) {
       try {
         this.track = Track.decode(state.code);
-        if (lossBlocking(this.track)) this.loadIssue = lossText(this.track);
+        if (lossBlocking(this.track)) this.loadIssue = lossMessage(this.track);
       } catch { this.track = new Track('Mon circuit'); this.loadIssue = 'Le code de ce circuit est illisible : l\'éditeur s\'ouvre vide.'; }
     } else {
       this.track = new Track(state.name || 'Mon circuit');
@@ -50,7 +51,7 @@ export class EditorSession {
     // (un nouvel enregistrement crée une copie) et le dit. Avant, un code abîmé ouvrait un circuit vide et le premier enregistrement écrasait le circuit d'origine.
     if (this.loadIssue) {
       this.entryId = null;
-      setTimeout(() => { try { this.app.ui.flash(this.loadIssue + ' Le circuit d\'origine reste intact dans « Mes circuits » ; ce que tu enregistres ici en fait une copie.', 8); } catch { /* interface fermée */ } }, 700);
+      setTimeout(() => { try { this.app.ui.flash(this.loadIssue + ' ' + lossNote.detached(), 8); } catch { /* interface fermée */ } }, 700);
     }
     // (0.12.0 : l'ancien outil « appliquer une option » n'a plus de bouton : un brouillon qui l'avait reprend la ligne droite)
     this.tool = validTool(state.tool) && !state.tool.startsWith('mod:') ? state.tool : 'straight';
