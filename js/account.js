@@ -11,13 +11,13 @@ import { online, OnlineError } from './online.js';
 import {
   getGlobal, setGlobal, setScope, getSessionFlag, setSessionFlag, dumpAll, restoreAll, restoreFitting, onWrite, loadSettings, saveSettings, removeKeys,
 } from './storage.js';
-import { toCloud, fromCloud, mergeSaves, sameData, pickSynced, withoutGhosts, isSyncKey } from './cloudsave.js';
+import { toCloud, fromCloud, mergeSaves, sameData, pickSynced, fitCloud, isSyncKey } from './cloudsave.js';
 import { reloadProfile } from './profile.js';
 
 // Domaine technique des adresses (doit être le même que dans supabase/etape4-comptes.sql).
 const ACCOUNT_EMAIL_DOMAIN = 'accounts.copytrack.invalid';
 const FORBIDDEN_NAMES = ['player', 'pilote'];
-const MAX_CLOUD_BYTES = 6_000_000;     // au-delà, les fantômes enregistrés ne partent pas dans le cloud
+const MAX_CLOUD_BYTES = 6_000_000;     // au-delà, les fantômes enregistrés (puis les commandes des plus anciens records) ne partent pas dans le cloud (cloudsave.fitCloud)
 
 // Messages quand la copie locale du compte ne tient pas dans le stockage de l'appareil (le cloud, lui, garde tout).
 const FIT_FAILED = 'Espace insuffisant sur cet appareil : la sauvegarde du compte n’a pas pu y être écrite (le cloud la garde). Libère de la place sur l’appareil, puis « Synchroniser maintenant ».';
@@ -276,9 +276,10 @@ class Account {
         if (fit && fit.level !== 'full') this.note = fitNote(fit);
         return result;
       };
-      if (row && sameData(merged, row.data)) return finish('à jour');
-      let data = merged;
-      if (JSON.stringify(data).length > MAX_CLOUD_BYTES) data = withoutGhosts(data);
+      // Ce qui PARTIRAIT (la fusion, allégée si elle dépasse la limite) se compare à la copie du cloud : avant (TECH-074), on comparait la fusion complète, qui garde les fantômes locaux,
+      // à une copie du cloud qui n'en a plus : jamais égales, donc ≈ 6 Mo renvoyés et `rev` incrémenté à CHAQUE synchronisation (et des conflits avec les autres appareils).
+      const data = fitCloud(merged, MAX_CLOUD_BYTES);
+      if (row && sameData(data, row.data)) return finish('à jour');
       if (!row) {
         try {
           await online.rest('/rest/v1/cloud_saves', { method: 'POST', body: { user_id: uid, data }, headers: { Prefer: 'return=minimal' } });

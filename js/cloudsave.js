@@ -152,3 +152,21 @@ export function withoutGhosts(data) {
   for (const [k, v] of Object.entries(data)) out[k] = k.startsWith('rec3.') && v && typeof v === 'object' ? { ...v, ghost: null } : v;
   return out;
 }
+
+// Ce qui part réellement dans le cloud : `data` tel quel s'il tient dans `max` caractères ; sinon sans les fantômes (withoutGhosts), puis, si cela ne suffit pas, sans les commandes des plus
+// anciens records, jusqu'à tenir (TECH-074). Le temps, les temps intermédiaires et la version de physique ne sont jamais retirés. Les anciens clients lisent ces records comme ceux d'un
+// appareil qui n'a pas gardé la rejouabilité (inputs: null existe déjà : storage.slim).
+export function fitCloud(data, max) {
+  const len = (v) => JSON.stringify(v).length;
+  if (len(data) <= max) return data;
+  const out = withoutGhosts(data);
+  let size = len(out);
+  if (size <= max) return out;
+  const withInputs = Object.keys(out).filter((k) => k.startsWith('rec3.') && out[k] && typeof out[k] === 'object' && out[k].inputs).sort((a, b) => num(out[a].date) - num(out[b].date));
+  for (const k of withInputs) {
+    size -= len(out[k].inputs) - len(null);
+    out[k] = { ...out[k], inputs: null };
+    if (size <= max) break;
+  }
+  return out;
+}

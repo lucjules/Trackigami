@@ -157,6 +157,60 @@ await test('plusieurs niveaux d\'allègement : sans fantômes d\'abord ; si cela
   assert.ok(/n’y sont pas écrits/.test(account.note), account.note);
 });
 
+console.log('TECH-074 : sauvegarde au-delà de la limite d\'envoi (6 Mo)');
+const bytes = (o) => JSON.stringify(o).length;
+const bigLocal = (n, ghost, inputs) => { for (let i = 0; i < n; i++) storage.saveRecord('b-g' + i + '-x', rec(30 + i * 0.1, 2000 + i, { ghost: ghost ? 'g'.repeat(ghost) : null, inputs: inputs ? 'i'.repeat(inputs) : 'x' })); };
+await test('sauvegarde > 6 Mo (fantômes) sans changement : un seul envoi (sans fantômes), puis AUCUN PATCH et `rev` ne bouge plus (avant : ≈ 6 Mo renvoyés à chaque synchronisation)', async () => {
+  boot('A');
+  await account.signUp('Big_01', 'motdepasse1');
+  const uid = account.uid;
+  bigLocal(110, 60000, 0);
+  assert.ok(bytes(storage.dumpAll()) > 6_000_000);
+  await account.sync();
+  const first = srv.saves.get(uid);
+  assert.ok(bytes(first.data) <= 6_000_000, 'ce qui est parti tient dans la limite : ' + bytes(first.data));
+  assert.equal(first.data['rec3.b-g3-x'].ghost, null, 'sans fantômes');
+  const rev = first.rev;
+  srv.calls.length = 0;
+  for (let i = 0; i < 3; i++) assert.equal(await account.sync(), 'à jour');
+  assert.equal(patches(), 0, 'aucun PATCH');
+  assert.equal(srv.saves.get(uid).rev, rev, 'rev inchangé : pas de conflit inutile avec les autres appareils');
+  assert.equal(storage.getRecord('b-g3-x').ghost.length, 60000, 'l\'appareil garde ses fantômes');
+});
+await test('au-delà de la limite MÊME sans fantômes (commandes lourdes) : les commandes des plus anciens records sont retirées de l\'envoi, pas d\'échec ; aucun PATCH ensuite ; l\'appareil garde tout ; un second appareil ne réécrit rien', async () => {
+  boot('A');
+  await account.signUp('Big_02', 'motdepasse1');
+  const uid = account.uid;
+  bigLocal(110, 0, 60000);
+  assert.ok(bytes(storage.dumpAll()) > 6_000_000);
+  await account.sync();
+  const cloud = srv.saves.get(uid);
+  assert.ok(bytes(cloud.data) <= 6_000_000, 'tient dans la limite : ' + bytes(cloud.data));
+  const cut = Object.keys(cloud.data).filter((k) => k.startsWith('rec3.') && !cloud.data[k].inputs);
+  assert.ok(cut.length > 0 && cut.length < 110, 'commandes retirées pour une partie des records seulement : ' + cut.length);
+  assert.ok(cloud.data['rec3.b-g109-x'].inputs, 'les plus récents gardent leurs commandes'); assert.ok(!cloud.data['rec3.b-g0-x'].inputs, 'les plus anciens les perdent');
+  assert.equal(cloud.data['rec3.b-g0-x'].time, 30, 'le temps reste');
+  const rev = cloud.rev; srv.calls.length = 0;
+  assert.equal(await account.sync(), 'à jour'); assert.equal(patches(), 0);
+  assert.equal(storage.getRecord('b-g0-x').inputs.length, 60000, 'l\'appareil garde les commandes');
+  // un second appareil reçoit la version allégée et ne réécrit rien ; le premier garde tout
+  boot('B');
+  await account.signIn('Big_02', 'motdepasse1');
+  srv.calls.length = 0;
+  assert.equal(await account.sync(), 'à jour'); assert.equal(patches(), 0);
+  assert.equal(srv.saves.get(uid).rev, rev);
+  boot('A'); await account.restore();
+  assert.equal(await account.sync(), 'à jour');
+  assert.equal(storage.getRecord('b-g0-x').inputs.length, 60000);
+});
+await test('la fusion ne laisse pas une copie plus pauvre écraser le même record plus complet (à temps et physique égaux, le plus complet gagne ; un meilleur temps gagne toujours)', async () => {
+  const { mergeSaves } = await import('../js/cloudsave.js');
+  const full = rec(20, 5, { ghost: 'g'.repeat(100), inputs: 'i'.repeat(100) }), poor = rec(20, 5, { ghost: null, inputs: null });
+  assert.equal(mergeSaves({ 'rec3.b-x': poor }, { 'rec3.b-x': full })['rec3.b-x'].ghost.length, 100);
+  assert.equal(mergeSaves({ 'rec3.b-x': full }, { 'rec3.b-x': poor })['rec3.b-x'].ghost.length, 100);
+  assert.equal(mergeSaves({ 'rec3.b-x': { ...poor, time: 19 } }, { 'rec3.b-x': full })['rec3.b-x'].time, 19, 'un meilleur temps l\'emporte toujours');
+});
+
 console.log('TECH-078 : clés propres à l\'appareil');
 const { exportCode, parseCode, applySave } = await import('../js/profile.js');
 const { buildExport, readableLocal } = await import('../js/dataExport.js');
