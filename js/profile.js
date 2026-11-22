@@ -1,7 +1,7 @@
 // Profil du joueur : pièces, objets débloqués, équipement, code de sauvegarde.
 // Le jeu est 100 % statique (aucun serveur) : le « code joueur » est la sauvegarde
 // elle-même, compressée, à copier / coller ou à télécharger sous forme de fichier.
-import { getJSON, setJSON, dumpAll, restoreAll, DEVICE_ONLY_KEYS } from './storage.js';
+import { getJSON, setJSON, dumpAll, restoreAll, DEVICE_ONLY_KEYS, isTrialName } from './storage.js';
 import { DEFAULT_LOADOUT, itemCost, sanitizeLoadout, itemsOf, exclusiveOf } from './cosmetics.js';
 import { hashString } from './track.js';
 
@@ -159,7 +159,7 @@ export async function parseCode(code) {
 // (les anciens codes la contenaient : l'importer faisait de vous le pilote qui l'avait exporté, et effaçait votre propre identité en ligne).
 const importable = (data) => {
   const out = {};
-  for (const [k, v] of Object.entries(data || {})) if (typeof v === 'string' && /^[\w.~:-]{1,160}$/.test(k) && !DEVICE_ONLY_KEYS.includes(k)) out[k] = v;
+  for (const [k, v] of Object.entries(data || {})) if (typeof v === 'string' && /^[\w.~:-]{1,160}$/.test(k) && !DEVICE_ONLY_KEYS.includes(k) && !isTrialName(k)) out[k] = v;      // (ni les essais d'éditeur d'un ancien code : jetables, TECH-022)
   return out;
 };
 const parse = (txt, fallback) => { try { const x = JSON.parse(txt); return x == null ? fallback : x; } catch { return fallback; } };

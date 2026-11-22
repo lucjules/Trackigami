@@ -10,14 +10,15 @@
 //  - dernières courses (runs.*) : réunies, les plus récentes gardées.
 import { itemCost } from './cosmetics.js';
 import { mergeFavorites } from './favorites.js';
-import { cleanRuns, validRecord, validTrackEntry } from './storage.js';
+import { cleanRuns, validRecord, validTrackEntry, isTrialName } from './storage.js';
 import { mergeDrills } from './skills.js';
 import { mergeProgress } from './progression.js';
 
 // Ce qui suit un compte d'un appareil à l'autre : progression, circuits créés, records. Les réglages
 // (volume, touches, qualité...) restent propres à chaque appareil, le brouillon de l'éditeur aussi.
+// Les essais de l'éditeur (rec3.e-…, storage.js : isTrialName) sont JETABLES et ne partent jamais (TECH-022) : ni envoyés, ni reçus ; la prochaine écriture du cloud en retire ceux d'avant.
 export const isSyncKey = (k) =>
-  k === 'profile' || k === 'tracks' || k === 'tracksDel' || k === 'recReset' || /^(rec3|daily|ghostImp|runs)\./.test(k);
+  k === 'profile' || k === 'tracks' || k === 'tracksDel' || k === 'recReset' || (/^(rec3|daily|ghostImp|runs)\./.test(k) && !isTrialName(k));
 
 export const pickSynced = (dump) => Object.fromEntries(Object.entries(dump || {}).filter(([k, v]) => isSyncKey(k) && typeof v === 'string'));
 

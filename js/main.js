@@ -22,7 +22,7 @@ import { account } from './account.js';
 import { runWelcome } from './welcome.js';
 import { initI18n } from './i18n/boot.js';
 import { describeBuiltin, describeUser } from './trackDescriptor.js';
-import { loadSettings, saveSettings, getRecord, saveRecord, saveMyTrack, newId, formatTime, purgeOldRecords, getJSON, setJSON } from './storage.js';
+import { loadSettings, saveSettings, getRecord, saveRecord, saveMyTrack, newId, formatTime, purgeOldRecords, purgeEditorTrials, getJSON, setJSON } from './storage.js';
 import { dayKey } from './daily.js';
 import { Telemetry } from './telemetry.js';
 import { ErrorReport } from './errorReport.js';
@@ -84,6 +84,7 @@ class App {
     this.input.setBindings(this.settings.keys, this.settings.pad);
     this.input.setPadConfig({ deadzone: this.settings.padDeadzone, sens: this.settings.padSens, rumble: this.settings.haptics });
     purgeOldRecords();
+    purgeEditorTrials();      // les essais de l'éditeur d'avant ne servent plus (TECH-022) : 21 à 43 Ko chacun
     profile();
     $('menu-foot').textContent = `${GAME_NAME} ${VERSION} · un jeu de course original · propulsé par three.js`;
     this.audio = new GameAudio();
