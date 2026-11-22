@@ -1333,6 +1333,93 @@ try {
     await waitApp(() => window.copytrack.mode === 'menu');
   });
 
+  // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+  // Arbitre d'entrées (TRANS-03 : TECH-004, 005, 006, 017, 020, 033, 065). Un seul contexte actif décide qui consomme quoi (voir l'en-tête de js/input.js).
+  // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+  // Laisse tourner N images de la boucle du jeu (les rAF de la page passent APRÈS celui du jeu) : en rendu logiciel les images sont très espacées, et une
+  // pause fixe pourrait lire l'état AVANT que la boucle n'ait traité la touche (faux « réussi »).
+  const frames = (n = 5) => page.evaluate((k) => new Promise((res) => { let i = 0; const f = () => { if (++i >= k) res(); else requestAnimationFrame(f); }; requestAnimationFrame(f); }), n);
+  const settle = async () => { await page.waitForTimeout(100); await frames(6); };
+  const startRaceNow = async () => {
+    await app(() => window.copytrack.playBuiltin(0));
+    await waitApp(() => window.copytrack.session && window.copytrack.session.state === 'racing', null, 40000);
+    await waitApp(() => window.copytrack.session.logic.steps > 40, null, 20000);
+  };
+  const leaveToMenu = async () => { await app(() => window.copytrack.showMenu('menu')); await waitApp(() => window.copytrack.mode === 'menu'); };
+  // Manette simulée : les boutons sont lus comme ceux d'une vraie manette (navigator.getGamepads).
+  const installPad = () => app(() => {
+    const p = { connected: true, id: 'manette-test', index: 0, axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })) };
+    window.__pad = p; navigator.getGamepads = () => [p];
+  });
+  const padSet = (i, on) => app(([k, v]) => { const b = window.__pad.buttons[k]; b.pressed = v; b.value = v ? 1 : 0; }, [i, on]);
+  const removePad = () => app(() => { delete navigator.getGamepads; window.__pad = null; });
+
+  await test('entrées (TECH-004) : Entrée sur « Reprendre », sur « Retour au checkpoint » et sur « 🎬 Vidéo » du Theater active le bouton UNE fois, sans relancer la course', async () => {
+    await startRaceNow();
+    // 1. Pause, puis Entrée sur « Reprendre » (le bouton principal a le focus) : la course reprend, le chrono n'est pas remis à zéro.
+    await page.keyboard.press('Escape');
+    await waitApp(() => window.copytrack.session.state === 'paused');
+    assert.equal(await app(() => document.activeElement && document.activeElement.dataset.action), 'resume', 'le focus est sur « Reprendre »');
+    const s0 = await app(() => window.copytrack.session.logic.steps);
+    await page.keyboard.press('Enter');
+    await waitApp(() => window.copytrack.session.state === 'racing');
+    await settle();
+    const r1 = await app(() => ({ state: window.copytrack.session.state, steps: window.copytrack.session.logic.steps }));
+    assert.equal(r1.state, 'racing', 'la course continue (pas de décompte)');
+    assert.ok(r1.steps >= s0, `le chrono n'est pas remis à zéro (${s0} pas avant, ${r1.steps} après)`);
+    // 2. Pause, focus sur « Retour au checkpoint », Entrée : retour au checkpoint (une fois), jamais « recommencer ».
+    await page.keyboard.press('Escape');
+    await waitApp(() => window.copytrack.session.state === 'paused');
+    await app(() => document.querySelector('#pause [data-action="pause-respawn"]').focus());
+    await page.keyboard.press('Enter');
+    await waitApp(() => window.copytrack.session.state !== 'paused');
+    await settle();
+    const r2 = await app(() => ({ state: window.copytrack.session.state, respawns: window.copytrack.session.stats.respawns }));
+    assert.equal(r2.state, 'racing', 'après « Retour au checkpoint » + Entrée : la course continue, pas de décompte');
+    assert.equal(r2.respawns, 1, 'un seul retour au checkpoint');
+    // 3. Theater : Entrée sur « 🎬 Vidéo » n'annule pas l'export et ne relance pas le replay.
+    const run = await makeRun();
+    await app((r) => { window.copytrack.session.lastRun = { inputs: r.inputs, time: r.time }; }, run);
+    await app(() => window.copytrack.watchReplay());
+    await waitApp(() => window.copytrack.session && window.copytrack.session.replay, null, 20000);
+    await app(() => { window.copytrack.session.replaySpeed = 4; });
+    await waitApp(() => window.copytrack.session.logic.steps > 240, null, 30000);
+    await app(() => document.getElementById('replay-export').focus());
+    const st0 = await app(() => window.copytrack.session.logic.steps);
+    await page.keyboard.press('Enter');
+    await settle();
+    const th = await app(() => ({ steps: window.copytrack.session.logic.steps, finished: window.copytrack.session.state === 'finished', rec: !!window.copytrack.session._rec }));
+    assert.ok(th.steps >= st0 || th.finished || th.rec, `Entrée sur « 🎬 Vidéo » ne relance pas le replay (${st0} → ${th.steps} pas)`);
+    if (th.rec) assert.ok(th.steps > 5, 'l\'export démarre une fois ; il n\'est pas annulé par une relance');
+    await app(() => window.copytrack.endReplay());
+    await leaveToMenu();
+  });
+
+  await test('entrées (TECH-005) : manette avec A tenu : la pause reste ouverte, l\'arrivée s\'affiche sans relance ; la navigation à la manette marche toujours', async () => {
+    await installPad();
+    try {
+      await startRaceNow();
+      await padSet(0, true);                              // A : accélérer ET valider
+      await settle();
+      await page.keyboard.press('Escape');
+      await settle();
+      assert.equal(await app(() => window.copytrack.session.state), 'paused', 'A tenu à l\'ouverture de la pause : elle s\'ouvre et reste ouverte (pas de « valider » sur « Reprendre »)');
+      // Navigation intacte : A relâché puis pressé = « valider » sur le bouton ayant le focus (« Reprendre »).
+      await padSet(0, false); await settle();
+      await padSet(0, true);
+      await waitApp(() => window.copytrack.session.state === 'racing');
+      // Arrivée avec A tenu : l'écran de fin s'affiche et reste (pas de relance).
+      await app(() => window.copytrack.session._finish(window.copytrack.session.logic.steps / 120));
+      await waitApp(() => !document.getElementById('finish').classList.contains('hidden'));
+      await settle();
+      const fin = await app(() => ({ state: window.copytrack.session.state, shown: !document.getElementById('finish').classList.contains('hidden'), steps: window.copytrack.session.logic.steps }));
+      assert.equal(fin.state, 'finished', 'l\'arrivée n\'est pas relancée par A tenu');
+      assert.ok(fin.shown, 'l\'écran d\'arrivée reste affiché');
+      await padSet(0, false);
+    } finally { await padSet(0, false).catch(() => {}); await removePad(); }
+    await leaveToMenu();
+  });
+
   await test('fantôme rival (haut d\'un classement) : affiché sur la piste, suit son enregistrement, étiquette au nom du rival', async () => {
     await app(() => window.copytrack.playBuiltin(0));
     await waitApp(() => window.copytrack.session && window.copytrack.session.state, null, 40000);

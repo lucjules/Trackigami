@@ -1,5 +1,35 @@
 // Entrées : clavier (codes physiques => QWERTY et AZERTY), manette, tactile.
 // Toutes les actions sont reconfigurables (Paramètres › Commandes).
+//
+// ── Arbitre d'entrées (TRANS-03) ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Un seul état d'entrée (`keys`, `pressed`, `padEdges`) sert la course, l'éditeur, le garage, les menus et les fenêtres. Pour qu'une touche, un
+// bouton de manette ou un bouton tactile n'agisse jamais à la place d'un autre, UN contexte est actif à la fois ; `App.inputContext()` (main.js) le
+// calcule à chaque image et à chaque ouverture / fermeture de fenêtre, de superposition ou d'écran, puis appelle `setContext()`.
+//
+//   contexte   quand                                                    qui consomme quoi
+//   ─────────  ───────────────────────────────────────────────────────  ──────────────────────────────────────────────────────────────────────
+//   capture    une case de liaison attend une touche / un bouton       TOUT va à la capture (touche ou bouton lu une fois, Échap annule) ;
+//                                                                       ni course, ni éditeur, ni navigation de menu
+//   modal      une fenêtre (ui.modal) est ouverte                      menu seulement : Échap / « retour » la ferme, flèches et « valider »
+//                                                                       à la manette ; AUCUNE action de course ni raccourci de l'éditeur
+//   overlay    pause ou arrivée affichée (mode « course »)             la course (Échap / P reprend, T / Entrée rejoue à l'arrivée…) ET la
+//                                                                       navigation de menu ; « valider » exige un relâchement préalable
+//   race       course, sans superposition                              actions de course (touches, manette « course », boutons tactiles)
+//   editor     éditeur de circuits                                     raccourcis de l'éditeur ; les raccourcis Ctrl ne marchent que dans ce contexte
+//   garage     garage                                                  navigation de menu (Échap : retour)
+//   menu       accueil, listes, profil, paramètres                     navigation de menu (Échap : même chemin que « ← Retour »)
+//
+// Règles :
+//  1. À CHAQUE changement de contexte (`setContext`) : `pressed` et `padEdges` sont vidés, l'état précédent des boutons de manette est réinitialisé
+//     sur l'état courant (un bouton tenu n'est jamais un « nouvel appui » après la transition), et « valider » (A) reste verrouillé tant qu'il n'a
+//     pas été relâché une fois. `keys` (touches tenues) n'est pas touché : le pilotage continue, les `keyup` restent exacts.
+//  2. Un `keydown` d'activation (Entrée, Espace) dont la cible est un contrôle activable (bouton, lien, carte…) active ce contrôle UNE fois : il
+//     n'est jamais converti en action de jeu (sinon Entrée sur « Reprendre » relancerait la course : Entrée = « recommencer »).
+//  3. En contexte `modal`, seul Échap est mis en file (pour fermer la fenêtre) ; en contexte `capture`, rien.
+//  4. Les boutons tactiles ne fabriquent pas de codes de touche : ils déclenchent l'action par `post(action)` (file d'actions, même durée de vie que
+//     `padEdges`), si bien qu'une action réassignée garde son bouton.
+//  5. Une capture (touche ou bouton de manette) est annulée par `cancelCapture()` à tout changement d'écran, d'onglet, de course, de fenêtre.
+// Le FORMAT des commandes enregistrées (`drive()`, quantSteer, InputRecorder) est hors de ce contrat : rien ici ne le modifie.
 
 // [action, libellé, touches par défaut]
 export const KEY_ACTIONS = {
@@ -77,6 +107,13 @@ const EDGE = {
   editor: ['pause', 'ed.place', 'ed.erase', 'ed.pick', 'ed.rotate', 'ed.test', 'ed.levelUp', 'ed.levelDown', 'ed.nextPiece'],
 };
 
+const ALL_EDGE_IDS = [...new Set(Object.values(EDGE).flat())];
+
+// Contrôle activable au clavier (Entrée / Espace l'activent nativement) : une touche d'activation dont la cible en est un n'est pas une action de jeu.
+const ACTIVATION_CODES = new Set(['Enter', 'NumpadEnter', 'Space']);
+const ACTIVABLE = 'button, a[href], summary, [role="button"], [role="menuitem"], [role="tab"], [role="link"], [role="option"], .card, .gcard';
+const isActivable = (el) => !!(el && el.closest && el.closest(ACTIVABLE));
+
 export function defaultKeys() {
   const out = {};
   for (const group of Object.values(KEY_ACTIONS)) for (const [id, , keys] of group) out[id] = keys.slice();
@@ -133,12 +170,16 @@ export class Input {
     this.capture = null;
     this.padEdges = new Set();
     this.navT = 0;
+    this.ctx = 'menu';           // contexte actif (voir l'en-tête) ; App.inputContext() le fixe
+    this.sync = null;            // crochet posé par App : recalcule le contexte quand une capture s'arme ou se termine
+    this._confirmLock = false;   // « valider » (A) verrouillé jusqu'au premier relâchement
     window.addEventListener('keydown', (e) => {
       if (e.key && e.key.length === 1) learned[e.code] = e.key;
       if (this.capture) {
         e.preventDefault();
         const cb = this.capture;
         this.capture = null;
+        this._changed();
         cb(e.code === 'Escape' ? null : e.code);
         return;
       }
@@ -146,12 +187,41 @@ export class Input {
       // Avec Ctrl / Cmd, la touche sert à un raccourci (copier, coller, annuler...) :
       // elle ne compte pas comme un appui « simple » (C, V, X, Z... ont leur propre action).
       const mod = e.ctrlKey || e.metaKey;
-      if (!this.keys.has(e.code) && !mod) this.pressed.add(e.code);
+      // Entrée / Espace sur un bouton (lien, carte…) l'ACTIVENT : ce n'est pas une action de jeu (Entrée = « recommencer » relancerait la course).
+      const activation = ACTIVATION_CODES.has(e.code) && isActivable(e.target);
+      if (!this.keys.has(e.code) && !mod && !activation && this._queues(e.code)) this.pressed.add(e.code);
       if (!mod || e.code.startsWith('Control') || e.code.startsWith('Meta')) this.keys.add(e.code);
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'PageUp', 'PageDown', 'Tab', 'F1', 'Home'].includes(e.code)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => this.keys.clear());
+    window.addEventListener('blur', () => { this.keys.clear(); this.pressed.clear(); });
+  }
+
+  // ---- Arbitre : contexte actif ----
+  // Une touche est-elle mise en file dans le contexte courant ? (modal : seul Échap, pour fermer la fenêtre ; capture : rien, la capture l'a déjà lue)
+  _queues(code) {
+    if (this.ctx === 'capture') return false;
+    if (this.ctx === 'modal') return code === 'Escape';
+    return true;
+  }
+
+  _changed() { if (this.sync) this.sync(); }
+
+  // Change de contexte (règle 1 de l'en-tête). Renvoie vrai s'il a changé.
+  setContext(ctx) {
+    if (ctx === this.ctx) return false;
+    this.ctx = ctx;
+    this.reset();
+    return true;
+  }
+
+  // Vide les appuis en attente et réinitialise les fronts de manette sur l'état courant ; verrouille « valider » s'il est tenu.
+  reset() {
+    this.pressed.clear();
+    this.padEdges.clear();
+    const p = this.gamepad();
+    for (const id of ALL_EDGE_IDS) this.gamepadPrev[id] = !!p && this._anyOn(p, id);
+    this._confirmLock = !!p && this._anyOn(p, 'confirm');
   }
 
   setBindings(keys, pad) {
@@ -171,9 +241,29 @@ export class Input {
     this.padCfg = { ...this.padCfg, ...cfg };
   }
 
-  // Attend la prochaine touche (null si Échap).
+  // Attend la prochaine touche (null si Échap). Une capture déjà en attente est annulée d'abord (rappelée avec (null, 'replace')) : sans cela sa
+  // scrutation de manette continuerait et lierait un bouton à l'ancienne case.
   captureKey(cb) {
+    this.cancelCapture('replace');
     this.capture = cb;
+    this._changed();
+  }
+
+  // Annule la capture en attente, s'il y en a une (changement d'écran, d'onglet, de course, ouverture d'une fenêtre) : le rappel reçoit (null, why).
+  cancelCapture(why = 'cancel') {
+    const cb = this.capture;
+    if (!cb) return false;
+    this.capture = null;
+    this._changed();
+    cb(null, why);
+    return true;
+  }
+
+  // Action déclenchée directement (boutons tactiles) : même durée de vie qu'un front de manette, consommée par act(). Ignorée sous une fenêtre ou une capture.
+  post(action) {
+    if (this.ctx === 'modal' || this.ctx === 'capture') return false;
+    this.padEdges.add(action);
+    return true;
   }
 
   down(...codes) {
@@ -198,6 +288,7 @@ export class Input {
 
   // Action reconfigurable déclenchée (une fois par appui).
   act(action) {
+    if (this.ctx === 'modal' || this.ctx === 'capture') return false;      // sous une fenêtre ou une capture, aucune action de jeu
     const b = this.bindings[action];
     if (!b) return false;
     let r = false;
@@ -236,6 +327,11 @@ export class Input {
       const on = this._anyOn(p, id);
       if (on && !this.gamepadPrev[id]) this.padEdges.add(id);
       this.gamepadPrev[id] = on;
+    }
+    // « Valider » reste verrouillé tant que A n'a pas été relâché une fois depuis la dernière transition (A est aussi « accélérer »).
+    if (this._confirmLock) {
+      if (this._anyOn(p, 'confirm')) this.padEdges.delete('confirm');
+      else this._confirmLock = false;
     }
   }
 

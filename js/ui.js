@@ -140,18 +140,25 @@ export class UI {
     $('touch').classList.toggle('hidden', !(mode === 'race' && document.body.classList.contains('touch')));
     this.hideOverlay('pause');
     this.hideOverlay('finish');
+    this._syncInput();
   }
+
+  // Arbitre d'entrées : l'ouverture ou la fermeture d'une superposition / d'une fenêtre change le contexte tout de suite (js/input.js), ce qui vide les
+  // appuis en attente : l'Entrée qui active « Reprendre » ne doit pas être relue ensuite comme « recommencer ».
+  _syncInput() { if (this.app && this.app._syncInput) this.app._syncInput(); }
 
   showOverlay(id) {
     $(id).classList.remove('hidden');
     document.body.classList.add('ov-open');
     const b = $(id).querySelector('.btn.primary');
     if (b && matchMedia('(pointer: fine)').matches) b.focus({ preventScroll: true });
+    this._syncInput();
   }
 
   hideOverlay(id) {
     $(id).classList.add('hidden');
     if (['pause', 'finish'].every((o) => $(o).classList.contains('hidden'))) document.body.classList.remove('ov-open');
+    this._syncInput();
   }
 
   flash(text, dur = 2.4) {
@@ -194,6 +201,7 @@ export class UI {
     this.modalOpen = true;
     // Un Échap appuyé AVANT l'ouverture (pas encore lu par la boucle) ne doit pas refermer cette fenêtre au tour suivant.
     if (this.app.input && this.app.input.pressed) this.app.input.pressed.delete('Escape');
+    this._syncInput();
   }
 
   _fireModalClose() { const f = this._onModalClose; this._onModalClose = null; if (f) f(); }
@@ -201,6 +209,7 @@ export class UI {
   closeModal() {
     $('modal').classList.add('hidden');
     this.modalOpen = false;
+    this._syncInput();
     this._fireModalClose();
   }
 

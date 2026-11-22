@@ -87,6 +87,7 @@ class App {
     this.audio.setVolume(this.settings.volume);
     this.audio.setMusicVolume(this.settings.musicVolume);
     this.ui = new UI(this);
+    this.input.sync = () => this._syncInput();      // (arbitre d'entrées : le contexte suit les captures qui s'arment ou se terminent, voir js/input.js)
     this.session = null;
     this.mode = null;
 
@@ -180,7 +181,26 @@ class App {
   }
 
   // ------------------------------------------------------------ Navigation
+  // Contexte d'entrée actif (voir l'en-tête de js/input.js) : un seul à la fois, du plus prioritaire au moins prioritaire.
+  inputContext() {
+    if (this.input.capture) return 'capture';
+    if (this.ui && this.ui.modalOpen) return 'modal';
+    if (this.mode === 'race') return !$('finish').classList.contains('hidden') || !$('pause').classList.contains('hidden') ? 'overlay' : 'race';
+    return this.mode === 'editor' ? 'editor' : this.mode === 'garage' ? 'garage' : 'menu';
+  }
+
+  // Recalcule le contexte ; à chaque transition l'arbitre vide les appuis en attente et réinitialise les fronts de manette (Input.setContext).
+  // Appelé à chaque image, et tout de suite à l'ouverture / la fermeture d'une fenêtre ou d'une superposition (ui.js) : une touche arrivée entre deux
+  // images ne doit pas être lue dans le contexte précédent.
+  _syncInput() {
+    if (!this.input || !this.ui) return 'menu';
+    const ctx = this.inputContext();
+    this.input.setContext(ctx);
+    return ctx;
+  }
+
   _dispose() {
+    this.input.cancelCapture();         // une capture de liaison en attente ne survit pas à un changement d'écran, de course ou de mode (TECH-006)
     $('garage').classList.add('hidden');
     $('replay-bar').classList.add('hidden');
     if (this.session) this.session.dispose();
@@ -436,14 +456,15 @@ class App {
       const dt = Math.min(0.1, (now - last) / 1000);
       rawLast = last;
       last = now;
-      const gmode = this.mode === 'race' ? 'race' : this.mode === 'editor' ? 'editor' : 'menu';
-      this.input.pollGamepad(this.ui.modalOpen ? "menu" : gmode);
-      const inMenuUi = this.ui.modalOpen || this.mode === 'menu' || this.mode === 'garage'
-        || (this.mode === 'race' && (!$('finish').classList.contains('hidden') || !$('pause').classList.contains('hidden')));
-      if (inMenuUi) {
-        if (this.mode === 'race') this.input.pollGamepad('menu');
+      // Arbitre d'entrées : le contexte de l'image décide quels fronts de manette sont suivis. Les fronts « menu » le sont à CHAQUE image (A tenu en course :
+      // son état précédent est exact quand une superposition s'ouvre, TECH-005) ; ceux de la course / de l'éditeur seulement dans leur contexte.
+      const ctx = this._syncInput();
+      this.input.pollGamepad('menu');
+      if (ctx === 'race' || ctx === 'overlay') this.input.pollGamepad('race');
+      else if (ctx === 'editor') this.input.pollGamepad('editor');
+      if (ctx === 'modal' || ctx === 'overlay' || ctx === 'menu' || ctx === 'garage') {
         const m = this.input.padMenu();
-        if (m && (m.dx || m.dy || m.confirm || m.back) && !this.input.capture) this._padNav(m);
+        if (m && (m.dx || m.dy || m.confirm || m.back)) this._padNav(m);
       }
       if (this._disco && this.scenery) this.scenery.sky.material.uniforms.horizon.value.setHSL((now / 4000) % 1, 0.8, 0.55);
       if (this.ui.modalOpen && this.input.hit('Escape')) this.ui.closeModal();
