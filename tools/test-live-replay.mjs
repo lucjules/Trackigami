@@ -76,8 +76,8 @@ async function boot() {
 }
 
 // Lance un circuit et prend la main : la session n'avance plus que par nos appels (« tenue »), avec le pilote automatique bruité comme source des commandes.
-async function launch(id, seed, amp = 0.2, modeId = '') {
-  await page.evaluate(async ({ id, seed, amp, modeId }) => {
+async function launch(id, seed, amp = 0.2, modeId = '', script = null) {
+  await page.evaluate(async ({ id, seed, amp, modeId, script }) => {
     const A = window.copytrack;
     const [{ RaceSession }, { Autopilot }] = await Promise.all([import('/js/race.js'), import('/js/autopilot.js')]);
     const L = window.__lr = { hold: true, inject: false, trace: [], inputRespawns: 0, autoRespawns: 0, rBack: [], rSpeed: [] };
@@ -96,8 +96,14 @@ async function launch(id, seed, amp = 0.2, modeId = '') {
       A.input.clearHits = () => { if (!(window.__lr && window.__lr.hold)) clear(); };      // (une touche appuyée attend l'update suivant : pas d'effacement entre deux images de la boucle)
     }
     const idx = A.builtins.findIndex((b) => b.def.id === id);
-    L.index = idx; L.key = A.builtins[idx].key;
-    if (modeId) {                                                    // mode de jeu (règles appliquées à une copie du circuit : App.playMode), sans clé de classement
+    L.index = idx; L.key = idx >= 0 ? A.builtins[idx].key : null;
+    if (script) {                                                    // circuit construit par script dans la page (ligne du pilote comprise), sans clé de classement
+      const { scriptTrack } = await import('/js/track.js');
+      const t = scriptTrack('plaque', script.code);
+      if (script.cpOn) t.tiles.find((x) => x.s === script.cpOn).cp = 1;
+      A.playTrack(t, { trackKey: null, seed: 'live-replay', difficulty: 1 });
+      L.key = null;
+    } else if (modeId) {                                                    // mode de jeu (règles appliquées à une copie du circuit : App.playMode), sans clé de classement
       const { BUILTIN_MODES } = await import('/js/rules.js');
       A.playMode(BUILTIN_MODES.find((m) => m.id === modeId), A.builtins[idx].track);
       L.key = null;
@@ -121,8 +127,8 @@ async function launch(id, seed, amp = 0.2, modeId = '') {
     const stepOnce = S._stepOnce.bind(S);
     S._stepOnce = () => { const was = S.state; stepOnce(); if (was === 'racing') L.trace.push(S.phys.pos.x, S.phys.pos.y, S.phys.pos.z, S.logic.steps); };
     const respawn = S.respawn.bind(S);
-    S.respawn = (fromInput) => { const was = S.state; respawn(fromInput); if (was === 'racing') { if (fromInput === true) { L.inputRespawns++; L.rBack.push(S.logic.steps); L.rSpeed.push(Math.hypot(S.phys.vel.x, S.phys.vel.z)); } else L.autoRespawns++; bot.reset(S.phys); } };
-  }, { id, seed, amp, modeId });
+    S.respawn = (fromInput) => { const was = S.state; respawn(fromInput); if (was === 'racing') { if (fromInput === true) { L.inputRespawns++; L.rBack.push(S.logic.steps); L.rSpeed.push(Math.hypot(S.phys.vel.x, S.phys.vel.z)); L.rVeh = (L.rVeh || []).concat(S.phys.vehicle); } else L.autoRespawns++; bot.reset(S.phys); } };
+  }, { id, seed, amp, modeId, script });
 }
 
 // Avance la course (update, dt = 0,1 s : douze pas fixes par appel) jusqu'au pas de course `tick` (ou l'arrivée).
@@ -159,7 +165,7 @@ async function finishRace() {
   return page.evaluate(() => {
     const L = window.__lr, S = L.S, A = window.copytrack;
     const run = S.opts.mode ? { inputs: S.recorder.encode(), time: S.logic.time } : S.lastRun;      // (mode de jeu : ni record ni lastRun, l'enregistreur reste)
-    return { inputs: run.inputs, time: run.time, liveTime: S.logic.time, rSpeed: L.rSpeed.slice(), splits: S.logic.splits.slice(), code: S.track.encode(), key: L.key, trace: L.trace.slice(), inputRespawns: L.inputRespawns, autoRespawns: L.autoRespawns, rBack: L.rBack.slice(), ticks: S.tick, statsRespawns: S.stats.respawns, finishShown: !document.getElementById('finish').classList.contains('hidden'), mode: A.mode };
+    return { inputs: run.inputs, time: run.time, liveTime: S.logic.time, rSpeed: L.rSpeed.slice(), rVeh: (L.rVeh || []).slice(), vehicle: S.phys.vehicle, splits: S.logic.splits.slice(), code: S.track.encode(), key: L.key, trace: L.trace.slice(), inputRespawns: L.inputRespawns, autoRespawns: L.autoRespawns, rBack: L.rBack.slice(), ticks: S.tick, statsRespawns: S.stats.respawns, finishShown: !document.getElementById('finish').classList.contains('hidden'), mode: A.mode };
   });
 }
 async function release() {
@@ -242,6 +248,28 @@ try {
       compareLiveToReplay(d);
     } finally { await release(); }
   });
+
+  // TECH-001 : la course EN DIRECT (chemin B : RaceSession._stepOnce, vraie touche R) sur des plaques de transformation, puis son rejeu côté Node (chemin A).
+  for (const [label, code, cpOn] of [['checkpoint posé sur une plaque moto', 'start S2 S.o S3 S3 finish', 'moto'], ['anneau-checkpoint après une plaque moto et un tremplin', 'start S2 S.o S UU GC2 S3 finish', '']]) {
+    await pageTest(`course en direct sur plaque (${label}) : touche R après le checkpoint → la moto est rendue, sans retour en voiture ni chute ; rejeu identique`, async () => {
+      await launch('', 7, 0.05, '', { code, cpOn });
+      try {
+        let s = await advance(1);
+        precondition(s.state === 'racing', `la course est partie (état : ${s.state})`);
+        s = await advance(s.tick + 1, 1500, 1);
+        precondition(s.state === 'racing' && s.splits === 1, `checkpoint pris (${s.splits})`);
+        s = await advance(s.tick + 2);
+        await pressR();
+        s = await advance(s.tick + 3);
+        const d = await finishRace();
+        assert.equal(d.inputRespawns, 1);
+        assert.deepEqual(d.rVeh, ['moto'], 'véhicule rendu par le retour');
+        assert.equal(d.autoRespawns, 0, 'aucune chute ni réapparition automatique après le retour');
+        assert.equal(d.vehicle, 'moto', 'arrivée en moto');
+        compareLiveToReplay(d);
+      } finally { await release(); }
+    });
+  }
 
   // Sans retour : le même circuit, mêmes commandes bruitées : témoin que la comparaison passe aussi quand rien d'autre que la conduite n'intervient.
   await pageTest('témoin : « Premiers Éclats » sans aucun retour (ni touche R, ni erreur) : même comparaison, même résultat', async () => {
