@@ -202,6 +202,18 @@ function smallestDown(n, ok) {
   return lo;
 }
 
+// Le stockage de l'appareil n'a pas la place d'écrire une restauration (stockage plein, navigation privée) : rien n'a été modifié (restoreAll est atomique).
+export class StorageFullError extends Error {
+  constructor(message = 'Stockage plein') { super(message); this.name = 'StorageFullError'; this.code = 'storage-full'; }
+}
+// restoreAll, mais l'échec ne passe plus inaperçu (TECH-075) : après avoir libéré les essais d'éditeur (jetables), une seconde tentative ; sinon StorageFullError.
+export function restoreAllOrThrow(data, keep = false) {
+  if (restoreAll(data, keep)) return true;
+  // (la seconde tentative n'écrit pas les essais d'éditeur que `data` reprendrait de l'appareil : ils viennent d'être purgés)
+  if (purgeEditorTrials() && restoreAll(Object.fromEntries(Object.entries(data || {}).filter(([k]) => !isTrialName(k))), keep)) return true;
+  throw new StorageFullError();
+}
+
 export const DEFAULT_SETTINGS = {
   volume: 0.7,
   quality: 'auto',         // auto | ultra | high | medium | low | potato | ultrapotato (voir quality.js)

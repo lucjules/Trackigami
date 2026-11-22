@@ -1,7 +1,7 @@
 // Profil du joueur : pièces, objets débloqués, équipement, code de sauvegarde.
 // Le jeu est 100 % statique (aucun serveur) : le « code joueur » est la sauvegarde
 // elle-même, compressée, à copier / coller ou à télécharger sous forme de fichier.
-import { getJSON, setJSON, dumpAll, restoreAll, DEVICE_ONLY_KEYS, isTrialName } from './storage.js';
+import { getJSON, setJSON, dumpAll, restoreAllOrThrow, DEVICE_ONLY_KEYS, isTrialName } from './storage.js';
 import { DEFAULT_LOADOUT, itemCost, sanitizeLoadout, itemsOf, exclusiveOf } from './cosmetics.js';
 import { hashString } from './track.js';
 
@@ -202,6 +202,8 @@ function stampRestored(imp, cur, now) {
 }
 
 // mode : 'replace' remplace tout ; 'merge' garde les meilleurs records et réunit les circuits.
+// Lève StorageFullError (code « storage-full ») si l'appareil n'a pas la place d'écrire la restauration : RIEN n'a alors été modifié (écriture atomique, voir storage.restoreAll) ; l'appelant
+// l'annonce au lieu d'un succès (TECH-075).
 export function applySave(obj, mode = 'replace', now = Date.now()) {
   if (!obj || !obj.data || typeof obj.data !== 'object') return reloadProfile();
   const cur = dumpAll();
@@ -211,7 +213,7 @@ export function applySave(obj, mode = 'replace', now = Date.now()) {
   if (mode === 'replace') {
     const own = {};
     for (const k of DEVICE_ONLY_KEYS) if (typeof cur[k] === 'string') own[k] = cur[k];      // l'identité en ligne de CET appareil survit à une restauration
-    restoreAll({ ...obj.data, ...own });
+    restoreAllOrThrow({ ...obj.data, ...own });
   } else {
     const out = { ...cur };
     for (const [k, v] of Object.entries(obj.data)) {
@@ -249,7 +251,7 @@ export function applySave(obj, mode = 'replace', now = Date.now()) {
         } catch { out[k] = v; }
       } else if (typeof v === 'string') out[k] = v;
     }
-    restoreAll(out);
+    restoreAllOrThrow(out);
   }
   return reloadProfile();
 }

@@ -232,6 +232,7 @@ export default {
   'Fusionner': 'Merge',
   'Remplacer': 'Replace',
   'Sauvegarde restaurée !': 'Save restored!',
+  'Stockage plein : la sauvegarde n’a pas été restaurée, rien n’a été modifié. Libère de la place sur l’appareil, puis réessaie.': 'Storage full: the save was not restored, nothing was changed. Free some space on the device, then try again.',
   'Code joueur invalide': 'Invalid player code',
   'Navigateur trop ancien pour lire ce code': 'Browser too old to read this code',
   'Code joueur abîmé (somme de contrôle incorrecte)': 'Damaged player code (checksum mismatch)',

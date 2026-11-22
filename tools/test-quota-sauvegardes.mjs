@@ -232,7 +232,7 @@ await test('importer un code en « Remplacer » ne fait pas adopter l\'identifia
   const d = boot('G2');
   storage.setJSON('telemetry.state', { install: 'aaaaaaaaaaaaaaaa', attempts: {} });
   const foreign = { v: 1, id: 'p', t: 1, data: { settings: '{"volume":0.2}', 'telemetry.state': JSON.stringify({ install: 'bbbbbbbbbbbbbbbb', attempts: {} }), 'errors.queue': '[{"message":"x"}]' } };
-  assert.equal(applySave(foreign, 'replace').ok !== false, true);
+  applySave(foreign, 'replace');
   assert.ok(d.local.m.get('shardway.telemetry.state').includes('aaaaaaaaaaaaaaaa'), 'l\'identifiant de cet appareil est gardé');
   assert.ok(!d.local.m.has('shardway.errors.queue'), 'la file d\'erreurs de l\'autre appareil n\'est pas importée');
   assert.equal(storage.getJSON('settings').volume, 0.2);
@@ -334,6 +334,61 @@ await test('éviction : sans essais, ce sont les fantômes importés (le plus gr
   setQuota(d, usedOf(d) + 100);
   storage.saveRecord('daily-2026-02-02', rec(55, 300, { ghost: 'g'.repeat(20000), inputs: 'i'.repeat(20000) }));
   for (const [k, t] of [['b-a-1', 20], ['u-xyz', 21], ['daily-2026-01-01', 22], ['b-new-1', 19]]) assert.equal(storage.getRecord(k).time, t, k + ' : temps jamais perdu');
+});
+
+console.log('TECH-075 : restauration (import) avec le stockage plein');
+const { profileMethods } = await import('../js/app/profile.js');
+const { StorageFullError } = storage;
+const importCode = (data) => ({ v: 1, id: 'AAAAA-BBBBB', t: 1, data });
+await test('import « Remplacer » ou « Fusionner » avec le stockage plein : StorageFullError (storage-full), RIEN n\'est modifié sur l\'appareil', async () => {
+  for (const mode of ['replace', 'merge']) {
+    const d = boot('I' + mode);
+    storage.saveRecord('b-a-1', rec(21, 5, { ghost: 'g'.repeat(2000) })); storage.setJSON('settings', { volume: 0.3 });
+    const before = new Map(d.local.m);
+    setQuota(d, usedOf(d) + 300);
+    const imp = importCode({ settings: '{"volume":0.9}', 'rec3.b-z-9': JSON.stringify(rec(9, 9, { ghost: 'g'.repeat(5000) })), tracks: '[]' });
+    assert.throws(() => applySave(imp, mode), (e) => e instanceof StorageFullError && e.code === 'storage-full', mode);
+    assert.deepEqual([...d.local.m.entries()].sort(), [...before.entries()].sort(), mode + ' : stockage identique à l\'avant-import');
+  }
+});
+await test('même plein, les essais d\'éditeur (jetables) sont libérés et l\'import réussit ; un vrai record n\'est pas touché', async () => {
+  const d = boot('Itrial');
+  storage.saveRecord('b-a-1', rec(21, 5, { ghost: 'g'.repeat(1000) }));
+  for (let i = 0; i < 3; i++) d.local.m.set('shardway.rec3.e-x' + i, JSON.stringify(rec(40, 1, { ghost: 'g'.repeat(20000) })));
+  setQuota(d, usedOf(d) + 500);
+  applySave(importCode({ settings: '{"volume":0.9}', 'rec3.b-z-9': JSON.stringify(rec(9, 9, { ghost: 'g'.repeat(5000) })) }), 'merge');
+  assert.equal(storage.getRecord('b-z-9').time, 9); assert.equal(storage.getRecord('b-a-1').ghost.length, 1000);
+  assert.ok(![...d.local.m.keys()].some((k) => k.includes('rec3.e-')));
+});
+await test('à l\'écran : stockage plein → message d\'échec, JAMAIS « Sauvegarde restaurée ! » ; stockage libre → « Sauvegarde restaurée ! »', async () => {
+  const flashes = []; let after = 0;
+  const fakeApp = { ui: { flash: (m) => flashes.push(m) }, _afterImport() { after++; this.ui.flash('Sauvegarde restaurée !'); }, _applyImport: profileMethods._applyImport };
+  const d = boot('Iui');
+  storage.setJSON('settings', { volume: 0.3 });
+  const imp = importCode({ settings: '{"volume":0.9}', 'rec3.b-z-9': JSON.stringify(rec(9, 9, { ghost: 'g'.repeat(5000) })) });
+  const real = d.local.setItem.bind(d.local);
+  d.local.setItem = () => { throw new Error('QuotaExceededError'); };
+  fakeApp._applyImport(imp, 'replace');
+  assert.equal(after, 0, 'pas d\'après-import'); assert.equal(flashes.length, 1);
+  assert.ok(/plein/i.test(flashes[0]) && !/restaurée !/.test(flashes[0]), flashes[0]);
+  d.local.setItem = real;
+  fakeApp._applyImport(imp, 'replace');
+  assert.equal(after, 1); assert.equal(flashes.at(-1), 'Sauvegarde restaurée !');
+  assert.equal(storage.getRecord('b-z-9').time, 9);
+});
+await test('les nouveaux textes sont traduits en anglais (note de copie allégée, erreur d\'espace, import refusé)', async () => {
+  const I = await import('../js/i18n.js'); const { default: en } = await import('../js/i18n/en.js');
+  I.resetDictionary(); I.register(en); I.setLang('en');
+  const fr = [
+    'Espace insuffisant sur cet appareil : la sauvegarde du compte n’a pas pu y être écrite (le cloud la garde). Libère de la place sur l’appareil, puis « Synchroniser maintenant ».',
+    'Espace insuffisant sur cet appareil : copie du compte allégée (90 records sans fantôme ni commandes ; le cloud les garde en entier).',
+    'Espace insuffisant sur cet appareil : 119 records du compte n’y sont pas écrits (le cloud les garde en entier).',
+    'Stockage plein : la sauvegarde n’a pas été restaurée, rien n’a été modifié. Libère de la place sur l’appareil, puis réessaie.',
+    'erreur : Espace insuffisant sur cet appareil : 119 records du compte n’y sont pas écrits (le cloud les garde en entier).',
+  ];
+  for (const t of fr) { const out = I.translate(t); assert.notEqual(out, t, 'non traduit : ' + t); assert.ok(!/[éèà]/.test(out.replace(/[“”’]/g, '')) || /Sync now/.test(out), out); }
+  assert.match(I.translate(fr[1]), /90 records/);
+  I.setLang('fr');
 });
 
 await finish('Tous les tests de la cause commune TRANS-02 passent.');

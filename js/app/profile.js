@@ -274,11 +274,21 @@ export const profileMethods = {
       title: 'Restaurer cette sauvegarde ?',
       body: `<p>Joueur <b>${esc(obj.id || '?')}</b>, du ${esc(when)}.</p><p><b>Fusionner</b> : meilleurs records, circuits réunis. <b>Remplacer</b> : efface tes données.</p>`,
       actions: [
-        { label: 'Fusionner', primary: true, onClick: () => { applySave(obj, 'merge'); this._afterImport(); } },
-        { label: 'Remplacer', danger: true, onClick: () => { applySave(obj, 'replace'); this._afterImport(); } },
+        { label: 'Fusionner', primary: true, onClick: () => this._applyImport(obj, 'merge') },
+        { label: 'Remplacer', danger: true, onClick: () => this._applyImport(obj, 'replace') },
         { label: 'Annuler' },
       ],
     });
+  },
+
+  // Restaure le code joueur ; si l'appareil n'a pas la place de l'écrire (stockage plein), l'échec est ANNONCÉ et rien n'a changé : jamais « Sauvegarde restaurée ! » à tort (TECH-075).
+  _applyImport(obj, mode) {
+    try { applySave(obj, mode); } catch (e) {
+      if (!e || e.code !== 'storage-full') throw e;
+      this.ui.flash('Stockage plein : la sauvegarde n’a pas été restaurée, rien n’a été modifié. Libère de la place sur l’appareil, puis réessaie.', 6);
+      return;
+    }
+    this._afterImport();
   },
 
   _afterImport() {
