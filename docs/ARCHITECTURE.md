@@ -246,3 +246,14 @@ Règles à ne pas casser en y touchant :
 - **Une capture de liaison est annulée** (`cancelCapture`) à tout changement d'écran, d'onglet, de course et à l'ouverture d'une fenêtre.
 - **Le format des commandes enregistrées n'est pas concerné** : `input.drive()`, `quantSteer` et `InputRecorder` restent tels quels (replays, fantômes et vérification serveur en dépendent ; test live ↔ rejeu).
 - Tests : `tools/test-entrees.mjs` (arbitre, sans navigateur) et les parcours « entrées » de `tools/test-browser.mjs`.
+
+## Cycle de vie d'une session de course (0.16.2, hors noyau de simulation)
+
+Ni `js/main.js`, ni `js/race.js`, ni `js/race/finish.js` ne sont dans la fermeture de `js/verify.js` : rien de ceci ne peut changer un temps, une commande enregistrée ni `PHYS_VER` (contrôle : `tools/test-determinisme.mjs` et le test live ↔ rejeu de `tools/test-browser.mjs`).
+
+- **Un enregistrement toujours fidèle.** On n'écrit jamais un record dont les commandes ne reproduisent pas le temps. Une erreur dans la boucle (`App._loopError`) ramène la voiture au checkpoint par `respawn(true)` (le drapeau de retour est enregistré). Si l'erreur a interrompu un pas (`RaceSession._stepping` resté vrai), la course est `unverifiable` : l'arrivée n'est pas enregistrée du tout (`_finishUnverified` : ni record local, ni envoi, ni fantôme, ni récompense, ni replay). Choix pour le record local : ne pas le garder, parce que son temps vient d'un état incertain et qu'un faux record bloquerait les vrais. `restart()` remet le drapeau à zéro.
+- **Une construction de course qui échoue proprement.** Le constructeur de `RaceSession` libère ce qu'il avait créé (`_abortBuild`) avant de relancer l'exception ; `App.playTrack` et `openTheater` la rattrapent (`_raceBuildFailed`) : session et mode cohérents, retour au menu, à la liste, à la fiche du circuit ou au salon, message au joueur. La fiche du circuit ne propose « Regarder » et « Laboratoire » que si les commandes du record se décodent.
+- **Jeton de génération.** Tout ce qui suit un `await` dans `App.onRaceFinished` vérifie `session._finishGen === gen` (incrémenté par `_finish` et `restart()`) : la garde par identité d'objet ne voit pas un redémarrage de la même session. Les données de l'arrivée (`lastRun`, temps intermédiaires) sont lues avant l'attente.
+- **Une réponse tardive ne touche pas à l'interface.** `_ensureLocalRecord` renvoie s'il a écrit ; seulement alors `refreshProgress` met à jour l'écran affiché, sans fermer de panneau ni voler le focus, défilement et focus des listes rendus.
+- Tests : les parcours « cycle de vie » de `tools/test-browser.mjs`.
+

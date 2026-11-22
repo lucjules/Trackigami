@@ -6,6 +6,19 @@ multijoueurs y sont liés. Une version qui change `PHYS_VER` impose de **redépl
 
 *Les nombres des sections anciennes (portées en cases, vitesses de saut…) sont ceux du monde de leur époque ; le monde est passé de cases de 24 m à 32 m en 0.9.11.*
 
+## Bêta 0.16.2 — le cycle de vie d'une course : plus de record faux, plus de jeu figé, plus de résultat périmé
+
+**`PHYS_VER` reste 38**, rien ne change dans la course : records, replays, fantômes, médailles et classements restent valables. Aucune commande enregistrée ne change pour une course sans erreur (le test live ↔ rejeu reste vert) ; aucun fichier de la fermeture de `js/verify.js` n'est touché.
+
+Cause commune corrigée (audit, `TRANS-08` et `TRANS-04` côté client) : des gardes par identité d'objet (`this.session !== session`) et des états qui n'étaient pas remis à zéro aux transitions. Désormais un **jeton de génération** par arrivée / redémarrage est vérifié après chaque attente, la construction d'une course échoue proprement, et l'enregistrement est toujours fidèle à la course jouée.
+
+- **Erreur dans la boucle : le record reste rejouable** (`TECH-015`). Le retour au checkpoint qui suit une erreur est maintenant enregistré. Si l'erreur a interrompu un pas (l'état de la voiture est incertain), la course est marquée non vérifiable : à l'arrivée, ni record (local ou envoyé), ni fantôme, ni récompense, ni replay, et l'écran le dit. Règle : on n'écrit jamais un record dont les commandes ne reproduisent pas le temps.
+- **Une course qui ne peut pas se construire ne fige plus le jeu** (`TECH-016`). Les objets déjà créés sont libérés, l'application revient au menu, à la liste, à la fiche du circuit ou au salon avec un message clair, sans session fantôme. « Regarder mon record » et « Laboratoire » ne sont proposés que si les commandes du record sont lisibles.
+- **Un résultat d'envoi n'apparaît plus sur la mauvaise arrivée** (`TECH-018`). Si l'on recommence pendant l'envoi, la réponse du premier envoi n'est plus affichée sur l'arrivée suivante, et le bloc caché de l'écran d'arrivée le reste.
+- **Une réponse tardive du serveur ne touche plus à l'interface** (`TECH-066`). Le panneau ouvert reste ouvert, le focus et le défilement sont gardés, et une liste n'est reconstruite que si le record local a vraiment dû être écrit.
+- Contrat et choix (dont celui du record local) : `docs/ARCHITECTURE.md`, « Cycle de vie d'une session de course ». Textes anglais ajoutés dans `js/i18n/en/race.js`.
+- Tests : quatre parcours « cycle de vie » dans `tools/test-browser.mjs` (erreur injectée en pleine course, record aux commandes invalides, envoi simulé à 1,5 s, réponse tardive).
+
 ## Bêta 0.16.1 — un arbitre d'entrées : plus de course perdue ni de réglage corrompu par un geste ordinaire
 
 **`PHYS_VER` reste 38**, rien ne change dans la course : records, replays, fantômes, médailles et classements restent valables. Aucune commande enregistrée ne change (le format `quantSteer` / `InputRecorder` et `input.drive()` sont intacts ; le test live ↔ rejeu reste vert).
