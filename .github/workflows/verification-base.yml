@@ -1,0 +1,52 @@
+name: vérification de la base
+# OPTIONNEL, DÉSACTIVÉ PAR DÉFAUT : exécute supabase/verify-prod.sql (LECTURE SEULE : que des SELECT, session ouverte en lecture seule) sur la base de production et en fait le bilan.
+# Il contrôle les droits réels (has_column_privilege : colonnes que le jeu lit, TECH-021), pas seulement l'existence des objets.
+#   - Lancement à la main (Actions › vérification de la base › Run workflow) : toujours possible, si le secret existe.
+#   - Lancement automatique (chaque lundi) : seulement si la VARIABLE de dépôt VERIFIER_BASE vaut « oui » (Settings › Secrets and variables › Actions › Variables). Sans elle : rien ne tourne.
+# Secret utilisé : SUPABASE_DB_URL, le MÊME que sauvegarde.yml (chaîne de connexion de la base, Session pooler, mot de passe compris). Jamais affiché, jamais écrit dans un fichier.
+# Un écart inattendu (MANQUE / ÉCART) fait échouer le travail : GitHub prévient le propriétaire par e-mail. Les écarts ATTENDUS sont listés dans ECARTS_ATTENDUS ci-dessous : ils restent
+# AFFICHÉS dans le bilan, étiquetés « attendu ». Docs : supabase/MIGRATIONS.md (« Contrôle des droits de lecture »), docs/DEPLOIEMENT.md.
+on:
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verifier:
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.VERIFIER_BASE == 'oui' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Écarts attendus tant que le correctif SQL de la phase 13 (TECH-021 : lecture de scores.ghost_veh) n'est pas appliqué ; fragments de libellé séparés par « ¦ ».
+      # À VIDER dès que la phase 13 est appliquée : un nouvel écart sur ces lignes deviendrait alors un vrai signal.
+      ECARTS_ATTENDUS: 'lisibilité (TECH-021) : scores (lues par le jeu)'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: secret présent ?
+        env:
+          DB: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$DB" ]; then echo "::error::Secret SUPABASE_DB_URL absent (le même que pour sauvegarde.yml : voir docs/EXPLOITATION.md)"; exit 1; fi
+      - name: verify-prod.sql (lecture seule)
+        env:
+          DB: ${{ secrets.SUPABASE_DB_URL }}
+          PGOPTIONS: '-c default_transaction_read_only=on'
+        run: |
+          docker run --rm -i -e DB -e PGOPTIONS postgres:17 sh -c 'psql "$DB" -X -v ON_ERROR_STOP=1 --csv -t' < supabase/verify-prod.sql > verify-prod.csv
+          wc -l verify-prod.csv
+      - name: bilan
+        run: |
+          set +e
+          node tools/verify-prod-report.mjs < verify-prod.csv > bilan.md
+          code=$?
+          cat bilan.md | tee -a "$GITHUB_STEP_SUMMARY"
+          exit $code

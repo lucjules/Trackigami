@@ -8,6 +8,10 @@
 --   statut « ÉCART »   : présent mais pas dans l'état attendu (droit trop large, fonction ancienne…) ;
 --   statut « info »    : renseignement, pas un verdict (ex. nombre de circuits publiés avant l'étape 15 : temps auteur non vérifié).
 -- Les lignes « après 15b » ne sont attendues QU'APRÈS l'étape 15b (voir MIGRATIONS.md) : avant, un « ÉCART » sur ces lignes est NORMAL.
+-- Les lignes « lisibilité (TECH-021) » vérifient que le jeu PEUT LIRE les colonnes qu'il demande (scores : ghost_veh, has_ghost, splits, track_name… ; players : name, title) et ne
+-- peut PAS lire scores.inputs ni scores.ghost. Elles contrôlent les DROITS (has_column_privilege), pas l'existence : une colonne présente mais illisible est ce qui dégrade le
+-- classement mondial (boutons de fantôme et titres absents). UN « ÉCART » SUR scores.ghost_veh EST ATTENDU tant que le correctif SQL de la phase 13 n'est pas appliqué
+-- (aucune étape du dépôt n'accorde cette lecture) : voir supabase/MIGRATIONS.md, « Contrôle des droits de lecture ». Le lire, ne pas le « corriger » ici.
 -- =====================================================================================
 with
 t(n, ord) as (values ('rate_hits', 1), ('track_binds', 2), ('submit_rate', 3), ('scores', 4), ('tracks', 5)),
@@ -17,6 +21,22 @@ f(sig, ord) as (values
   ('public.publish_track(uuid,text,text,text,text,double precision,integer,integer,text,text)', 12),
   ('public.submit_rate_check(uuid,integer,integer,integer)', 13),
   ('public.scores_limit()', 14)),
+-- Colonnes que le jeu lit (js/online.js : classement, ma place, nombre de temps, titres) et colonnes qu'il ne doit JAMAIS lire. `readable` : droit de lecture effectif du rôle
+-- (droit de colonne OU de table). La colonne est cherchée dans pg_attribute (par son numéro) : absente, elle est signalée « absente » au lieu de faire échouer toute la requête.
+col_state as (
+  select c.ord, c.role, c.tbl, c.want, c.col, a.attnum is not null as present,
+         coalesce(a.attnum is not null and has_column_privilege(c.role, to_regclass('public.' || c.tbl), a.attnum, 'select'), false) as readable
+  from (
+    select o.ord + r.ord as ord, r.role, o.tbl, o.want, unnest(o.cols) as col
+    from (values
+      (0, 'scores',  true,  array['track_key', 'player', 'time', 'phys_ver', 'track_name', 'updated_at', 'has_ghost', 'ghost_veh', 'splits']),
+      (2, 'players', true,  array['name', 'title']),
+      (4, 'scores',  false, array['inputs', 'ghost'])
+    ) o(ord, tbl, want, cols),
+    (values (0, 'authenticated'), (1, 'anon')) r(ord, role)
+  ) c
+  left join pg_attribute a on a.attrelid = to_regclass('public.' || c.tbl) and a.attname = c.col and not a.attisdropped
+),
 checks as (
   -- ---- 1. objets de l'étape 15 -------------------------------------------------------------------------------------------------------------
   select ord, 'table ' || n as verification, 'présente' as attendu,
@@ -204,6 +224,21 @@ checks as (
   select 93, 'RLS activée sur TOUTES les tables de public', 'aucune table sans RLS',
          coalesce((select string_agg(c.relname, ', ' order by c.relname) from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind = 'r' and not c.relrowsecurity), 'aucune'),
          case when exists (select 1 from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind = 'r' and not c.relrowsecurity) then 'ÉCART' else 'ok' end
+  union all
+  -- ---- 4 quinquies. lisibilité des colonnes que le jeu lit (TECH-021, COMPLETE-005) : des DROITS, pas de l'existence ------------------------------------------------
+  -- (ord 120 à 129 ; une ligne par table, par rôle et par sens : « le jeu doit lire » / « le jeu ne doit pas lire »)
+  select 120 + ord, 'lisibilité (TECH-021) : ' || tbl || ' (' || case when want then 'lues' else 'JAMAIS lues' end || ' par le jeu) pour le rôle ' || role,
+         case when want then 'toutes lisibles' else 'aucune lisible' end,
+         coalesce(nullif(concat_ws(' · ',
+                  case when want then 'ILLISIBLES : ' || (select string_agg(col, ', ' order by col) from col_state x where x.ord = g.ord and x.present and not x.readable)
+                       else 'LISIBLES À TORT : ' || (select string_agg(col, ', ' order by col) from col_state x where x.ord = g.ord and x.present and x.readable) end,
+                  'absentes : ' || (select string_agg(col, ', ' order by col) from col_state x where x.ord = g.ord and not x.present)), ''),
+                  case when want then 'toutes lisibles' else 'aucune lisible' end),
+         case when want and exists (select 1 from col_state x where x.ord = g.ord and not x.present) then 'MANQUE'
+              when want and exists (select 1 from col_state x where x.ord = g.ord and not x.readable) then 'ÉCART'
+              when not want and exists (select 1 from col_state x where x.ord = g.ord and x.present and x.readable) then 'ÉCART'
+              else 'ok' end
+  from (select distinct ord, tbl, want, role from col_state) g
   union all
   -- ---- 5. renseignements ---------------------------------------------------------------------------------------------------------------------
   select 70, 'circuits publiés dont le temps auteur n''est PAS vérifié (publiés avant l''étape 15)', 'info',

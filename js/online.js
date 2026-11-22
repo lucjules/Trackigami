@@ -22,6 +22,13 @@ function explain(status, body) {
 }
 function explain1(status, body) {
   const msg = (body && (body.message || body.msg || body.error_description || body.error)) || '';
+  // Le serveur refuse une course ou une publication parce que sa version de physique n'est pas celle du jeu : il le dit par un DRAPEAU (`versionMismatch`, avec `serverPhysVer`),
+  // jamais par son texte (la phrase française peut changer ou être traduite). Les deux cas se distinguent par `serverPhysVer` : voir versionMismatchText.
+  if (body && body.versionMismatch === true) {
+    const e = new OnlineError(msg || 'Version du jeu différente.', 'version-mismatch');
+    e.serverPhysVer = typeof body.serverPhysVer === 'number' && Number.isFinite(body.serverPhysVer) ? body.serverPhysVer : null;
+    return e;
+  }
   if (/anonymous/i.test(msg) && /disabled/i.test(msg)) return new OnlineError('Connexion anonyme désactivée sur le serveur.', 'anon-disabled');
   if (body && body.code === '42P01' || /relation .* does not exist|Could not find the table/i.test(msg)) return new OnlineError('Base non prête (étape 1 SQL manquante).', 'no-schema');
   if (body && body.code === '23505') return new OnlineError('Ce circuit est déjà publié.', 'duplicate');
@@ -43,6 +50,17 @@ function explain1(status, body) {
   if (/appartient à un compte/.test(msg)) return new OnlineError('Ce pseudo appartient à un compte : choisis-en un autre.', 'name-taken');
   if (status === 401 || status === 403) return new OnlineError('Accès refusé par le serveur.', 'denied');
   return new OnlineError(msg || `Erreur du serveur (${status}).`, 'http');
+}
+
+// Message affiché au joueur quand le serveur a refusé un temps pour cause de version (erreur de code 'version-mismatch') ; physVer : la version de physique de CE jeu.
+//  - serveur en retard (serverPhysVer < physVer) : la fonction « submit-score » n'est pas encore à jour, ce qui arrive pendant un déploiement : recharger la page ne sert à rien, il faut attendre ;
+//  - serveur en avance (serverPhysVer > physVer) : c'est CETTE page qui est périmée (ancienne version en cache) : la recharger ;
+//  - version du serveur inconnue : les deux pistes. Dans tous les cas, le record reste enregistré sur l'appareil.
+export function versionMismatchText(err, physVer) {
+  const sv = err && typeof err.serverPhysVer === 'number' ? err.serverPhysVer : null;
+  if (sv !== null && sv > physVer) return '🌍 Classement indisponible : ton jeu n’est plus à jour. Recharge la page. Record gardé ici.';
+  if (sv !== null && sv < physVer) return '🌍 Classement indisponible : le serveur est en cours de mise à jour, réessaie dans quelques minutes. Record gardé ici.';
+  return '🌍 Classement indisponible : le serveur et ton jeu ne sont pas à la même version. Réessaie dans quelques minutes, ou recharge la page. Record gardé ici.';
 }
 
 // Le serveur a-t-il REFUSÉ le jeton de renouvellement (périmé, déjà utilisé, révoqué) ? 400 / 401 / 403 ; tout le reste (réseau, 5xx, 429) est passager.
