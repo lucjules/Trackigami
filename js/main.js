@@ -15,6 +15,7 @@ import { RaceSession } from './race.js';
 import { BUILTIN_TRACKS, buildBuiltin, authorLabel } from './tracks.js';
 import { Track, hashString, lossBlocking } from './track.js';
 import { lossMessage, lossNote } from './lossMessage.js';
+import { adoptLegacyKeys } from './keyAlias.js';
 import { VERSION, PHYS_VER, GAME_NAME } from './version.js';
 import { online, versionMismatchText } from './online.js';
 import { account } from './account.js';
@@ -268,6 +269,7 @@ class App {
     let track;
     try { track = Track.decode(code); } catch { this.ui.flash('Code de circuit invalide.'); return; }
     // Circuits de joueurs : médailles déduites du temps de l'auteur, seulement s'il l'a fini (trackDescriptor.js).
+    adoptLegacyKeys(track);      // (records et courses rangés sous l'ancienne clé : TECH-039, js/keyAlias.js)
     this.launchDesc(describeUser(track, entryId ? { id: entryId } : null));
   }
 

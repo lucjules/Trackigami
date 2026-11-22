@@ -86,7 +86,8 @@ function flipTrack() {
 
 function trackEntry(label, code) {
   const tr = Track.decode(code);
-  return { label, code, reencoded: tr.encode(), signature: tr.signature(), userKey: tr.userKey, tiles: tr.tiles.length, decos: tr.decos.length, laps: tr.laps, verified: !!tr.verified };
+  // legacyKeys : les clés u-… d'AVANT la phase 7 (signature « legacy » : Track.legacyUserKeys), [] si la clé n'a pas changé ; elles épinglent l'ancien algorithme (js/keyAlias.js en dépend).
+  return { label, code, reencoded: tr.encode(), signature: tr.signature(), userKey: tr.userKey, legacyKeys: tr.legacyUserKeys(), tiles: tr.tiles.length, decos: tr.decos.length, laps: tr.laps, verified: !!tr.verified };
 }
 
 // ---- Courses enregistrées ----------------------------------------------------------------------------------------------------------

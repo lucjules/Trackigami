@@ -113,10 +113,15 @@ test('FAILLE CORRIGÉE : deux circuits qui ne diffèrent que par le roulis d\'un
 test('les signatures des circuits d\'avant la phase 3 (sans roulis d\'obstacle) ne changent pas : les classements existants restent', () => {
   for (const d of BUILTIN_TRACKS) { const t = buildBuiltin(d); assert.ok(!t.signatureText().includes(':z'), d.id); }
 });
-test('l\'arrondi de position des obstacles (0,1 m) est une limite CONNUE de la signature : un décalage de moins de 0,05 m garde la même clé (documenté, voir docs/AUDIT-PHASE4-INTEGRITE.md)', () => {
+test('TECH-039 (phase 7, limite levée) : la signature d\'un obstacle est au pas du CODE (centième de mètre, millième de radian) : un décalage de 0,04 m, ou de 0,01 m, change la clé ; un décalage sous le pas du code (4 mm) ne la change pas', () => {
   const t = Track.decode(richCode()), s0 = t.signature();
-  t.decos[0].x += 0.04;
-  assert.equal(t.signature(), s0);
+  assert.equal(t.decos[0].k, 'spikes');
+  for (const dx of [0.04, 0.01, -0.01]) { const u = Track.decode(richCode()); u.decos[0].x += dx; assert.notEqual(u.signature(), s0, `x ${dx > 0 ? '+' : ''}${dx}`); }
+  const v = Track.decode(richCode()); v.decos[0].x += 0.004;        // le code n'écrit que le centième : 4 mm de plus se relisent à l'identique
+  assert.equal(v.signature(), s0);
+  assert.equal(Track.decode(v.encode()).signature(), s0);
+  const w = Track.decode(richCode()); w.decos[0].ry += 0.004;       // 4 mrad : l'extrémité d'une poutre d'échelle 8 bouge de 0,26 m
+  assert.notEqual(w.signature(), s0);
 });
 
 console.log('\n2. Lecture des codes : rien n\'est perdu en silence');

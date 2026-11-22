@@ -63,6 +63,7 @@ La vue d'ensemble (principes, déterminisme, flux d'une course) est dans [ARCHIT
 | `input.js` | Entrées : clavier (codes physiques => QWERTY et AZERTY), manette, tactile. |
 | `inspector.js` | Mode Inspection de l'éditeur : sélection d'une pièce ou d'une décoration, panneau de propriétés généré selon l'objet, et gizmos 3D (TransformControls : flèches de déplacement, cercles de rotation). |
 | `joins.js` | Raccords d'orientation (0.9.3) : une route sur un mur ne se raccorde pas directement au sol, il faut une transition. |
+| `keyAlias.js` | Alias local des clés de circuits de joueurs : ancienne clé u-… → nouvelle (TECH-039, phase 7, 0.16.6). |
 | `legal.js` | Pages légales (0.12.4) : crédits et licences, confidentialité, mentions légales, règles de la communauté. Une seule source, en français et en anglais, affichée dans le jeu (js/app/legal.js) et par la page autonome legal.html (lien partageable, lisible sans lancer le jeu ni créer de compte). |
 | `legalPage.js` | Page autonome legal.html (0.12.4) : affiche une page légale (?p=confidentialite \| mentions \| regles \| credits) dans la langue choisie (?lang=fr \| en ; sinon la langue réglée dans le jeu sur cet appareil, sinon celle du navigateur). Les textes sont ceux du jeu (js/legal.js). |
 | `logicText.js` | Logique du circuit en phrases, et ses vérifications (éditeur de logique, E11). Module pur, testé sous Node (tools/test-logique.mjs). |

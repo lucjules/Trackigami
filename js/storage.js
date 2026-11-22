@@ -290,6 +290,12 @@ export function cleanRuns(list) {
     .slice(0, RUNS_MAX);
 }
 export function listRuns(trackKey) { return cleanRuns(read(RUNS + trackKey, [])); }
+export function setRuns(trackKey, list) { return !!trackKey && write(RUNS + trackKey, cleanRuns(list)); }
+
+// Clés de la portée courante qui commencent par `prefix`, sans le préfixe de portée (alias de clés de circuit : js/keyAlias.js).
+export function listKeys(prefix) {
+  return listPrefixedKeys().map((k) => k.slice(PREFIX.length)).filter((k) => k.startsWith(prefix));
+}
 export function pushRun(trackKey, run) {
   if (!trackKey) return false;
   return write(RUNS + trackKey, cleanRuns([{ time: run.time, date: run.date || Date.now() }, ...listRuns(trackKey)]));

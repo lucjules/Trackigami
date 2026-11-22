@@ -32,6 +32,7 @@ import { mountLeaderboard } from '../ui/leaderboardPanel.js';
 import { thumbnail } from '../editorTools.js';
 import { BUILTIN_MODES, sanitizeRules } from '../rules.js';
 import { listModes } from '../storage.js';
+import { adoptLegacyKeys } from '../keyAlias.js';
 
 const MAX_RIVALS = 3;
 const WIND_LABEL = ['vers le nord', 'vers le nord-est', 'vers l’est', 'vers le sud-est', 'vers le sud', 'vers le sud-ouest', 'vers l’ouest', 'vers le nord-ouest'];
@@ -365,12 +366,14 @@ export const raceHubMethods = {
   openUserHub(entry, from = 'mytracks') {
     let track;
     try { track = Track.decode(entry.code); } catch { this.ui.flash('Code de circuit invalide.'); return; }
+    adoptLegacyKeys(track);      // (records et courses rangés sous l'ancienne clé : TECH-039, js/keyAlias.js)
     this.openRaceHub(describeUser(track, entry), { from });
   },
 
   openCommunityHub(row, from = 'community') {
     let track;
     try { track = Track.decode(row.code); } catch { this.ui.flash('Ce circuit est abîmé : impossible de l’ouvrir.'); return; }
+    adoptLegacyKeys(track);
     this.openRaceHub(describeCommunity(track, row), { from });
   },
 

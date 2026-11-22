@@ -71,6 +71,7 @@ test('les codes de circuit de tous les formats se relisent (pièces, signature, 
     assert.equal(tr.encode(), e.reencoded, `${e.label} : code réécrit`);
     assert.equal(tr.signature(), e.signature, `${e.label} : signature`);
     assert.equal(tr.userKey, e.userKey, `${e.label} : clé`);
+    assert.deepEqual(tr.legacyUserKeys(), e.legacyKeys, `${e.label} : clés d'avant la phase 7 (signature legacy : l'alias des records locaux en dépend)`);
     assert.deepEqual([tr.tiles.length, tr.decos.length, tr.laps, !!tr.verified], [e.tiles, e.decos, e.laps, e.verified], e.label);
     assert.equal(Track.decode(e.reencoded).encode(), e.reencoded, `${e.label} : relecture stable`);
     // (phase 7, TECH-002 : lire → écrire → lire redonne la MÊME signature, la même clé et la même marque « vérifié », à chaque génération)

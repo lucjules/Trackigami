@@ -319,7 +319,7 @@ export const screenMethods = {
     for (const entry of tracks) {
       let track = null;
       try { track = Track.decode(entry.code); } catch { /* code abîmé */ }
-      const rec = track ? getRecord(track.userKey) || getRecord('u-' + hashString(track.encode())) : null;
+      const rec = track ? track.userRecordKeys().map((k) => getRecord(k)).find(Boolean) || null : null;      // (clé actuelle, puis celles d'avant : TECH-039)
       const card = document.createElement('div');
       card.className = 'card';
       card.innerHTML = `${track ? `<img class="thumb" alt="" src="${thumbnail(track, 'u-' + entry.code.length + '-' + hashString(entry.code))}">` : ''}
