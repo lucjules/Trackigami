@@ -5,11 +5,42 @@ Tout se lance depuis la racine du dépôt. **Rien n'est désactivé** : un test 
 | Commande | Ce que ça vérifie | Prérequis |
 | --- | --- | --- |
 | `npm run lint` | ESLint (règles du dépôt : pas de `Math.sin`… dans le noyau de simulation, variables inutilisées, `const`…) | Node, accès à npm (`npx eslint@10.1.0`) |
-| `npm test` | 91 fichiers de test du noyau (physique, circuits, éditeur, comptes, cloud, multijoueur, serveur, interface) + vérification que les fichiers générés sont à jour | Node 22 |
+| `npm test` | 127 fichiers de test du noyau (physique, circuits, éditeur, comptes, cloud, multijoueur, serveur, interface) + vérification que les fichiers générés sont à jour | Node 22 |
 | `npm run test:deno` | `js/dmath.js` et l'empreinte de la physique sous **Deno** (le moteur de la fonction serveur) : mêmes bits qu'avec Node | accès à npm (`npx deno@2.9.6`) |
-| `npm run test:browser` | un vrai Chromium (WebGL logiciel) : parcours complet du jeu, éditeur, menus, tactile, multijoueur à deux onglets, accessibilité des boutons sur 5 tailles d'écran, puis la langue | Playwright 1.63 + Chromium (`npm install --no-save playwright@1.63.0 && npx playwright install chromium`) |
+| `npm run test:browser` | un vrai Chromium (WebGL logiciel) : parcours complet du jeu, éditeur, menus, tactile, multijoueur à deux onglets, accessibilité des boutons sur 5 tailles d'écran, puis la langue ; course en direct ↔ rejeu et entrées (voir « Filet de sécurité ») | Playwright 1.63 + Chromium (`npm install --no-save playwright@1.63.0 && npx playwright install chromium`) |
 | `npm run test:sql` | les étapes `supabase/etape*.sql` (1 à 15, puis 15b et le retour arrière) sur un PostgreSQL local avec un faux schéma `auth` : RLS, droits, fonctions, limitation, et de la **concurrence réelle** (sessions `psql` simultanées avec entrelacements forcés : plafond de 2 000, meilleur temps, limitation de cadence). Le script échoue (code de sortie ≠ 0) si un test échoue | PostgreSQL (`psql`, `initdb`) |
 | `node tools/phys-fingerprint.mjs` | la physique n'a pas changé sans que `PHYS_VER` change (193 scénarios) ; `--update` après un changement voulu | Node |
+
+## Défauts connus : `bugConnu` (0.16.1)
+
+Les défauts de `docs/audit/AUDIT_COMPLET.md` qui ne sont pas encore corrigés sont reproduits par des tests, pour que leur correction soit mesurable et que les phases qui touchent le noyau, le modèle ou les entrées ne cassent rien d'autre sans qu'on le voie.
+
+```js
+import { test, bugConnu, precondition } from './harness.mjs';
+bugConnu('TECH-001', () => { assert.equal(sim.phys.vehicle, 'glider'); }, 'ce que le jeu devrait faire');
+```
+
+- `fn` décrit le comportement **attendu** (des `assert.*`). Tant que le défaut existe, `fn` échoue sur une assertion et le test est **ok** (la suite reste verte).
+- Dès que `fn` passe, le test **échoue** : « le défaut <id> est corrigé : retire bugConnu et garde ce test comme test de régression ». Le correctif de l'audit doit donc, dans le même changement, remplacer `bugConnu(id, fn)` par `test(nom, fn)` (et mettre à jour la fiche).
+- Seule une `AssertionError` compte comme « le défaut est présent ». Toute autre exception (test cassé, délai dépassé, erreur de la page) fait échouer le test. Les préconditions de la mise en scène s'écrivent avec `precondition(cond, message)` : une mise en scène ratée n'est jamais un défaut « connu ». À côté de chaque `bugConnu`, un **témoin** (test ordinaire) prouve que la sonde fonctionne.
+- `BUG_VERBOSE=1 node tools/test-….mjs` affiche, sous chaque test, **comment** le défaut se manifeste aujourd'hui (le message de l'assertion qui échoue).
+- Le mécanisme lui-même est testé par `test-harnais`.
+
+## Filet de sécurité (0.16.1, `PHYS_VER` 38)
+
+Ajouté avant les phases de correction ; **aucun fichier de `js/` n'est modifié**.
+
+| Fichier | Contenu | Défauts |
+| --- | --- | --- |
+| `test-harnais` (npm test) | `bugConnu` : défaut présent → ok, corrigé → échec avec le message exact, exception non assertion → échec | — |
+| `test-noyau-defauts` (npm test) | retour au checkpoint aérien puis sur plaque moto / bateau / deltaplane (véhicule restauré, pas de chute en boucle) ; vitesse de départ `v0` après `rewind` ; règle de logique « à T s » après un retour avec `keepClock` ; téléportation > 3 m à la réception sur un ruban (graines 349198 et 349322, puis fuzz de 144 courses perturbées sur « Épave Engloutie », graines 349100 à 349243, budget de 90 s qui échoue au lieu de conclure) | TECH-001, TECH-013, TECH-014, GAME-004 |
+| `test-modele-defauts` (npm test) | obstacle roulé de π relu en boucle (roulis, signature, clé `u-…`, `verifyPublish`, `verifyRun`, « vérifié » conservé) ; décoration aux coordonnées non arrondies (état relu ≠ mémoire, instantané de l'éditeur au retour d'un essai) ; annuler / rétablir après écriture directe d'une inclinaison ; solide incliné | TECH-002, TECH-034, TECH-035 |
+| `test-live-replay` (`npm run test:browser`) | 4 courses complètes dans Chromium (« Premiers Éclats » et « Laminoir », conduite propre puis maladroite) par `RaceSession.update` / `_stepOnce`, pilote automatique bruité à graine fixe, trois retours par la vraie touche R ; puis, côté Node : code relu, `replayRun` (temps et temps intermédiaires), `GhostRunner` pas à pas (écart de position 0 m), `verifyRun` ; témoin sans retour ; variante avec exception injectée dans la boucle | chemin B ↔ chemin A ; TECH-015 |
+| `test-browser-entrees` (`npm run test:browser`) | pause puis Entrée sur « Reprendre » ; manette simulée, A tenu à l'ouverture de la pause et de l'arrivée ; case de liaison cliquée puis course puis W tenue ; P, T, C, H sous la fenêtre « Commandes » ; un contexte de navigateur neuf par scénario | TECH-004, 005, 006, 017 |
+
+Déterminisme de `test-live-replay` : la boucle du jeu est « tenue » (elle n'avance plus la session) ; seuls les appels du test à `update(0,1)` (douze pas fixes) font avancer la course, avec un générateur à graine fixe ; seules les touches R viennent de Chromium, et elles attendent la prochaine image. Trois exécutions donnent exactement les mêmes temps. Les attentes de `test-browser-entrees` après une touche comptent des images rendues, pas des durées.
+
+Limites : le cas d'origine de GAME-004 (graine 348437 de l'audit) n'est pas retrouvé (les sondes d'origine sont perdues) : un autre modèle de perturbation retrouve le même phénomène sur « Épave Engloutie ». La capture de touche par manette (TECH-006, `_capturePad`) et les touches sous les bilans de l'Académie et des modes (TECH-017) ne sont pas couvertes.
 
 ## Les essais par sujet
 
