@@ -188,7 +188,7 @@ test('normalizeAngle : ramené dans ]−π, π] puis arrondi au millième ; π r
   assert.equal(normalizeAngle(2 * Math.PI + 0.5), 0.5);
   assert.equal(normalizeAngle(0.0004), 0);
   assert.equal(normalizeAngle(-0.0004), 0);
-  assert.equal(normalizeAngle(0.6544984694978735), 0.654);       // 37,5° saisi à l'inspecteur : arrondi au millième comme le code (TECH-035 reste un défaut de l'éditeur, phase 8)
+  assert.equal(normalizeAngle(0.6544984694978735), 0.654);       // 37,5° saisi à l'inspecteur : arrondi au millième comme le code (TECH-035 : corrigé en phase 8, normalizeDeco arrondit toute écriture)
 });
 test('addDeco : tout roulis ou inclinaison écrit est une valeur normalisée ; le circuit relu du code est identique, signature comprise, après 1, 2 et 5 lectures', () => {
   const r = lcg(77);

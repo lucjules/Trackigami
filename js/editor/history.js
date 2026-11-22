@@ -2,10 +2,11 @@
 // Ces méthodes s'ajoutent au prototype de EditorSession (voir editor.js) : `this` est l'instance.
 import { CELL, MAX_TRACK_CODE_CHARS } from '../constants.js';
 import { PIECES } from '../pieces.js';
-import { Track, tileToRow, rowToTile, lossBlocking } from '../track.js';
+import { Track, tileToRow, rowToTile, lossBlocking, normalizeDeco } from '../track.js';
 import { lossMessage, lossNote } from '../lossMessage.js';
 import { setEditorDraft, saveMyTrack, newId, wroteOk } from '../storage.js';
 import { centerlineWorld } from '../ribbons.js';
+import { newCircuitId } from './shared.js';
 export const historyMethods = {
   exportState() {
     return {
@@ -50,32 +51,17 @@ export const historyMethods = {
   },
 
   // ---------------------------------------------------------------- Historique
-  _snapshot() {
-    return JSON.stringify({
-      t: this.track.tiles.map(tileToRow),
-      d: this.track.decos.map((o) => [o.k, o.x, o.y, o.z, o.ry, o.s, o.c, o.u, o.ph || 0, o.cc || '', o.cp || null, o.g || 0, o.rx || 0, o.rz || 0]),      // (cp : formes d'une pièce perso, sans elles l'annulation la perdait)
-      gn: this.track.groupNames(),
-      lg: this.track.lg,
-      lp: this.track.laps || 1,
-      pr: { name: this.track.name, desc: this.track.desc, decor: this.track.decor, ambiance: this.track.ambiance, scripts: this.track.scripts, ...this.track.rulesState() },      // (ambiance et scripts : sans eux, annuler / rétablir les remettait à zéro)
-    });
-  },
+  // Phase 8 (TECH-035) : l'instantané est CANONIQUE (snapshotOf, en bas du fichier) : écrit puis relu (_restore), il redonne exactement le même texte.
+  _snapshot() { return snapshotOf(this.track); },
 
   _restore(snap) {
     const data = JSON.parse(snap);
-    const { vt, vh } = this.track;
-    this.track.clear();
-    this.track.vt = vt; this.track.vh = vh;
-    for (const row of data.t) this.track.add(rowToTile(row));
-    for (const [k, x, y, z, ry, sc, c, u, ph, cc, cp, g, rx, rz] of data.d) this.track.addDeco({ k, x, y, z, ry, s: sc, c, u, ph, cc, cp: cp || undefined, g, rx, rz });
-    for (const [g, n] of data.gn || []) this.track.setGroupName(g, n);
-    this.track.lg = data.lg || null;
-    this.track.laps = data.lp || 1;
-    if (data.pr) {
-      this.track.setParams(data.pr);
-      if (data.pr.name) this.track.name = data.pr.name;
-      if (data.pr.decor && data.pr.decor !== this.track.decor) { this.track.decor = data.pr.decor; this._applyDecor(); this.gridKey = ''; }
-    }
+    const { vt, vh, decor } = this.track;
+    fillFromSnapshot(this.track, data);
+    // (TECH-054 : la vérification est dans l'instantané — annuler un « Nouveau » ou un import rend le circuit d'avant AVEC la sienne. Un instantané sans vérification garde celle
+    // du moment : revenir à un état qu'on avait vérifié le redonne vérifié, la signature (vh) décide.)
+    if (data.v && data.v[0] > 0) { this.track.vt = data.v[0]; this.track.vh = data.v[1]; } else { this.track.vt = vt; this.track.vh = vh; }
+    if (this.track.decor !== decor) { this._applyDecor(); this.gridKey = ''; }
     this._changed(false);
     this.needsRebuild = true;
     this._lastDirty = undefined; this._refreshSaved();
@@ -181,9 +167,20 @@ export const historyMethods = {
     if (r === 'saved') this.app.ui.flash(`« ${this.track.name} » enregistré dans « Mes circuits ».`, 2.4);
   },
 
+  // Un autre circuit est chargé dans la session (Nouveau, Importer) : ce qui n'appartient qu'au circuit d'avant est remis à zéro — calques masqués et verrouillés (TECH-054 :
+  // les groupes 1, 2 du nouveau circuit restaient invisibles ou verrouillés) et circuit d'origine du presse-papiers (TECH-058).
+  _resetForOtherTrack() {
+    for (const g of this.hiddenGroups || []) this.view.setGroupVisible(g, true);
+    this.hiddenGroups = new Set(); this.lockedGroups = new Set();
+    this.circuitId = newCircuitId();
+    this.selGroup = 0;
+  },
+
   newTrack() {
     const r = this.autoSave();
     if (r === 'failed') return;
+    this._commit();      // (l'état d'avant, avec sa vérification, est le dernier pas : « annuler » le rend tel quel — TECH-054)
+    this._resetForOtherTrack();
     this.track.clear();
     this.track.name = 'Mon circuit';
     this.track.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 });
@@ -206,7 +203,7 @@ export const historyMethods = {
       history: this.history, hIndex: this.hIndex, histSel: this.histSel, histRect: this.histRect,
       clip: this.clip, opts: { ...this.opts }, famTraits: { ...this.famTraits }, deco: { ...this.deco }, surfParam: { ...this.surfParam },
       hiddenGroups: this.hiddenGroups ? [...this.hiddenGroups] : [], lockedGroups: this.lockedGroups ? [...this.lockedGroups] : [],
-      focusLevel: this.focusLevel, freeCam: !!this.freeCam, showGrid: this.showGrid, lastBrush: this._lastBrush, hinted: this._hinted ? [...this._hinted] : [],
+      circuitId: this.circuitId, focusLevel: this.focusLevel, freeCam: !!this.freeCam, showGrid: this.showGrid, lastBrush: this._lastBrush, hinted: this._hinted ? [...this._hinted] : [],
       savedSnap: this._savedSnap, lastTile: this._lastTile ? this.track.tiles.indexOf(this._lastTile) : -1, ui: this._uiKeep ? this._uiKeep() : null,
     };
   },
@@ -216,6 +213,7 @@ export const historyMethods = {
     this.clip = k.clip; this.opts = { ...this.opts, ...k.opts }; this.famTraits = k.famTraits; this.deco = { ...this.deco, ...k.deco }; this.surfParam = k.surfParam;
     if (k.hiddenGroups.length) { this.hiddenGroups = new Set(k.hiddenGroups); for (const g of k.hiddenGroups) this.view.setGroupVisible(g, false); }
     if (k.lockedGroups.length) this.lockedGroups = new Set(k.lockedGroups);
+    if (k.circuitId) this.circuitId = k.circuitId;
     this.focusLevel = k.focusLevel; if (k.focusLevel) this.needsRebuild = true;
     this.freeCam = k.freeCam; this.showGrid = k.showGrid; this._lastBrush = k.lastBrush; this._hinted = new Set(k.hinted);
     this._savedSnap = k.savedSnap;
@@ -229,6 +227,8 @@ export const historyMethods = {
     const t = Track.decode(code);
     const r = this.autoSave();
     if (r === 'failed') return;
+    this._commit();      // (voir newTrack)
+    this._resetForOtherTrack();
     const tr = this.track;
     tr.clear();
     for (const tile of t.tiles) tr.add(tile);
@@ -297,7 +297,7 @@ export const historyMethods = {
     }
     const a = pts[0], b = pts[1];
     const yaw = Math.atan2(-(b[0] - a[0]), -(b[2] - a[2]));
-    const gs = (t.v && PIECES[t.t].kind !== 'ribbon' && PIECES[t.t].kind !== 'loop') || this.track.flip0 ? -1 : 1;
+    const gs = testGravity(t);
     this.app.testTrack(this._stateForTest(), { x: a[0] + (b[0] - a[0]) * 0.5, y: a[1], z: a[2] + (b[2] - a[2]) * 0.5, yaw, gs });
   },
 
@@ -312,3 +312,55 @@ export const historyMethods = {
     this.app.testTrack(this._stateForTest(), null, verify);
   },
 };
+
+// Sens de gravité d'un test lancé depuis le curseur (TECH-055, décision D-2 par défaut) : celui de la PIÈCE VISÉE (à l'envers : -1), et non celui de la règle « gravité inversée
+// au départ » (flip0), qui ne vaut que pour la pièce de départ (raccordRaceLogic : placeAtStart). Avant, sur un circuit qui démarre au plafond, tester depuis une route
+// ordinaire posée au sol mettait la voiture en gravité inversée : elle tombait vers le ciel. Les rubans (vrille, looping…) retournent la voiture eux-mêmes : gravité normale.
+export const testGravity = (t) => (t.v && PIECES[t.t].kind !== 'ribbon' && PIECES[t.t].kind !== 'loop' ? -1 : 1);
+
+// ---- Instantanés d'historique (phase 8 : TECH-034, TECH-035 ; transversal TRANS-01) -------------------------------------------------------------------------------
+// Une chaîne JSON par état : pièces (lignes TILE_FIELDS), décorations NORMALISÉES (normalizeDeco, la normalisation du modèle : ce que la restauration redonne), noms de
+// groupes, logique, tours, réglages. Écriture = relecture : snapshotOf(fillFromSnapshot(t, s)) === s pour tout instantané s écrit par snapshotOf. Avant, l'instantané gardait les
+// valeurs brutes d'une décoration et la restauration les normalisait : après annuler / rétablir le circuit n'égalait plus l'instantané courant.
+const decoRow = (o) => { const n = normalizeDeco(o) || o; return [n.k, n.x, n.y, n.z, n.ry, n.s, n.c, n.u, n.ph || 0, n.cc || '', n.cp || null, n.g || 0, n.rx || 0, n.rz || 0]; };      // (cp : formes d'une pièce perso, sans elles l'annulation la perdait)
+export function snapshotOf(track) {
+  return JSON.stringify({
+    ...(track.vt > 0 ? { v: [track.vt, track.vh] } : {}),      // vérification de l'auteur (TECH-054) : absente tant que le circuit n'a jamais été vérifié
+    t: track.tiles.map(tileToRow),
+    d: track.decos.map(decoRow),
+    gn: track.groupNames(),
+    lg: track.lg,
+    lp: track.laps || 1,
+    pr: { name: track.name, desc: track.desc, decor: track.decor, ambiance: track.ambiance, scripts: track.scripts, ...track.rulesState() },      // (ambiance et scripts : sans eux, annuler / rétablir les remettait à zéro)
+  });
+}
+
+// Remplace le contenu de `track` par celui d'un instantané (objet déjà lu). vt / vh ne sont pas dans l'instantané : l'appelant les garde.
+export function fillFromSnapshot(track, data) {
+  track.clear();
+  for (const row of data.t) track.add(rowToTile(row));
+  for (const [k, x, y, z, ry, sc, c, u, ph, cc, cp, g, rx, rz] of data.d) track.addDeco({ k, x, y, z, ry, s: sc, c, u, ph, cc, cp: cp || undefined, g, rx, rz });
+  for (const [g, n] of data.gn || []) track.setGroupName(g, n);
+  track.lg = data.lg || null;
+  track.laps = data.lp || 1;
+  if (data.pr) {
+    track.setParams(data.pr);
+    if (data.pr.name) track.name = data.pr.name;
+    if (data.pr.decor) track.decor = data.pr.decor;
+  }
+  return track;
+}
+
+// Forme canonique d'un instantané : celui du circuit qu'on obtient en l'écrivant dans un code puis en relisant ce code (c'est ce que fait l'essai : le circuit est re-décodé, puis
+// rouvert dans l'éditeur). Sert à comparer, au retour d'un essai, l'état mis de côté et l'état rouvert (TECH-034) sans dépendre d'une valeur gardée plus finement en mémoire.
+export function canonicalSnapshot(snap) {
+  return snapshotOf(Track.decode(fillFromSnapshot(new Track(''), JSON.parse(snap)).encode()));
+}
+
+// Le même instantané sans la vérification de l'auteur : elle change quand on vérifie (course de vérification), sans que le CONTENU du circuit change ; le retour d'un essai
+// compare le contenu (TECH-034 / 054).
+export function withoutVerification(snap) {
+  const d = JSON.parse(snap);
+  delete d.v;
+  return JSON.stringify(d);
+}

@@ -271,6 +271,22 @@ export default {
   'Refaire un meilleur temps': 'Set a better time',
   'Inspecte une pièce (I), puis Ctrl+D.': 'Inspect a piece (I), then Ctrl+D.',
   'Un seul départ par circuit.': 'Only one start per track.',
+  // Phase 8 (TECH-003, TECH-052, TECH-053) : validateur de placement de l'éditeur (js/placement.js), Prolonger avec le départ.
+  'Place occupée': 'Spot occupied',
+  // Phase 9 (TECH-059) : l'enregistrement a échoué, issues proposées.
+  'Circuit non enregistré': 'Track not saved',
+  'Rester dans l’éditeur': 'Stay in the editor',
+  'Exporter le code': 'Export the code',
+  'Quitter sans enregistrer': 'Leave without saving',
+  'Recharger sans enregistrer': 'Reload without saving',
+  '« {a} » n’a pas pu être enregistré dans « Mes circuits » : le stockage du navigateur est plein ou bloqué, ou le circuit est trop grand.': '“{a}” could not be saved in “My tracks”: the browser storage is full or blocked, or the track is too big.',
+  'Exporte le code du circuit pour ne pas le perdre, ou reste dans l’éditeur pour le réduire (retirer des pièces ou des décorations).': 'Export the track code so you do not lose it, or stay in the editor to shrink it (remove pieces or decorations).',
+  // Phase 9 (TECH-058).
+  // Phase 9 (TECH-056) : direction du vent par pas de 15°.
+  'Cap {a}°': 'Heading {a}°',
+  'Collé : les groupes de la zone viennent d’un autre circuit, ils sont remis à zéro.': 'Pasted: the groups of this area come from another track, they are reset to none.',
+  '{a} posée : l’ancien départ est retiré (un seul départ par circuit).': '{a} placed: the old start is removed (only one start per track).',
+  'remplacerait le départ d\'un calque verrouillé ou masqué': 'would replace the start of a locked or hidden layer',
   'Pas de place pour une copie.': 'No room for a copy.',
   'Pas de place pour une copie de toute la sélection.': 'No room for a copy of the whole selection.',
   'Rien à dupliquer dans cette zone.': 'Nothing to duplicate in this area.',

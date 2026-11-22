@@ -4,7 +4,8 @@ import { CELL, MAX_LEVEL, DIRS, MAX_DECOS } from '../constants.js';
 import { PIECES, SURFACES, SURFACE_ORDER, surfaceAllowed, flagAllowed, armOption } from '../pieces.js';
 import { retypePlacement } from '../tileInfo.js';
 import { Track } from '../track.js';
-import { spillConflicts, spillMessage } from '../spill.js';
+import { spillMessage } from '../spill.js';
+import { placementPlan, applyPlacement, reshapeTile } from '../placement.js';
 import { minGroundLevel } from '../ribbons.js';
 import { safeUrl } from '../decos.js';
 import { DECO_CATS, DECO_LABELS } from '../decoData.js';
@@ -119,6 +120,32 @@ export const toolMethods = {
     return OPT_KEYS.filter((k) => cand[k] && norm[k] !== cand[k]);
   },
 
+  // Phase 8 (TECH-003) : le plan de la pose ordinaire (js/placement.js), le MÊME pour l'aperçu et pour le clic : pièce normalisée (une option armée que la pièce
+  // refuse ne réserve plus rien), pièces remplacées, calques protégés, débordement d'une pente au mur, un seul départ (l'ancien est retiré).
+  _placePlan(tile) {
+    return placementPlan(this.track, tile, { replace: true, layerOk: (o) => this._layerOk(o), start: 'replace', detectSame: true });
+  },
+
+  // Garde de placement du circuit de l'éditeur (Track.placementGuard, consultée par toggleFlag / _reshape et setMover) : le même validateur que la pose.
+  // Le dernier refus est gardé pour le message (_refusalText).
+  _guardTrack(track = this.track) {
+    track.placementGuard = (cand, self) => {
+      const plan = placementPlan(track, cand, { self });
+      this._lastRefusal = plan.ok ? null : plan;
+      return plan.ok;
+    };
+  },
+
+  // Message d'un refus du validateur ('' si le refus n'a rien de particulier à dire : l'appelant garde le sien).
+  _refusalText(plan) {
+    if (!plan || plan.ok) return '';
+    if (plan.why === 'bounds') return outOfBounds(plan.norm);
+    if (plan.why === 'spill') return spillMessage(plan.blocker);
+    if (plan.why === 'locked') return this._layerWhy(plan.blocker);
+    if (plan.why === 'start') return 'Un seul départ par circuit.';
+    return '';
+  },
+
   _act(painting = false) {
     const t = this.tool;
     if (t === 'erase') { this._erase(painting); return; }
@@ -131,24 +158,17 @@ export const toolMethods = {
     const key = `${tile.x},${tile.z},${tile.l}`;
     if (painting && key === this._lastPaint) return;
     this._lastPaint = key;
-    const norm = Track.normalize(tile);
-    if (!Track.placeable(norm)) { if (!painting) { this.app.ui.flash(outOfBounds(norm)); this.app.audio.error(); } return; }
-    const conflicts = this.track.conflicts(tile);
-    if (conflicts.length === 1) {
-      const c = conflicts[0];
-      if (c.t === tile.t && c.x === tile.x && c.z === tile.z && c.l === tile.l && c.r === tile.r && OPT_KEYS.every((k) => (c[k] | 0) === (norm[k] | 0))) return;
+    // Phase 8 (TECH-003) : conflits calculés sur la pièce NORMALISÉE (js/placement.js) ; avant, une option armée que la pièce refuse (mur, anneau, checkpoint,
+    // mouvement…) réservait encore ses niveaux ou ses cases, et les pièces de ce volume fantôme étaient supprimées alors que la pièce posée ne les touchait pas.
+    // Refus (sans rien modifier) : hors des niveaux ; pièce identique déjà là ; pièce d'un calque verrouillé ou masqué (groups.js : avant 0.12.0 la pose l'effaçait
+    // sans un mot, même invisible) ; bord incliné d'une pente posée au mur qui déborde dans la case (0.12.6, js/spill.js).
+    const plan = this._placePlan(tile);
+    if (!plan.ok) {
+      if (plan.why !== 'same' && !painting) { this.app.ui.flash(this._refusalText(plan) || 'Place occupée', plan.why === 'spill' ? 3 : undefined); this.app.audio.error(); }
+      return;
     }
-    // Une pièce d'un calque verrouillé ou masqué (groups.js) n'est jamais remplacée : avant 0.12.0 la pose l'effaçait sans un mot, même invisible.
-    const guarded = conflicts.find((c) => !this._layerOk(c));
-    if (guarded) { if (!painting) { this.app.ui.flash(this._layerWhy(guarded)); this.app.audio.error(); } return; }
-    // (0.12.6) Le bord incliné d'une pente posée au mur déborde dans la case voisine : seule une pièce qui la prolonge peut s'y poser (js/spill.js).
-    const spill = spillConflicts(this.track, norm, conflicts);
-    if (spill.length) { if (!painting) { this.app.ui.flash(spillMessage(spill[0]), 3); this.app.audio.error(); } return; }
-    for (const c of conflicts) this.track.remove(c);
-    if (tile.t === 'start') for (const s of this.track.tiles.filter((x) => x.t === 'start')) this.track.remove(s);
-    const dropped = this._droppedOptions(tile, norm);
-    if (dropped.length && !painting) this.app.ui.flash(`Option ignorée : ${dropped.map((k) => OPT_NAMES[k]).join(', ')}`, 2.4);
-    const added = this.track.add(tile);
+    if (plan.dropped.length && !painting) this.app.ui.flash(`Option ignorée : ${plan.dropped.map((k) => OPT_NAMES[k]).join(', ')}`, 2.4);
+    const added = applyPlacement(this.track, plan);      // (retire les pièces remplacées et, pour un départ, l'ancien départ)
     this._lastTile = added;
     this.app.audio.place();
     this._prepareAutoLevel(added);
@@ -164,8 +184,11 @@ export const toolMethods = {
     const sel = this.inspector && this.inspector.active && this.inspector.sel.kind === 'tile' ? this.inspector.sel.obj : null;
     const from = sel || (this._lastTile && this.track.tiles.includes(this._lastTile) ? this._lastTile : null) || lastOpenTile(this.track);
     const armed = {}; for (const k of OPT_KEYS) if (this.opts && this.opts[k]) armed[k] = this.opts[k];
-    const r = extendPlan(this.track, from, type, armed);
+    const r = extendPlan(this.track, from, type, armed, { layerOk: (o) => this._layerOk(o) });
     if (!r.tile) { this.app.ui.flash(r.why, 4); this.app.audio.error(); return false; }
+    // Phase 8 (TECH-053) : un départ prolongé remplace l'ancien, comme la pose ordinaire (avant : un départ de plus à chaque P ; essai et vérification refusés,
+    // mais le circuit s'enregistrait et se partageait).
+    for (const t of r.remove || []) this.track.remove(t);
     if (r.chain) for (const t of r.chain) this.track.add(t);      // raccordement automatique : les transitions manquantes, puis la pièce (un seul pas d'annulation)
     else this.track.add(r.tile);
     this._lastTile = this.track.tiles[this.track.tiles.length - 1];
@@ -177,6 +200,7 @@ export const toolMethods = {
     const P = PIECES[r.tile.t], cx = (r.tile.x + P.size / 2) * CELL, cz = (r.tile.z + P.size / 2) * CELL;
     if (Math.hypot(cx - this.target.x, cz - this.target.z) > this.dist * 0.45) { this.target.x = cx; this.target.z = cz; }
     if (r.note) this.app.ui.flash(`Orientation choisie impossible à raccorder (${r.note}) : la route reprend son orientation.`, 4);
+    else if (r.remove && r.remove.length) this.app.ui.flash(`${P.label} posée : l’ancien départ est retiré (un seul départ par circuit).`, 2.4);
     else this.app.ui.flash(`${P.label} posée${r.reverse ? ' à contresens (retour de la pièce)' : r.widened ? ` après un ${PIECES[r.chain[0].t].label.toLowerCase()} (raccord de largeur automatique)` : r.bridged ? ` après ${r.chain.length - 1} transition${r.chain.length > 2 ? 's' : ''} d'orientation (raccord automatique)` : r.inferred ? ' (orientation de la route reprise)' : ''}`, 1.4);
     return true;
   },
@@ -286,11 +310,13 @@ export const toolMethods = {
   },
 
   // Niveaux [lo, hi] occupés par la pièce que le pot de peinture poserait au niveau courant.
+  // (phase 8, même cause que TECH-003 : la pièce NORMALISÉE — une option armée que la pièce refuse ne réserve rien, une orientation gardée réserve ses niveaux)
   _fillRange() {
     const base = fillBase(this.tool);
     if (!PIECES[base]) return [this.level, this.level];
-    const o = this.opts || {};
-    return Track.range({ t: base, x: 0, z: 0, l: this.level, r: 0, v: o.v ? 1 : 0, cp: o.cp | 0, tb: o.tb | 0, mv: o.mv | 0 });
+    const tile = { t: base, x: 0, z: 0, l: this.level, r: 0 };
+    for (const k of OPT_KEYS) if (this.opts && this.opts[k]) tile[k] = this.opts[k];
+    return Track.range(Track.normalize(tile));
   },
 
   // Vrai si le curseur vise une case VIDE (sans pièce aux niveaux de pose) et pas une pièce touchée par le rayon : on remplit alors la zone vide.
@@ -319,9 +345,9 @@ export const toolMethods = {
     for (const [x, z] of spots) {
       const tile = { t: base, x, z, l: this.level, r: this.rot, s: '' };
       for (const k of OPT_KEYS) if (this.opts && this.opts[k]) tile[k] = this.opts[k];
-      const norm = Track.normalize(tile);
-      if (!Track.placeable(norm) || this.track.conflicts(norm).length) { skipped++; continue; }
-      this.track.add(tile);
+      const plan = placementPlan(this.track, tile);      // (phase 8, TECH-052 : le validateur commun, débordement d'une pente au mur compris)
+      if (!plan.ok) { skipped++; continue; }
+      applyPlacement(this.track, plan);
       done++;
     }
     if (!done) return fail('Aucune pièce posée (pas la place).');
@@ -332,15 +358,10 @@ export const toolMethods = {
   },
 
   // Change le type d'une pièce sur place (même case, niveau et rotation) si l'empreinte est identique.
+  // (phase 8, TECH-052 : par le validateur commun, js/placement.js ; options devenues impossibles retirées par la normalisation ; même objet : la zone collectée reste valide)
   _retypeTile(tile, type) {
     if (!PIECES[type] || PIECES[type].size !== PIECES[tile.t].size) return false;
-    const cand = Track.normalize({ ...tile, t: type });               // retire les options devenues impossibles
-    if (!Track.placeable(cand)) return false;
-    this.track.remove(tile);
-    if (this.track.conflicts(cand).length) { this.track._insert(tile); return false; }
-    Object.assign(tile, cand);                                        // même objet : la zone collectée reste valide
-    this.track._insert(tile);
-    return true;
+    return reshapeTile(this.track, tile, { ...tile, t: type }).ok;
   },
 
   // Change une caractéristique de famille : la pièce reste « en place » même si son empreinte change (looping 1 → 3 boucles).
@@ -358,12 +379,8 @@ export const toolMethods = {
     const conv = LEGACY_CP[tile.t];
     if (!conv) return false;
     const cand = Track.normalize({ ...tile, t: conv[0], cp: conv[1] });
-    if (cand.cp !== conv[1] || !Track.placeable(cand)) return false;
-    this.track.remove(tile);
-    if (this.track.conflicts(cand).length) { this.track._insert(tile); return false; }
-    Object.assign(tile, cand);
-    this.track._insert(tile);
-    return true;
+    if (cand.cp !== conv[1]) return false;
+    return reshapeTile(this.track, tile, cand).ok;
   },
 
   _toggleMod(painting) {
@@ -380,11 +397,13 @@ export const toolMethods = {
       this.app.audio.error();
       return;
     }
+    this._lastRefusal = null;
     if (this.track.toggleFlag(t, flag, val)) {
       this.app.audio.place();
       this._changed();
       if (!painting) this._commit();
-    } else if (flag === 'tn') this.app.ui.flash('Tunnel impossible sur une route à l\'envers');
+    } else if (this._refusalText(this._lastRefusal)) { if (!painting) { this.app.ui.flash(this._refusalText(this._lastRefusal), 3); this.app.audio.error(); } }      // (refus du validateur : débordement…)
+    else if (flag === 'tn') this.app.ui.flash('Tunnel impossible sur une route à l\'envers');
     else if (flag === 'v' || flag === 'o') { if (!painting) this.app.ui.flash(flag === 'o' ? 'Pas la place pour un mur : la route descend de 2 niveaux sous son niveau (monte d’abord, libère le dessous).' : 'Pas la place à l’envers : monte d’abord, ou libère le niveau en dessous.'); this.app.audio.error(); }
     else if (flag === 'cp') { this.app.ui.flash('Pas la place (niveaux au-dessus occupés)'); this.app.audio.error(); }
     else if (flag === 'mv') { this.app.ui.flash('Pas la place pour ce mouvement'); this.app.audio.error(); }
@@ -441,16 +460,15 @@ export const toolMethods = {
     this._commit();      // range la sélection dans l'historique (sans créer de pas si rien n'a changé)
   },
 
-  // Modifie une pièce (case, niveau, rotation) en vérifiant la place ; réindexe le circuit. Faux si impossible.
+  // Modifie une pièce (case, niveau, rotation) en vérifiant la place ; réindexe le circuit. Faux si impossible (le refus est gardé dans _lastRefusal).
+  // Inspecteur, gizmo, Maj + glisser : phase 8 (TECH-052), par le validateur commun (js/placement.js), débordement d'une pente au mur compris.
   _applyTilePatch(tile, patch) {
     const cand = Track.normalize({ ...tile, ...patch });
-    if (!Track.placeable(cand)) return false;
+    if (!Track.placeable(cand)) { this._lastRefusal = placementPlan(this.track, cand, { self: tile }); return false; }
     if (cand.x === tile.x && cand.z === tile.z && cand.l === tile.l && cand.r === tile.r) return true;
-    this.track.remove(tile);
-    if (this.track.conflicts(cand).length) { this.track._insert(tile); return false; }
-    Object.assign(tile, cand);
-    this.track._insert(tile);
-    return true;
+    const plan = reshapeTile(this.track, tile, cand);
+    this._lastRefusal = plan.ok ? null : plan;
+    return plan.ok;
   },
 
   _pick() {

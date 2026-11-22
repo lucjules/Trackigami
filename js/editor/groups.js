@@ -41,7 +41,7 @@ export const groupMethods = {
     const tiles = this._selTiles(), decos = this._selDecos();
     if (!tiles.length && !decos.length) { this.app.ui.flash('Sélectionne d’abord des pièces (outil Sélection, Q).'); return 0; }
     for (const t of tiles) t.g = Math.max(0, Math.min(MAX_GROUP, g | 0));      // (en place : l'ordre du circuit et la pièce inspectée ne changent pas)
-    for (const d of decos) { if (g) d.g = g; else delete d.g; }
+    for (const d of decos) this.track.setDeco(d, { g });      // (phase 8 : normalisée comme à l'ajout ; groupe 0 : le champ disparaît)
     // La sélection était « le groupe N » (selectGroup) : elle suit ses membres dans leur nouveau groupe ; retirés de tout groupe, il n'y a plus de filtre possible :
     // la zone est abandonnée (sinon le rectangle se mettrait à désigner toutes les pièces qu'il contient).
     if (this.selGroup) { if (g) this.selGroup = g; else { this.selGroup = 0; this.sel = null; } }
@@ -65,13 +65,19 @@ export const groupMethods = {
     this._selInfo();
   },
 
+  // Premier numéro de groupe libre : ni rangé dans une pièce ou une décoration, ni nommé, ni cité par la logique (TECH-038) ; undefined s'il n'y en a plus.
+  _freeGroup() {
+    const taken = new Set(this.track.reservedGroups());
+    return Array.from({ length: MAX_GROUP }, (_, i) => i + 1).find((g) => !taken.has(g));
+  },
+
   openGroups() {
     const body = document.createElement('div');
     body.className = 'ed-groups';
     const render = () => {
       const counts = this._groupCounts();
-      const ids = [...new Set([...counts.keys(), ...this.track.groupNames().map(([g]) => g)])].sort((a, b) => a - b);
-      const free = Array.from({ length: MAX_GROUP }, (_, i) => i + 1).find((g) => !ids.includes(g));
+      const ids = [...new Set([...counts.keys(), ...this.track.groupNames().map(([g]) => g), ...this.track.logicGroups()])].sort((a, b) => a - b);      // (TECH-038 : les groupes cités par la logique sont réservés, vides ou non)
+      const free = this._freeGroup();
       const hasSel = this._selTiles().length + this._selDecos().length > 0;
       body.innerHTML = `<p class="meta">Un groupe rassemble des pièces et des décorations : un calque à masquer ou verrouiller pendant l'édition, et la cible des règles de logique du circuit. ${hasSel ? '' : 'Sélectionne des pièces (outil Sélection, Q) pour les ranger dans un groupe.'}</p>
         ${ids.length ? `<table class="ed-gtable"><thead><tr><th>N°</th><th>Nom</th><th>Contenu</th><th>Calque</th><th></th></tr></thead><tbody>${ids.map((g) => {

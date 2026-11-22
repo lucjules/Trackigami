@@ -4,7 +4,6 @@ import * as THREE from '../vendor/three.module.min.js';
 import { CELL, LEVEL_H, MAX_LEVEL } from '../constants.js';
 import { PIECES, surfaceAllowed, flagAllowed } from '../pieces.js';
 import { Track } from '../track.js';
-import { spillConflicts } from '../spill.js';
 import { DECORS } from '../themes.js';
 import { buildTileMesh } from '../trackMesh.js';
 import { tint } from '../trackGeometry.js';
@@ -203,9 +202,9 @@ export const pointerMethods = {
       const pos = kind === 'tile' ? new THREE.Vector3((obj.x + PIECES[obj.t].size / 2) * CELL, this.levelY(obj.l), (obj.z + PIECES[obj.t].size / 2) * CELL) : new THREE.Vector3(obj.x, obj.y, obj.z);
       const dy = -dyPx * this._metersPerPixel(pos);
       if (kind === 'deco') {
-        obj.y += dy;
-        this.track.version++;
-        this._changed();
+        // (phase 8, TECH-035 : par Track.setDeco, au centième comme le code ; le reste d'un geste plus fin que le centimètre est gardé pour le mouvement suivant)
+        const want = obj.y + (this._yAccD || 0) + dy;
+        if (this.track.setDeco(obj, { y: want })) { this._yAccD = want - obj.y; this._changed(); }
       } else {
         this._yAcc = (this._yAcc || 0) + dy / LEVEL_H;
         const step = Math.trunc(this._yAcc * 2) / 2;                      // les pièces montent par demi-niveaux
@@ -214,7 +213,7 @@ export const pointerMethods = {
           this._yAcc -= step;
           if (l !== obj.l) {
             if (this._applyTilePatch(obj, { l })) { this.level = l; this._changed(); }
-            else { this._yAcc = 0; if (!this._yWarn) { this._yWarn = true; this.app.ui.flash('Place occupée à cette hauteur'); } }
+            else { this._yAcc = 0; if (!this._yWarn) { this._yWarn = true; this.app.ui.flash(this._refusalText(this._lastRefusal) || 'Place occupée à cette hauteur'); } }
           }
         }
       }
@@ -232,7 +231,7 @@ export const pointerMethods = {
 
   // Maj relâchée : un seul pas d'historique pour tout le geste.
   _endShiftY() {
-    this._yAcc = 0; this._yWarn = false; this._ptrY = null;
+    this._yAcc = 0; this._yAccD = 0; this._yWarn = false; this._ptrY = null;
     if (this._shiftYDirty) { this._shiftYDirty = false; this._commit(); }
   },
 
@@ -318,6 +317,8 @@ export const pointerMethods = {
     if (!this.hover) return null;
     let best = null, bd = Infinity;
     for (const d of this.track.decos) {
+      // (TECH-036 : jamais une décoration d'un calque verrouillé ou masqué — gomme, clic droit en pose de décorations et pipette passent par ici ; comme le rayon, _pickTarget)
+      if (!this._layerOk(d)) continue;
       const dd = Math.hypot(d.x - this.hover.x, d.z - this.hover.z) - 1.5 * d.s;
       if (dd < bd && dd < maxD) { bd = dd; best = d; }
     }
@@ -496,14 +497,14 @@ export const pointerMethods = {
     if (key === this.previewKey) return;
     this.previewKey = key;
     this._clearPreview();
-    const conflicts = this.track.conflicts(cand);
-    if (!Track.placeable(Track.normalize(cand))) conflicts.push(null);
-    if (spillConflicts(this.track, Track.normalize(cand), conflicts).length) conflicts.push(null);      // (0.12.6 : débordement d'une pente au mur, js/spill.js)
-    const nc = Track.normalize(cand);
-    const same = conflicts.length === 1 && conflicts[0] && ['t', 'x', 'z', 'l', 'r'].every((k) => conflicts[0][k] === cand[k]) && OPT_KEYS.every((k) => (conflicts[0][k] | 0) === (nc[k] | 0));
-    this.previewMat.emissive.set(conflicts.length && !same ? '#ff2244' : '#000000');
+    // Phase 8 (TECH-003) : le MÊME plan que la pose (tools.js : _placePlan, js/placement.js) : la pièce normalisée, ses conflits réels. Rouge : la pose
+    // remplacerait des pièces, ou serait refusée (hors des niveaux, calque protégé, débordement d'une pente au mur) ; caché : la même pièce est déjà là.
+    const plan = this._placePlan(cand);
+    this._previewPlan = plan;
+    const same = plan.why === 'same';
+    this.previewMat.emissive.set(!same && (!plan.ok || plan.conflicts.length) ? '#ff2244' : '#000000');
     this.previewMat.emissiveIntensity = 0.45;
-    this.preview.add(buildTileMesh(Track.normalize(cand), this.previewMat, this.previewGlow));
+    this.preview.add(buildTileMesh(plan.norm, this.previewMat, this.previewGlow));
     this.preview.visible = !same;
   },
 

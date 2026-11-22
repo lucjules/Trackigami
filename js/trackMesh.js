@@ -127,6 +127,9 @@ export class TrackView {
     const track = this.track, focus = this.focus;
     // Vue par niveau (éditeur) : les pièces des autres niveaux sont dessinées estompées.
     const dimG = new GeoBuilder(), dimGlow = new GeoBuilder();
+    // (TECH-062 : une pièce estompée d'un groupe a son propre maillage estompé, étiqueté par groupe : masquer le calque la cache aussi, même estompée)
+    const dimGrouped = new Map();
+    const dimBuild = (g) => { let b = dimGrouped.get(g); if (!b) dimGrouped.set(g, b = { gb: new GeoBuilder(), glow: new GeoBuilder() }); return b; };
     const buckets = new Map();
     const bucket = (cx, cz) => {
       const k = chunkKey(cx, cz);
@@ -160,7 +163,9 @@ export class TrackView {
         this.group.add(grp);
         if (tile.mv) this.movers.push({ tile, grp });
         if (glassy) this.glassGroups.push({ tile, grp });
-      } else if (dim) buildTileInto(dimG, dimGlow, tile, track);
+      } else if (dim) {
+        if (tile.g) { const b = dimBuild(tile.g); buildTileInto(b.gb, b.glow, tile, track); } else buildTileInto(dimG, dimGlow, tile, track);
+      }
       else if (tile.g) { const b = groupBuild(tile.g); buildTileInto(b.gb, b.glow, tile, track, b.fx); }
       else bucket(Math.floor(tile.x / CHUNK), Math.floor(tile.z / CHUNK)).tiles.push(tile);
     }
@@ -168,6 +173,15 @@ export class TrackView {
       if (!this.dimMat) this.dimMat = new THREE.MeshBasicMaterial({ color: '#8c90b8', transparent: true, opacity: 0.16, depthWrite: false });
       this.group.add(new THREE.Mesh(dimG.build(), this.dimMat));
       if (!dimGlow.empty) this.group.add(new THREE.Mesh(dimGlow.build(), this.dimMat));
+    }
+    for (const [g, b] of dimGrouped) {
+      if (!this.dimMat) this.dimMat = new THREE.MeshBasicMaterial({ color: '#8c90b8', transparent: true, opacity: 0.16, depthWrite: false });
+      for (const geo of [b.gb, b.glow]) {
+        if (geo.empty) continue;
+        const m = new THREE.Mesh(geo.build(), this.dimMat);
+        m.userData.g = g;
+        this.group.add(m);
+      }
     }
     const span = CELL * CHUNK;
     for (const d of track.decos) {

@@ -86,16 +86,35 @@ export const editorFlowMethods = {
   },
 
   // Quitter l'éditeur enregistre le circuit dans « Mes circuits » s'il a changé (0.12.0) : avant, seul l'unique brouillon le gardait, et la session suivante l'écrasait.
-  // Si l'enregistrement échoue (stockage plein), on reste dans l'éditeur : le message dit quoi faire.
-  leaveEditor() {
+  // Si l'enregistrement échoue (stockage plein, code trop long), on reste dans l'éditeur ET une fenêtre propose les trois issues (TECH-059) : rester, exporter le code du
+  // circuit (le copier pour ne pas le perdre), ou quitter sans enregistrer (le brouillon reste, s'il tient). Avant, aucune issue : on ne pouvait plus sortir que par un
+  // rechargement de la page, qui perdait le travail.
+  // next : ce qu'on fait une fois sorti (aller à « Mes circuits »…) ; discard : quitter sans enregistrer (choix fait dans la fenêtre).
+  leaveEditor(next = null, { discard = false } = {}) {
     const ed = this.session && this.session.kind === 'editor' ? this.session : null;
-    const r = ed ? ed.autoSave() : '';
-    if (r === 'failed') return false;
+    const r = ed && !discard ? ed.autoSave() : '';
+    if (r === 'failed') { this.saveFailedModal(ed, { leaveLabel: 'Quitter sans enregistrer', onLeave: () => this.leaveEditor(next, { discard: true }) }); return false; }
     const name = ed ? ed.track.name : '';
     this._editorKeep = null;
     this.showMenu('menu');
     if (r === 'saved') this.ui.flash(`« ${name} » enregistré dans « Mes circuits ».`, 2.6);
+    if (next) next();
     return true;
+  },
+
+  // Fenêtre « l'enregistrement a échoué » : le circuit n'est pas enregistré (stockage plein ou bloqué, code trop long). leaveLabel / onLeave : l'issue qui abandonne le travail
+  // non enregistré (quitter, recharger la page pour la nouvelle version).
+  saveFailedModal(ed, { leaveLabel, onLeave }) {
+    const body = document.createElement('div');
+    body.innerHTML = `<p>« ${esc(ed.track.name)} » n’a pas pu être enregistré dans « Mes circuits » : le stockage du navigateur est plein ou bloqué, ou le circuit est trop grand.</p><p class="meta">Exporte le code du circuit pour ne pas le perdre, ou reste dans l’éditeur pour le réduire (retirer des pièces ou des décorations).</p>`;
+    this.ui.modal({
+      title: 'Circuit non enregistré', body,
+      actions: [
+        { label: 'Rester dans l’éditeur', primary: true },
+        { label: 'Exporter le code', onClick: () => { setTimeout(() => this.shareModal(ed.track.encode(), ed.track.name, ed.track), 0); return true; } },
+        { label: leaveLabel, danger: true, onClick: () => { setTimeout(onLeave, 0); return true; } },
+      ],
+    });
   },
 
   // Test depuis l'éditeur. verify : course complète qui vérifie le circuit (temps de l'auteur).

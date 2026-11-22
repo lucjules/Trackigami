@@ -62,3 +62,8 @@ export function pieceLabel(id) {
   if (id.startsWith('deco:')) return DECO_LABELS[id.slice(5)];
   return PIECES[id].label;
 }
+
+// Identifiant du circuit ouvert dans une session de l'éditeur (le même objet Track sert à plusieurs circuits : Nouveau et Importer le vident et le remplissent) : un
+// presse-papiers sait de quel circuit il vient (TECH-058).
+let circuitSeq = 0;
+export const newCircuitId = () => `c${Date.now().toString(36)}${(circuitSeq++).toString(36)}`;

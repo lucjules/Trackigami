@@ -632,7 +632,8 @@ try {
     const typeAngle = (label, v) => page.evaluate(([l, val]) => { const row = [...document.querySelectorAll('.insp-row')].find((r) => r.textContent.startsWith(l)); const i = row.querySelector('input.insp-deg'); i.value = val; i.dispatchEvent(new Event('change', { bubbles: true })); }, [label, v]);
     await typeAngle('Inclinaison (X)', '37.5'); await typeAngle('Roulis (Z)', '-20');
     const d1 = await app(() => { const d = window.copytrack.session.track.decos[0]; return [d.rx, d.rz, d.ry]; });
-    assert.ok(Math.abs(d1[0] - 37.5 * Math.PI / 180) < 1e-6 && Math.abs(d1[1] + 20 * Math.PI / 180) < 1e-6, 'angles saisis : ' + JSON.stringify(d1));
+    // (phase 8, TECH-035 : écrits au pas du code, le millième de radian — exactement ce que l'historique, l'enregistrement et la course reliront ; le demi-degré reste lisible)
+    assert.deepEqual(d1.slice(0, 2), [+(37.5 * Math.PI / 180).toFixed(3), +(-20 * Math.PI / 180).toFixed(3)], 'angles saisis : ' + JSON.stringify(d1));
     assert.equal(await page.evaluate(() => [...document.querySelectorAll('.insp-row')].find((r) => r.textContent.startsWith('Inclinaison (X)')).querySelector('input.insp-deg').value), '37.5');
     // 2. gizmo : les trois cercles sont proposés ; un geste du gizmo (orientation imposée au proxy) met à jour les TROIS angles
     const g = await app(() => {

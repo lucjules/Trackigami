@@ -180,7 +180,7 @@ function placeObstacles(track, specs) {
     const a = P[i], b = P[i + 1];
     const dx = b[0] - a[0], dz = b[2] - a[2], l = hypot2(dx, dz) || 1;
     const q = (v, st) => Math.round(v / st) * st;
-    track.addDeco({ k: o.k, x: q(a[0] + (-dz / l) * (o.side || 0), 0.5), y: q(a[1], 0.1), z: q(a[2] + (dx / l) * (o.side || 0), 0.5), ry: +q(datan2(dx / l, dz / l), Math.PI / 8).toFixed(4), s: o.s || 1, c: 0, ph: o.ph || 0 });
+    track.addDeco({ k: o.k, x: q(a[0] + (-dz / l) * (o.side || 0), 0.5), y: q(a[1], 0.1), z: q(a[2] + (dx / l) * (o.side || 0), 0.5), ry: +q(datan2(dx / l, dz / l), Math.PI / 8).toFixed(4), s: o.s || 1, c: 0, ph: o.ph || 0 }, { exact: true });      // (comme buildBuiltin : circuit généré, valeurs exactes)
   }
 }
 

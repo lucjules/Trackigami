@@ -7,6 +7,8 @@ import { styleFor } from '../trackGeometry.js';
 import { DECO_COLORS } from '../decoData.js';
 import { safeUrl } from '../decos.js';
 import { isObstacle } from '../obstacles.js';
+import { isSolid } from '../solids.js';
+import { quarterTurn } from '../track/shared.js';
 import { h } from '../dom.js';
 import { LEGACY_CP, MIRROR_TYPES } from '../inspector.js';
 
@@ -39,8 +41,10 @@ export const bodyMethods = {
     rows.push(h('div', { class: 'insp-row' }, h('span', {}, 'Cap'), rot));
     const setOri = (n) => {
       if (n === tileOri(t)) return true;
+      ed._lastRefusal = null;
       const ok = n === 3 ? ed.track.toggleFlag(t, 'v') : ed.track.toggleFlag(t, 'o', ORI_TO_O[n]);      // (id d'orientation -> valeur de tile.o : 4 = incliné gauche -> 3…)
-      if (!ok) ed.app.ui.flash(n === 3 ? 'Pas la place à l’envers : monte d’abord, ou libère le niveau en dessous.' : n ? 'Pas la place pour un mur : la route descend de 2 niveaux sous son niveau (monte d’abord, libère le niveau en dessous).' : 'Pas la place pour revenir au sol.');
+      // (phase 8 : un refus du validateur de l'éditeur — débordement d'une pente au mur… — dit sa raison)
+      if (!ok) ed.app.ui.flash(ed._refusalText(ed._lastRefusal) || (n === 3 ? 'Pas la place à l’envers : monte d’abord, ou libère le niveau en dessous.' : n ? 'Pas la place pour un mur : la route descend de 2 niveaux sous son niveau (monte d’abord, libère le niveau en dessous).' : 'Pas la place pour revenir au sol.'));
       return ok || false;
     };
     const oriOff = (n) => (n === 0 || n === 3 ? false : !flagAllowed(t.t, 'o', null, ORI_TO_O[n]));
@@ -207,69 +211,73 @@ export const bodyMethods = {
     return rows;
   },
 
+  // (phase 8, TECH-035 : toute modification passe par Track.setDeco, la normalisation du modèle)
   _decoColors(d) {
     const ed = this.ed;
-    const touch = () => { ed.track.version++; return true; };
+    const set = (patch) => ed.track.setDeco(d, patch);
     const rows = [h('div', { class: 'insp-group' }, 'Couleur de la décoration')];
     const sw = h('div', { class: 'insp-swatches', role: 'group', 'aria-label': 'Couleurs prédéfinies' }, DECO_COLORS.map((c, i) => {
-      const b = h('button', { class: 'swatch', style: `background:${c}`, title: `Couleur ${i + 1}`, onclick: () => this._apply(() => { d.c = i + 1; d.cc = ''; return touch(); }) });
+      const b = h('button', { class: 'swatch', style: `background:${c}`, title: `Couleur ${i + 1}`, onclick: () => this._apply(() => set({ c: i + 1, cc: '' })) });
       this._sync.push(() => b.classList.toggle('on', !d.cc && (d.c | 0) === i + 1));
       return b;
     }));
     rows.push(h('div', { class: 'insp-row' }, h('span', {}, 'Palette'), sw));
     rows.push(h('div', { class: 'insp-row' }, h('span', {}, 'Naturelle'),
-      h('button', { class: 'btn', onclick: () => this._apply(() => { d.c = 0; d.cc = ''; return touch(); }) }, 'Couleurs d’origine')));
+      h('button', { class: 'btn', onclick: () => this._apply(() => set({ c: 0, cc: '' })) }, 'Couleurs d’origine')));
     rows.push(this._colorRow('Libre', () => d.cc || '', () => (d.c > 0 ? DECO_COLORS[d.c - 1] : '#ffffff'),
-      (v) => { d.cc = v; return touch(); }, () => { d.cc = ''; return touch(); }));
+      (v) => set({ cc: v }), () => set({ cc: '' })));
     return rows;
   },
 
+  // Phase 8 (TECH-035) : chaque champ s'écrit par Track.setDeco (la normalisation du modèle, celle de l'ajout et de la lecture d'un code) : ce qui est affiché est ce que
+  // l'historique, l'enregistrement et la course reliront. Un solide (pilier, poutre, mur, bloc…) ne propose ni inclinaison, ni roulis, ni « Retourner » : la physique le
+  // voit toujours droit (solids.js) ; avant, il s'affichait incliné dans l'éditeur et redevenait droit au premier essai, enregistrement ou annulation.
   _decoBody(d) {
     const ed = this.ed;
-    const touch = () => { ed.track.version++; return true; };
+    const set = (patch) => ed.track.setDeco(d, patch);
     const rows = [h('div', { class: 'insp-group' }, 'Position')];
-    rows.push(this._num('X', () => d.x, (v) => { d.x = v; return touch(); }, { step: 0.5 }));
-    rows.push(this._num('Hauteur', () => d.y, (v) => { d.y = v; return touch(); }, { step: 0.5 }));
-    rows.push(this._num('Z', () => d.z, (v) => { d.z = v; return touch(); }, { step: 0.5 }));
-    const obst = isObstacle(d.k);
+    rows.push(this._num('X', () => d.x, (v) => set({ x: v }), { step: 0.5 }));
+    rows.push(this._num('Hauteur', () => d.y, (v) => set({ y: v }), { step: 0.5 }));
+    rows.push(this._num('Z', () => d.z, (v) => set({ z: v }), { step: 0.5 }));
+    const obst = isObstacle(d.k), upright = obst || isSolid(d.k);      // (upright : ni inclinaison ni roulis libres)
     const deg = (r) => Math.round((r || 0) * 1800 / Math.PI) / 10;          // (au dixième de degré : une saisie de 37,5° s'affiche 37,5°)
     const norm = (v) => (((v % 360) + 360) % 360);
     rows.push(h('div', { class: 'insp-group' }, 'Rotation'));
-    rows.push(this._angle('Cap (Y)', () => norm(deg(d.ry)), (v) => { d.ry = norm(v) * Math.PI / 180; return touch(); }, { min: 0, max: 359 }));
+    rows.push(this._angle('Cap (Y)', () => norm(deg(d.ry)), (v) => set({ ry: norm(v) * Math.PI / 180 }), { min: 0, max: 359 }));
     if (obst) {
       // Phase 3 : un obstacle se pose aussi sur un mur, un plan incliné ou au plafond : son roulis (autour de l'axe de la route) est un multiple de 45° ; sa forme de contact tourne avec lui.
       const ROLLS = [['0', 'À plat (sol)'], ['45', 'Incliné 45° ◣'], ['90', 'Sur un mur ◣'], ['135', 'Surplomb 135° ◣'], ['180', 'Au plafond'], ['-135', 'Surplomb 135° ◢'], ['-90', 'Sur un mur ◢'], ['-45', 'Incliné 45° ◢']];
-      rows.push(this._select('Roulis (mur, plafond)', ROLLS, () => String(Math.round(deg(d.rz) / 45) * 45 > 180 ? Math.round(deg(d.rz) / 45) * 45 - 360 : Math.round(deg(d.rz) / 45) * 45), (v) => { if (+v) d.rz = +v * Math.PI / 180; else delete d.rz; return touch(); }));
+      rows.push(this._select('Roulis (mur, plafond)', ROLLS, () => String(Math.round(deg(d.rz) / 45) * 45 > 180 ? Math.round(deg(d.rz) / 45) * 45 - 360 : Math.round(deg(d.rz) / 45) * 45), (v) => set({ rz: +v * Math.PI / 180 })));
     }
-    if (!obst) {
+    if (!upright) {
       // Inclinaison et roulis : purement visuels (une décoration n'a pas de contact). Un obstacle, lui, ne tourne qu'autour de la verticale : sa forme de contact est celle du jeu.
-      rows.push(this._angle('Inclinaison (X)', () => deg(d.rx), (v) => { d.rx = v * Math.PI / 180; return touch(); }));
-      rows.push(this._angle('Roulis (Z)', () => deg(d.rz), (v) => { d.rz = v * Math.PI / 180; return touch(); }));
+      rows.push(this._angle('Inclinaison (X)', () => deg(d.rx), (v) => set({ rx: v * Math.PI / 180 })));
+      rows.push(this._angle('Roulis (Z)', () => deg(d.rz), (v) => set({ rz: v * Math.PI / 180 })));
       // Pas d'angle du gizmo 3D (cercles de rotation) : 1°, 5°, 15°, 45° ou 90°.
       rows.push(this._select('Pas du gizmo', [['1', '1°'], ['5', '5°'], ['15', '15°'], ['45', '45°'], ['90', '90°']], () => String(this.angleStep || 5), (v) => { this.angleStep = +v; this._applyMode(); return true; }));
     }
-    const step = (label, fn, title) => h('button', { class: 'btn', title, onclick: () => this._apply(() => { fn(); return touch(); }) }, label);
+    const step = (label, patch, title) => h('button', { class: 'btn', title, onclick: () => this._apply(() => set(patch())) }, label);
     rows.push(h('div', { class: 'insp-row' }, h('span', {}, ''), h('div', { class: 'insp-rot', role: 'group', 'aria-label': 'Rotations rapides' }, [
-      step('↶ 90°', () => { d.ry = ((d.ry || 0) - Math.PI / 2 + 2 * Math.PI) % (2 * Math.PI); }, 'Cap : quart de tour à gauche'),
-      step('↷ 90°', () => { d.ry = ((d.ry || 0) + Math.PI / 2) % (2 * Math.PI); }, 'Cap : quart de tour à droite'),
-      ...(obst ? [] : [
-        step('Remettre droit', () => { delete d.rx; delete d.rz; }, 'Inclinaison et roulis à 0°'),
-        step('Retourner', () => { d.rx = Math.PI; d.rz = 0; }, 'Tête en bas (inclinaison 180°)'),
+      step('↶ 90°', () => ({ ry: quarterTurn(d.ry, -1, 'full') }), 'Cap : quart de tour à gauche'),      // (au pas du code : quatre quarts = le cap d'origine)
+      step('↷ 90°', () => ({ ry: quarterTurn(d.ry, 1, 'full') }), 'Cap : quart de tour à droite'),
+      ...(upright ? [] : [
+        step('Remettre droit', () => ({ rx: 0, rz: 0 }), 'Inclinaison et roulis à 0°'),
+        step('Retourner', () => ({ rx: Math.PI, rz: 0 }), 'Tête en bas (inclinaison 180°)'),
       ]),
-      step('↺ Tout à zéro', () => { d.ry = 0; delete d.rx; delete d.rz; }, 'Cap, inclinaison et roulis à 0°'),
+      step('↺ Tout à zéro', () => ({ ry: 0, rx: 0, rz: 0 }), 'Cap, inclinaison et roulis à 0°'),
     ])));
     if (obst) rows.push(h('div', { class: 'insp-note' }, 'Un obstacle tourne autour de la verticale (cap) et autour de l’axe de la route (roulis, par pas de 45°) : sa forme de contact tourne avec lui. Visé sur un mur ou au plafond, il se pose tout seul à plat sur la route.'));
-    rows.push(this._range('Taille', () => d.s, (v) => { d.s = v; return touch(); }, { min: obst ? 0.5 : 0.3, max: obst ? 2.5 : 6, step: 0.05, fmt: (v) => '×' + (+v).toFixed(2) }));
+    rows.push(this._range('Taille', () => d.s, (v) => set({ s: v }), { min: obst ? 0.5 : 0.3, max: obst ? 2.5 : 6, step: 0.05, fmt: (v) => '×' + (+v).toFixed(2) }));
     if (d.k === 'plaque') {
       const url = h('input', { type: 'text', maxlength: 400, placeholder: 'https://…', spellcheck: false });
       url.addEventListener('change', () => {
         if (url.value && !safeUrl(url.value)) { ed.app.ui.flash('URL https:// invalide.'); ed.app.audio.error(); this._syncPanel(); return; }
-        this._apply(() => { d.u = url.value; return touch(); });
+        this._apply(() => set({ u: url.value }));
       });
       this._sync.push(() => { if (document.activeElement !== url) url.value = d.u || ''; });
       rows.push(h('label', { class: 'insp-row' }, h('span', {}, 'Image'), url));
     }
-    if (obst) rows.push(this._range('Décalage', () => d.ph || 0, (v) => { d.ph = Math.max(0, Math.min(0.95, Math.round(v * 20) / 20)); return touch(); }, { min: 0, max: 0.95, step: 0.05, fmt: (v) => Math.round(v * 100) + ' %' }));
+    if (obst) rows.push(this._range('Décalage', () => d.ph || 0, (v) => set({ ph: v }), { min: 0, max: 0.95, step: 0.05, fmt: (v) => Math.round(v * 100) + ' %' }));
     return rows;
   },
 };

@@ -11,14 +11,14 @@ import { DECO_LABELS } from './decoData.js';
 import { setEditorDraft } from './storage.js';
 import { Inspector } from './inspector.js';
 import { ERASE_FILTERS } from './editorPick.js';
-import { MODS, NO_OPTS, TOOLS, fillBase, isFill, toFill } from './editor/shared.js';
+import { MODS, NO_OPTS, TOOLS, fillBase, isFill, toFill, newCircuitId } from './editor/shared.js';
 import { paletteMethods } from './editor/palette.js';
 import { pointerMethods } from './editor/pointer.js';
 import { toolMethods } from './editor/tools.js';
 import { groupMethods } from './editor/groups.js';
 import { logicUiMethods } from './editor/logicUi.js';
 import { selectionMethods } from './editor/selection.js';
-import { historyMethods } from './editor/history.js';
+import { historyMethods, canonicalSnapshot, withoutVerification } from './editor/history.js';
 import { prefabMethods } from './editor/prefabs.js';
 import { cdecoMethods } from './editor/cdeco.js';
 import { scriptsUiMethods } from './editor/scriptsUi.js';
@@ -46,6 +46,8 @@ export class EditorSession {
       this.track.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 });
     }
     if (state.name) this.track.name = state.name;
+    this._guardTrack();      // (phase 8, TECH-052 : options, orientation, mouvement du circuit passent par le validateur de placement de l'éditeur, js/placement.js)
+    this.circuitId = newCircuitId();      // (TECH-058 : identifie le circuit ouvert ; change au chargement d'un autre : Nouveau, Importer)
     this.entryId = state.entryId || null;
     // Phase 4 : un circuit dont la lecture a perdu des pièces (version plus récente du jeu) ou n'a pas pu être lue ne doit JAMAIS réécrire l'original : l'éditeur se détache de l'entrée
     // (un nouvel enregistrement crée une copie) et le dit. Avant, un code abîmé ouvrait un circuit vide et le premier enregistrement écrasait le circuit d'origine.
@@ -131,8 +133,10 @@ export class EditorSession {
     // est exactement celui qu'on a quitté.
     const keep = app._editorKeep;
     app._editorKeep = null;
-    const kept = !!(keep && state.keepId === keep.id && keep.history[keep.hIndex] === this.history[0]);
-    if (kept) this._restoreKeep(keep);
+    // (phase 8, TECH-034 : comparaison sur la forme CANONIQUE de l'instantané quitté — celui du circuit écrit en code puis relu, comme l'essai le fait — ; avant, une seule
+    // décoration posée « Libre » suffisait à faire jeter l'historique, le presse-papiers et les calques masqués ou verrouillés à chaque retour d'essai)
+    const kept = !!(keep && state.keepId === keep.id && withoutVerification(canonicalSnapshot(keep.history[keep.hIndex])) === withoutVerification(this.history[0]));
+    if (kept) { this._restoreKeep(keep); this.history[this.hIndex] = this.history[0]; }      // (le pas courant devient l'état rouvert : une vérification terminée pendant l'essai n'ajoute pas de pas fantôme)
 
     // Le gizmo (TransformControls) s'abonne aux clics AVANT l'éditeur : il décide le premier s'il est saisi.
     this.inspector = new Inspector(this);

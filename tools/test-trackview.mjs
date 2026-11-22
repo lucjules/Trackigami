@@ -146,4 +146,26 @@ test('le coût d\'une modification reste très inférieur à une reconstruction 
   v.dispose();
 });
 
+console.log('TECH-062 : vue par niveau et calques masqués');
+test('vue par niveau : les pièces estompées d\'un groupe masqué ne s\'affichent pas, même atténuées ; elles reviennent quand le calque est affiché, sans reconstruire', () => {
+  const t = new Track('v');
+  t.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 });
+  t.add({ t: 'straight', x: 0, z: -1, l: 5, r: 0, g: 2 });      // niveau 5, groupe 2 : estompée quand on regarde le niveau 0
+  t.add({ t: 'straight', x: 0, z: -2, l: 5, r: 0 });            // niveau 5, sans groupe : estompée
+  const v = new TrackView(t, mats);
+  v.focus = 0; v.rebuild();
+  const dim = () => v.group.children.filter((c) => c.material === v.dimMat);
+  const tris = () => dim().filter((c) => c.visible).reduce((n, c) => n + triangles(c.geometry), 0);
+  const all = tris();
+  assert.ok(all > 0, 'mise en scène : des pièces estompées sont dessinées');
+  v.setGroupVisible(2, false);
+  assert.ok(tris() > 0 && tris() < all, `groupe masqué : sa pièce estompée disparaît (${tris()} triangles sur ${all})`);
+  const hidden = tris();
+  v.rebuild();
+  assert.equal(tris(), hidden, 'reconstruite (la vue par niveau change) : toujours masquée');
+  v.setGroupVisible(2, true);
+  assert.equal(tris(), all);
+  v.dispose();
+});
+
 finish('Tous les tests du maillage par tronçons passent.');

@@ -295,6 +295,271 @@ try {
     assert.ok(r.kept, 'l\'ancien record reste en place');
     await ctx.close();
   });
+  // Phase 8 (TECH-003) : avec une option armée que la pièce choisie refuse (« Mur gauche » sur un départ), l'aperçu montré sous la vraie souris annonce exactement ce que le clic
+  // fait : la pièce normalisée, sans le volume fantôme de l'option ; la ligne droite du niveau 2 n'est ni annoncée ni supprimée.
+  await test('TECH-003 : « Mur gauche » armé, départ visé en (0, 0) sous la souris : l\'aperçu et la pose donnent le même résultat ; la ligne droite du niveau 2 reste', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await page.evaluate(async () => {
+      const { Track } = await import('/js/track.js');
+      const t = new Track('Sonde');
+      t.add({ t: 'start', x: 6, z: 0, l: 0, r: 0 }); t.add({ t: 'straight', x: 0, z: 0, l: 2, r: 0 }); t.add({ t: 'straight', x: 1, z: 0, l: 0, r: 0 });
+      await window.copytrack.openEditor({ code: t.encode(), name: 'Sonde' });
+    });
+    await page.waitForFunction(() => window.copytrack.session && window.copytrack.session.kind === 'editor' && window.copytrack.session.track.name === 'Sonde', null, { timeout: 30000, polling: 100 });
+    await page.evaluate(() => { const A = window.copytrack, E = A.session; A.ui.closeModal(); E.setTool('start'); E._optClick('o', 1); E.setLevel(0); E.target.set(16, E.levelY(), 16); E.dist = 160; });
+    await page.waitForTimeout(500);
+    const pt = await page.evaluate(async () => {
+      const THREE = await import('/js/vendor/three.module.min.js');
+      const A = window.copytrack, E = A.session, r = A.renderer.domElement.getBoundingClientRect();
+      const v = new THREE.Vector3(16, E.levelY(), 16).project(A.camera);
+      return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height, opts: { ...E.opts } };
+    });
+    if (!pt.opts.o) throw new Error('précondition : l\'option « Mur gauche » est armée');
+    await page.mouse.move(pt.x, pt.y);
+    await page.waitForFunction(() => { const E = window.copytrack.session; return E.hover && E.hover.cx === 0 && E.hover.cz === 0 && E._previewPlan && E._previewPlan.norm.x === 0 && E._previewPlan.norm.z === 0; }, null, { timeout: 8000, polling: 50 });
+    const pv = await ed(page, () => { const E = window.copytrack.session, p = E._previewPlan; return { ok: p.ok, o: p.norm.o, dropped: p.dropped, remove: p.remove.map((t) => `${t.t}@${t.x},${t.z},${t.l}`).sort(), red: E.previewMat.emissive.getHex() !== 0, visible: E.preview.visible }; });
+    assert.equal(pv.ok, true); assert.equal(pv.o, 0, 'aperçu : la pièce normalisée (sans mur)'); assert.deepEqual(pv.dropped, ['o']);
+    assert.deepEqual(pv.remove, ['start@6,0,0'], 'aperçu : seul l\'ancien départ sera retiré');
+    assert.equal(pv.red, false, 'aperçu : aucune pièce remplacée (pas de rouge)');
+    const before = await ed(page, () => window.copytrack.session.track.tiles.map((t) => `${t.t}@${t.x},${t.z},${t.l}`).sort());
+    await page.mouse.down(); await page.mouse.up();
+    await page.waitForFunction(() => window.copytrack.session.track.tiles.some((t) => t.t === 'start' && t.x === 0), null, { timeout: 8000, polling: 50 });
+    const after = await ed(page, () => window.copytrack.session.track.tiles.map((t) => `${t.t}@${t.x},${t.z},${t.l}`).sort());
+    assert.deepEqual(before.filter((k) => !after.includes(k)), pv.remove, 'la pose retire exactement ce que l\'aperçu annonçait');
+    assert.ok(after.includes('straight@0,0,2'), 'la ligne droite du niveau 2 est toujours là');
+    assert.equal(after.filter((k) => k.startsWith('start')).length, 1);
+    await ctx.close();
+  });
+  // Phase 8 (TECH-034) : une décoration posée « Libre » à la souris (coordonnées quelconques), puis Essai, puis retour : tout ce que l'éditeur avait mis de côté revient.
+  // Avant : l'instantané du circuit rouvert (relu du code, arrondi) différait de celui qu'on avait quitté, et l'état gardé était jeté (historique 3 → 1, calques perdus…).
+  await test('TECH-034 : décoration libre posée à la souris, Essai, retour : historique, presse-papiers, calques masqués / verrouillés conservés ; la « pièce perso » garde ses formes', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await ed(page, (t) => window.copytrack.session.setTool(t), 'straight'); await press(page, 'KeyP', 3);
+    await ed(page, (t) => window.copytrack.session.setTool(t), 'finish'); await press(page, 'KeyP', 1);
+    // Calques : une ligne droite dans le groupe 2 (masqué), une autre dans le groupe 3 (verrouillé) ; presse-papiers : une zone copiée.
+    await ed(page, () => {
+      const E = window.copytrack.session, T = E.track;
+      T.tiles[1].g = 2; T.tiles[2].g = 3; T.version++; E._changed(); E._commit();
+      E.setGroupHidden(2, true); E.setGroupLocked(3, true);
+      E.setTool('select'); E.sel = { x0: -6, z0: -12, x1: 6, z1: 6 }; E.copySel(true); E.sel = null;      // (les pièces des calques masqué et verrouillé ne sont pas copiées : les autres le sont)
+      E.setTool('deco:cone'); E.deco.snap = 0; E.target.set(16, E.levelY(), -48); E.dist = 140;
+    });
+    await page.waitForTimeout(500);
+    const nDecos = await ed(page, () => window.copytrack.session.track.decos.length);
+    await page.mouse.move(611, 377); await page.mouse.move(613, 379);
+    await page.waitForTimeout(300);
+    await page.mouse.down(); await page.mouse.up();
+    await page.waitForFunction((n) => window.copytrack.session.track.decos.length === n + 1, nDecos, { timeout: 8000, polling: 50 });
+    // La pièce perso : l'outil garde ses formes (E.deco.cp) ; une première pose.
+    const before = await ed(page, async () => {
+      const E = window.copytrack.session, d = E.track.decos[E.track.decos.length - 1];
+      const { sanitizeDecoParts } = await import('/js/customDeco.js');
+      E.deco.cp = sanitizeDecoParts([{ s: 'box', x: 0, y: 1, z: 0, sx: 2, sy: 1, sz: 1, ry: 0, c: '#ff0000' }, { s: 'sphere', x: 0, y: 2.5, z: 0, sx: 1, sy: 1, sz: 1, ry: 0, c: '#00ff00' }]);
+      E.setTool('deco:custom');
+      return { x: d.x, z: d.z, offGrid: Math.abs(d.x * 2 - Math.round(d.x * 2)) > 1e-6 || Math.abs(d.z * 2 - Math.round(d.z * 2)) > 1e-6, hist: E.history.length, hIndex: E.hIndex, clip: !!E.clip, cp: E.deco.cp.length, tool: E.tool };
+    });
+    if (!before.offGrid) throw new Error('précondition : la décoration est posée hors de la grille (Libre) : ' + JSON.stringify(before));
+    if (before.hist < 4 || !before.clip) throw new Error('précondition : historique et presse-papiers en place : ' + JSON.stringify(before));
+    await page.evaluate(() => window.copytrack.session.test());
+    await page.waitForFunction(() => window.copytrack.session && window.copytrack.session.kind !== 'editor' && window.copytrack.mode === 'race', null, { timeout: 30000, polling: 100 });
+    await page.waitForTimeout(1500);
+    await page.evaluate(() => window.copytrack.quitRace());
+    await page.waitForFunction(() => window.copytrack.session && window.copytrack.session.kind === 'editor', null, { timeout: 30000, polling: 100 });
+    await page.waitForTimeout(500);
+    const back = await ed(page, () => {
+      const E = window.copytrack.session;
+      return { hist: E.history.length, hIndex: E.hIndex, clip: !!E.clip, hidden: E.hiddenGroups ? [...E.hiddenGroups] : [], locked: E.lockedGroups ? [...E.lockedGroups] : [], cp: E.deco.cp ? E.deco.cp.length : 0, tool: E.tool, dirty: E.isDirty() };
+    });
+    assert.equal(back.hist, before.hist, 'historique d\'annulation conservé');
+    assert.equal(back.hIndex, before.hIndex);
+    assert.equal(back.clip, true, 'presse-papiers conservé');
+    assert.deepEqual(back.hidden, [2], 'calque masqué conservé');
+    assert.deepEqual(back.locked, [3], 'calque verrouillé conservé');
+    assert.equal(back.tool, 'deco:custom');
+    assert.equal(back.cp, before.cp, 'la pièce perso garde ses formes');
+    // Une pose avec la pièce perso : elle réussit (avant : « Maximum de 500 décorations atteint », l'outil n'avait plus de formes).
+    const n2 = await ed(page, () => window.copytrack.session.track.decos.length);
+    await page.mouse.move(640, 400); await page.mouse.move(642, 402); await page.waitForTimeout(300);
+    await page.mouse.down(); await page.mouse.up();
+    await page.waitForFunction((n) => window.copytrack.session.track.decos.length === n + 1, n2, { timeout: 8000, polling: 50 });
+    const undo = await ed(page, () => { const E = window.copytrack.session; E.undo(); E.undo(); return E.track.decos.length; });
+    assert.equal(undo, n2 - 1, 'annuler remonte l\'historique d\'avant l\'essai (la décoration libre est retirée)');
+    await ctx.close();
+  });
+  // Phase 8 (TECH-035) : l'inspecteur écrit par la normalisation du modèle ; un solide ne propose ni inclinaison ni roulis.
+  await test('TECH-035 : inclinaison de 37,5° saisie dans l\'inspecteur, annuler / rétablir : le rétablissement est intact (pas de pas fantôme) ; un pilier n\'a ni inclinaison, ni roulis, ni « Retourner »', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await ed(page, () => {
+      const E = window.copytrack.session;
+      E.track.addDeco({ k: 'cone', x: 20.5, y: 0, z: 20.5, ry: 0, s: 1 }); E.track.addDeco({ k: 'pillar', x: 60, y: 0, z: 20, ry: 0, s: 1 });
+      E._changed(); E._commit(); E.setTool('inspect'); E.inspector.select('deco', E.track.decos[0]);
+    });
+    await page.waitForTimeout(300);
+    const input = page.locator('#ed-insp label.insp-row', { hasText: 'Inclinaison (X)' }).locator('input[type=number]');
+    await input.fill('37.5'); await input.dispatchEvent('change');
+    await page.waitForTimeout(200);
+    const r = await ed(page, () => {
+      const E = window.copytrack.session, d = E.track.decos[0];
+      const rx = d.rx, n = E.history.length;
+      E.undo(); const undone = E.track.decos[0].rx || 0;
+      E.redo(); const same = E._snapshot() === E.history[E.hIndex];
+      E.undo(); E._commit();      // (un clic de l'inspecteur qui ne change rien)
+      const kept = E.history.length; E.redo();
+      return { rx, n, undone, same, kept, after: E.track.decos[0].rx, dirty: E.isDirty() };
+    });
+    assert.equal(r.rx, 0.654, 'au millième');
+    assert.equal(r.undone, 0);
+    assert.equal(r.same, true, 'après annuler / rétablir, le circuit égale l\'instantané courant');
+    assert.equal(r.kept, r.n, 'aucun pas fantôme : la pile « rétablir » est intacte');
+    assert.equal(r.after, 0.654, 'rétablir redonne l\'inclinaison');
+    await ed(page, () => { const E = window.copytrack.session; E.inspector.select('deco', E.track.decos[1]); });
+    await page.waitForTimeout(300);
+    const panel = await page.locator('#ed-insp').innerText();
+    assert.match(panel, /Cap \(Y\)/);
+    assert.doesNotMatch(panel, /Inclinaison \(X\)|Roulis \(Z\)|Retourner|Remettre droit/, 'un solide n\'expose ni inclinaison ni roulis');
+    await ctx.close();
+  });
+  // ---- Phase 9 : défauts indépendants de l'éditeur ----------------------------------------------------------------------------------------------------
+  // Écran d'un point 3D (le projeté de la caméra de l'éditeur).
+  const screenOf = (page, x, y, z) => page.evaluate(async ([x, y, z]) => {
+    const THREE = await import('/js/vendor/three.module.min.js');
+    const A = window.copytrack, r = A.renderer.domElement.getBoundingClientRect(), v = new THREE.Vector3(x, y, z).project(A.camera);
+    return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height };
+  }, [x, y, z]);
+  await test('TECH-036 : clic droit (outil décoration) et gomme à la souris : une décoration d\'un calque verrouillé ou masqué n\'est pas effacée ; celle d\'un calque libre l\'est', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await ed(page, () => {
+      const E = window.copytrack.session, T = E.track;
+      T.clear(); T.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 });
+      T.addDeco({ k: 'cone', x: 16, y: 0, z: 16, ry: 0, s: 1, g: 2 }); T.addDeco({ k: 'cone', x: 16, y: 0, z: 48, ry: 0, s: 1, g: 3 }); T.addDeco({ k: 'cone', x: 16, y: 0, z: 80, ry: 0, s: 1 });
+      E._changed(); E._commit(); E.setGroupLocked(2, true); E.setGroupHidden(3, true);
+      E.target.set(16, E.levelY(), 48); E.dist = 160;
+    });
+    await page.waitForTimeout(400);
+    for (const [z, tool, button] of [[16, 'deco:tree', 'right'], [48, 'deco:tree', 'right'], [16, 'erase', 'left'], [48, 'erase', 'left']]) {
+      await ed(page, (t) => window.copytrack.session.setTool(t), tool);
+      const p = await screenOf(page, 16, 0, z);
+      await page.mouse.move(p.x, p.y); await page.mouse.move(p.x + 1, p.y + 1); await page.waitForTimeout(150);
+      await page.mouse.click(p.x + 1, p.y + 1, { button });
+      await page.waitForTimeout(150);
+      assert.equal(await ed(page, () => window.copytrack.session.track.decos.filter((d) => d.g).length), 2, `${tool} / ${button} sur z = ${z} : décoration protégée intacte`);
+    }
+    await ed(page, (t) => window.copytrack.session.setTool(t), 'erase');
+    const p = await screenOf(page, 16, 0, 80);
+    await page.mouse.move(p.x, p.y); await page.mouse.move(p.x + 1, p.y + 1); await page.waitForTimeout(150);
+    await page.mouse.click(p.x + 1, p.y + 1);
+    await page.waitForFunction(() => window.copytrack.session.track.decos.length === 2, null, { timeout: 5000, polling: 50 });
+    await ctx.close();
+  });
+  await test('TECH-038 : un groupe cité seulement par la logique n\'est pas proposé par « Nouveau groupe » (fenêtre « Groupes et calques »)', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await ed(page, () => {
+      const E = window.copytrack.session, T = E.track;
+      T.clear(); T.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); T.add({ t: 'straight', x: 0, z: -1, l: 0, r: 0 });
+      T.setLogic({ v: 1, off: [1], vars: 0, rules: [{ on: ['start'], if: [], do: [['show', 1]], once: true }] });
+      E._changed(); E._commit(); E.setTool('select'); E.sel = { x0: 0, z0: -1, x1: 0, z1: -1 }; E.openGroups();
+    });
+    await page.waitForSelector('.ed-groups [data-a="new"]');
+    await page.locator('.ed-groups [data-a="new"]').click();
+    await page.waitForTimeout(200);
+    const r = await ed(page, () => { const T = window.copytrack.session.track; return { groups: T.tiles.map((t) => t.g), lg: T.logicGroups() }; });
+    assert.deepEqual(r.groups, [0, 2], 'la pièce est rangée dans le groupe 2, pas dans le groupe 1 de la logique (caché au départ)');
+    await ctx.close();
+  });
+  await test('TECH-057 : Ctrl+A sélectionne aussi les décorations hors de l\'emprise des pièces ; Suppr les efface', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await ed(page, () => { const E = window.copytrack.session, T = E.track; T.clear(); T.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); T.addDeco({ k: 'tree', x: 500, y: 0, z: -400, ry: 0, s: 1 }); E._changed(); E._commit(); E.setTool('inspect'); });
+    await page.keyboard.press('Control+a'); await page.waitForTimeout(200);
+    assert.equal(await ed(page, () => window.copytrack.session._selDecos().length), 1);
+    await ed(page, () => window.copytrack.session.deleteSel(true));
+    assert.equal(await ed(page, () => window.copytrack.session.track.decos.length), 0);
+    await ctx.close();
+  });
+  await test('TECH-054 / 058 : importer un circuit après avoir masqué des calques : calques remis à zéro, un presse-papiers d\'avant colle sans groupes ; annuler l\'import rend l\'ancien circuit vérifié', async () => {
+    const { ctx, page } = await open(1280, 720);
+    const r = await ed(page, async () => {
+      const E = window.copytrack.session, T = E.track, { scriptTrack } = await import('/js/track.js');
+      T.clear(); T.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); T.add({ t: 'straight', x: 0, z: -1, l: 0, r: 0, g: 1 }); T.setVerified(11.5);
+      E._changed(); E._commit();
+      E.setTool('select'); E.sel = { x0: 0, z0: -1, x1: 0, z1: -1 }; E.copySel(true); E.sel = null;      // (copié AVANT de masquer : un calque masqué ne se copie pas)
+      E.setGroupHidden(1, true); E.setGroupLocked(1, true);
+      const other = scriptTrack('Autre', 'start S2 finish'); other.tiles[1].g = 1;
+      E.loadCode(other.encode());
+      const a = { hidden: E.hiddenGroups.size, locked: E.lockedGroups.size, mine: E._layerOk(T.tiles[1]), verified: T.verified };
+      E.setTool('select'); E.hover = { cx: 6, cz: 6 }; E.level = 0; E.doPaste();
+      const pasted = T.tiles.filter((t) => t.x === 6 && t.z === 6).map((t) => t.g | 0);
+      E.undo(); E.undo();
+      return { ...a, pasted, back: { name: T.name, verified: T.verified, vt: T.vt } };
+    });
+    assert.deepEqual([r.hidden, r.locked, r.mine, r.verified], [0, 0, true, false]);
+    assert.deepEqual(r.pasted, [0], 'collé dans un autre circuit : groupe 0');
+    assert.equal(r.back.verified, true, 'annuler l\'import rend l\'ancien circuit vérifié : ' + JSON.stringify(r.back));
+    await ctx.close();
+  });
+  await test('TECH-056 : un code avec windDir 30 : ouvrir « Circuit » et valider ne change ni la direction ni la signature du vent', async () => {
+    const { ctx, page } = await open(1280, 720);
+    const before = await page.evaluate(async () => {
+      const { scriptTrack } = await import('/js/track.js'), t = scriptTrack('Vent', 'start S4 finish');
+      t.setParams({ wind: 40, windDir: 30 });
+      await window.copytrack.openEditor({ code: t.encode(), name: 'Vent' });
+      return { dir: t.windDir, sig: t.signature() };
+    });
+    await page.waitForFunction(() => window.copytrack.session && window.copytrack.session.kind === 'editor' && window.copytrack.session.track.name === 'Vent', null, { timeout: 30000, polling: 100 });
+    assert.equal(before.dir, 30);
+    await page.evaluate(() => { window.copytrack.ui.closeModal(); window.copytrack.session.openParams('cond'); });
+    await page.waitForSelector('#pp-winddir');
+    assert.equal(await page.locator('#pp-winddir').inputValue(), '30', 'la liste propose 30°');
+    await page.locator('#modal-actions button.primary').click();      // « Appliquer »
+    await page.waitForTimeout(300);
+    const after = await ed(page, () => { const T = window.copytrack.session.track; return { dir: T.windDir, wind: T.wind, sig: T.signature() }; });
+    assert.equal(after.wind, 40);
+    assert.equal(after.dir, 30, 'la direction reste 30° (avant : réécrite en 45°)'); assert.equal(after.sig, before.sig, 'la signature ne change pas');
+    await ctx.close();
+  });
+  await test('TECH-062 : vue par niveau : les pièces estompées d\'un calque masqué ne s\'affichent pas', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await ed(page, () => {
+      const E = window.copytrack.session, T = E.track;
+      T.clear(); T.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); T.add({ t: 'straight', x: 0, z: -1, l: 5, r: 0, g: 4 });
+      E._changed(); E._commit(); E.focusLevel = true; E.setLevel(0); E.needsRebuild = true;
+    });
+    await page.waitForTimeout(600);
+    const count = () => ed(page, () => { const V = window.copytrack.session.view; return V.group.children.filter((c) => c.material === V.dimMat && c.visible).length; });
+    assert.ok(await count() >= 1, 'précondition : la pièce du niveau 5 est estompée');
+    await ed(page, () => window.copytrack.session.setGroupHidden(4, true));
+    assert.equal(await count(), 0, 'calque masqué : rien d\'estompé à l\'écran');
+    await ed(page, () => { const E = window.copytrack.session; E.needsRebuild = true; E.setLevel(1); E.setLevel(0); });
+    await page.waitForTimeout(500);
+    assert.equal(await count(), 0, 'après reconstruction : toujours masquée');
+    await ctx.close();
+  });
+  await test('TECH-059 : stockage plein : « Retour » reste dans l\'éditeur et propose d\'exporter le code ou de quitter sans enregistrer ; le bandeau « Recharger » ne recharge pas dans le dos du joueur', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await ed(page, () => { const E = window.copytrack.session; E.track.clear(); E.track.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); E.track.add({ t: 'straight', x: 0, z: -1, l: 0, r: 0 }); E._changed(); E._commit(); window.__keepAlive = 'oui'; });
+    await page.evaluate(() => { const S = window.Storage, real = S.prototype.setItem; window.__realSet = real; S.prototype.setItem = function (k, v) { if (/track|mine|draft|editor/i.test(k)) throw new window.DOMException('plein', 'QuotaExceededError'); return real.call(this, k, v); }; });
+    await page.evaluate(() => window.copytrack.leaveEditor());
+    await page.waitForFunction(() => /Circuit non enregistré/.test(document.getElementById('modal').textContent), null, { timeout: 5000 });
+    const labels = await page.evaluate(() => [...document.querySelectorAll('#modal-actions button')].map((b) => b.textContent));
+    assert.deepEqual(labels, ['Rester dans l’éditeur', 'Exporter le code', 'Quitter sans enregistrer']);
+    assert.equal(await ed(page, () => window.copytrack.session.kind), 'editor', 'toujours dans l\'éditeur');
+    // bandeau de mise à jour : pas de rechargement
+    await page.evaluate(() => { window.copytrack.ui.closeModal(); window.copytrack._newVersion = 'bêta 99'; window.copytrack.maybeShowUpdate(); document.querySelector('#update-bar [data-up="reload"]').click(); });
+    await page.waitForFunction(() => /Circuit non enregistré/.test(document.getElementById('modal').textContent) && [...document.querySelectorAll('#modal-actions button')].some((b) => /Recharger sans enregistrer/.test(b.textContent)), null, { timeout: 5000 });
+    assert.equal(await page.evaluate(() => window.__keepAlive), 'oui', 'la page n\'a pas été rechargée');
+    // exporter le code
+    await page.evaluate(() => { window.copytrack.ui.closeModal(); window.copytrack.leaveEditor(); });
+    await page.waitForFunction(() => /Circuit non enregistré/.test(document.getElementById('modal').textContent));
+    await page.evaluate(() => [...document.querySelectorAll('#modal-actions button')].find((b) => /Exporter/.test(b.textContent)).click());
+    await page.waitForFunction(() => /Partager le circuit/.test(document.getElementById('modal-title').textContent), null, { timeout: 5000 });
+    assert.match(await page.locator('#modal-body textarea').inputValue(), /^SHW3:/, 'le code du circuit est proposé');
+    // quitter sans enregistrer
+    await page.evaluate(() => { window.copytrack.ui.closeModal(); window.copytrack.leaveEditor(); });
+    await page.waitForFunction(() => /Circuit non enregistré/.test(document.getElementById('modal').textContent));
+    await page.evaluate(() => [...document.querySelectorAll('#modal-actions button')].find((b) => /Quitter sans/.test(b.textContent)).click());
+    await page.waitForFunction(() => window.copytrack.mode === 'menu', null, { timeout: 8000 });
+    await page.evaluate(() => { window.Storage.prototype.setItem = window.__realSet; });
+    await ctx.close();
+  });
   await test('rangement 0.12 sur téléphone (844 × 390) : le panneau est un tiroir, il se referme après un choix ; la vue reste dégagée', async () => {
     const { ctx, page } = await open(844, 390);
     const drawer = () => page.evaluate(() => { const r = document.getElementById('ed-palette').getBoundingClientRect(); return r.right > 60 && r.left < 70; });

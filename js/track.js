@@ -14,6 +14,7 @@ import { DEFAULT_AMBIANCE, cleanAmbiance, ambianceToArray, ambianceFromArray } f
 import { COLOR_KEYS, MP, W2, cleanColors } from './track/shared.js';
 import { surfaceMethods } from './track/surfaces.js';
 import { editMethods } from './track/edit.js';
+export { normalizeDeco } from './track/edit.js';
 import { sanitizeLogic, logicToArray, logicFromArray, logicSig } from './sim/logic.js';
 import { PROFILE_IDS } from './physics/profiles.js';
 export const MAX_CELL = 4000;          // bornes de la grille, en cases (voir Track.normalize)
@@ -80,6 +81,9 @@ export class Track {
     this.resetRules();
     this.vt = 0;      // temps de vérification (secondes) de l'auteur
     this.vh = '';     // signature du circuit au moment de la vérification
+    // Phase 8 (TECH-052) : garde de placement de l'éditeur (js/placement.js), consultée par les modifications de pièce du modèle (_reshape : options, orientation,
+    // mouvement ; setMover) : (pièce candidate normalisée, pièce remplacée) → vrai si permis. null hors de l'éditeur (course, serveur) ; jamais copiée par clone().
+    this.placementGuard = null;
     for (const t of tiles) this.add(t);
   }
 
@@ -448,6 +452,23 @@ export class Track {
     for (const t of this.tiles) if (t.g) s.add(t.g);
     for (const d of this.decos) if (d.g) s.add(d.g);
     return [...s].sort((a, b) => a - b);
+  }
+
+  // Numéros de groupe CITÉS par la logique du circuit (cachés au départ, cibles de zone, conditions, actions), même si aucune pièce n'y est rangée (TECH-038).
+  logicGroups() {
+    const L = sanitizeLogic(this.lg), s = new Set();
+    if (!L) return [];
+    for (const g of L.off) s.add(g);
+    for (const r of L.rules) {
+      if (r.on[0] === 'zone') s.add(r.on[1]);
+      for (const c of r.if) if (c[0] === 'shown' || c[0] === 'hidden') s.add(c[1]);
+      for (const a of r.do) if (a[0] === 'show' || a[0] === 'hide' || a[0] === 'toggle') s.add(a[1]);
+    }
+    return [...s].sort((a, b) => a - b);
+  }
+  // Groupes RÉSERVÉS : ceux qui contiennent quelque chose, qui ont un nom ou que la logique cite (un « nouveau groupe » ne doit jamais en réutiliser un).
+  reservedGroups() {
+    return [...new Set([...this.usedGroups(), ...this.groupNames().map(([g]) => g), ...this.logicGroups()])].sort((a, b) => a - b);
   }
 
   // ---- Sérialisation -----------------------------------------------------
@@ -1172,7 +1193,7 @@ export function scriptTrack(name, script, opts = {}) {
   }
   if (split) throw new Error(`${name} : bifurcation SPL sans MRG`);
   if (tsplit) throw new Error(`${name} : bifurcation en T (TSPL) sans TMRG`);
-  for (const d of opts.decos || []) tr.addDeco(d);
+  for (const d of opts.decos || []) tr.addDeco(d, { exact: true });      // (circuit généré : valeurs exactes, voir track/edit.js, normalizeDeco)
   tr.path = path;
   tr.turtle = { x, z, h, l };   // position finale (sert à refermer les circuits à tours)
   return tr;

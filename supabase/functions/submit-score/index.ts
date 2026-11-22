@@ -6761,6 +6761,58 @@ var surfaceMethods = {
 };
 
 // js/track/edit.js
+var centi = (v) => +v.toFixed(2) || 0;
+var milliRy = (v) => +v.toFixed(3) || 0;
+function normalizeDeco(d, { exact = false } = {}) {
+  if (!d || !DECO_ORDER.includes(d.k)) return null;
+  const deco = {
+    k: d.k,
+    x: +d.x,
+    y: +d.y,
+    z: +d.z,
+    ry: +d.ry || 0,
+    s: Math.max(0.2, Math.min(20, +d.s || 1)),
+    c: d.c | 0,
+    u: d.u ? String(d.u).slice(0, 400) : ""
+  };
+  const g = Math.max(0, Math.min(63, d.g | 0));
+  if (g) deco.g = g;
+  if (isObstacle(deco.k)) {
+    deco.ph = Math.max(0, Math.min(0.95, Math.round((+d.ph || 0) * 20) / 20));
+    deco.s = Math.max(0.5, Math.min(2.5, deco.s));
+  }
+  if (!Number.isFinite(deco.x) || !Number.isFinite(deco.y) || !Number.isFinite(deco.z)) return null;
+  const solid = isSolid(deco.k);
+  if (solid) {
+    deco.s = Math.max(SOLID_SCALE[0], Math.min(SOLID_SCALE[1], deco.s));
+    if (!Number.isFinite(deco.ry)) return null;
+  }
+  if (!exact) {
+    deco.x = centi(deco.x);
+    deco.y = centi(deco.y);
+    deco.z = centi(deco.z);
+    deco.s = centi(deco.s);
+    deco.ry = Number.isFinite(deco.ry) ? milliRy(deco.ry) : 0;
+  }
+  if (isObstacle(deco.k)) {
+    const r = normalizeRoll(+d.rz);
+    if (r) deco.rz = r;
+  } else if (!solid) {
+    for (const a of [
+      "rx",
+      "rz"
+    ]) {
+      const r = normalizeAngle(+d[a]);
+      if (r) deco[a] = r;
+    }
+  }
+  if (typeof d.cc === "string" && HEX3.test(d.cc)) deco.cc = d.cc.toLowerCase();
+  if (deco.k === "custom") {
+    deco.cp = sanitizeDecoParts(d.cp);
+    if (!deco.cp.length) return null;
+  }
+  return deco;
+}
 var editMethods = {
   // Revêtement (avec paramètre en %). Renvoie true si quelque chose a changé.
   setSurface(tile, s, p = 0) {
@@ -6833,8 +6885,11 @@ var editMethods = {
   },
   // Remplace `tile` par `cand` (normalisée : options devenues impossibles retirées, revêtement incompatible effacé) si la place et les niveaux
   // le permettent ; sinon rien ne change. Même objet : la sélection de l'inspecteur reste valable.
+  // Phase 8 (TECH-052) : dans l'éditeur, la garde de placement (placementGuard, js/placement.js) a aussi son mot à dire : débordement d'une pente posée au mur,
+  // départ unique, niveaux de l'éditeur. Hors de l'éditeur (course, serveur) elle est absente (null) : rien ne change.
   _reshape(tile, cand) {
     const n = Track.normalize(cand);
+    if (this.placementGuard && !this.placementGuard(n, tile)) return false;
     this.remove(tile);
     if (this.conflicts(n).length || !Track.inBounds(n)) {
       this._insert(tile);
@@ -6854,6 +6909,7 @@ var editMethods = {
       ms: m.ms,
       ma: m.ma
     };
+    if (this.placementGuard && !this.placementGuard(Track.normalize(cand), tile)) return false;
     this.remove(tile);
     if (this.conflicts(cand).length || !Track.inBounds(cand)) {
       this._insert(tile);
@@ -6892,51 +6948,35 @@ var editMethods = {
     this.version++;
     return true;
   },
-  addDeco(d) {
+  // Ajoute une décoration, NORMALISÉE (normalizeDeco, plus haut) ; null si elle est refusée (limite de MAX_DECOS, de pièces perso, kind inconnu, position illisible).
+  // exact : circuits GÉNÉRÉS seulement (circuits officiels, scriptTrack) — valeurs gardées à la précision du calcul (voir normalizeDeco).
+  addDeco(d, { exact = false } = {}) {
     if (this.decos.length >= MAX_DECOS) return null;
-    const deco = {
-      k: d.k,
-      x: +d.x,
-      y: +d.y,
-      z: +d.z,
-      ry: +d.ry || 0,
-      s: Math.max(0.2, Math.min(20, +d.s || 1)),
-      c: d.c | 0,
-      u: d.u ? String(d.u).slice(0, 400) : ""
-    };
-    const g = Math.max(0, Math.min(63, d.g | 0));
-    if (g) deco.g = g;
-    if (isObstacle(deco.k)) {
-      deco.ph = Math.max(0, Math.min(0.95, Math.round((+d.ph || 0) * 20) / 20));
-      deco.s = Math.max(0.5, Math.min(2.5, deco.s));
-    }
-    if (!DECO_ORDER.includes(deco.k)) return null;
-    if (!Number.isFinite(deco.x) || !Number.isFinite(deco.y) || !Number.isFinite(deco.z)) return null;
-    const solid = isSolid(deco.k);
-    if (solid) {
-      deco.s = Math.max(SOLID_SCALE[0], Math.min(SOLID_SCALE[1], deco.s));
-      if (!Number.isFinite(deco.x) || !Number.isFinite(deco.y) || !Number.isFinite(deco.z) || !Number.isFinite(deco.ry)) return null;
-    }
-    if (isObstacle(deco.k)) {
-      const r = normalizeRoll(+d.rz);
-      if (r) deco.rz = r;
-    } else if (!solid) {
-      for (const a of [
-        "rx",
-        "rz"
-      ]) {
-        const r = normalizeAngle(+d[a]);
-        if (r) deco[a] = r;
-      }
-    }
-    if (typeof d.cc === "string" && HEX3.test(d.cc)) deco.cc = d.cc.toLowerCase();
-    if (deco.k === "custom") {
-      deco.cp = sanitizeDecoParts(d.cp);
-      if (!deco.cp.length || this.decos.filter((o) => o.k === "custom").length >= MAX_CUSTOM_DECOS) return null;
-    }
+    const deco = normalizeDeco(d, {
+      exact
+    });
+    if (!deco) return null;
+    if (deco.k === "custom" && this.decos.filter((o) => o.k === "custom").length >= MAX_CUSTOM_DECOS) return null;
     this.decos.push(deco);
     this.version++;
     return deco;
+  },
+  // Phase 8 (TECH-035) : LA façon de modifier une décoration posée (inspecteur, gizmo, Maj + glisser, déplacement / rotation / niveau d'une sélection, calques) : la
+  // décoration modifiée est renormalisée comme à l'ajout, puis recopiée dans le MÊME objet (la sélection de l'inspecteur reste valable) ; un champ que la normalisation
+  // retire (inclinaison d'un solide, roulis nul, couleur libre effacée…) disparaît. Faux si la décoration modifiée serait refusée (position illisible…) : rien ne change.
+  // Avant, ces chemins écrivaient les valeurs brutes (d.rx = …) : l'instantané d'historique les gardait, la restauration les normalisait ; après annuler / rétablir le
+  // circuit n'égalait plus l'instantané (pas fantôme, pile « rétablir » effacée, circuit enregistré « modifié »), et un solide incliné l'était dans l'éditeur seulement.
+  setDeco(d, patch) {
+    const n = normalizeDeco({
+      ...d,
+      ...patch
+    });
+    if (!n) return false;
+    if (JSON.stringify(n) === JSON.stringify(d)) return true;
+    for (const k of Object.keys(d)) if (!(k in n)) delete d[k];
+    Object.assign(d, n);
+    this.version++;
+    return true;
   },
   removeDeco(d) {
     const i = this.decos.indexOf(d);
@@ -7805,6 +7845,7 @@ var Track = class _Track {
     this.resetRules();
     this.vt = 0;
     this.vh = "";
+    this.placementGuard = null;
     for (const t of tiles) this.add(t);
   }
   static cellsOf(t) {
@@ -8235,6 +8276,30 @@ var Track = class _Track {
     for (const d of this.decos) if (d.g) s.add(d.g);
     return [
       ...s
+    ].sort((a, b) => a - b);
+  }
+  // Numéros de groupe CITÉS par la logique du circuit (cachés au départ, cibles de zone, conditions, actions), même si aucune pièce n'y est rangée (TECH-038).
+  logicGroups() {
+    const L4 = sanitizeLogic(this.lg), s = /* @__PURE__ */ new Set();
+    if (!L4) return [];
+    for (const g of L4.off) s.add(g);
+    for (const r of L4.rules) {
+      if (r.on[0] === "zone") s.add(r.on[1]);
+      for (const c of r.if) if (c[0] === "shown" || c[0] === "hidden") s.add(c[1]);
+      for (const a of r.do) if (a[0] === "show" || a[0] === "hide" || a[0] === "toggle") s.add(a[1]);
+    }
+    return [
+      ...s
+    ].sort((a, b) => a - b);
+  }
+  // Groupes RÉSERVÉS : ceux qui contiennent quelque chose, qui ont un nom ou que la logique cite (un « nouveau groupe » ne doit jamais en réutiliser un).
+  reservedGroups() {
+    return [
+      .../* @__PURE__ */ new Set([
+        ...this.usedGroups(),
+        ...this.groupNames().map(([g]) => g),
+        ...this.logicGroups()
+      ])
     ].sort((a, b) => a - b);
   }
   // ---- Sérialisation -----------------------------------------------------
@@ -9494,7 +9559,9 @@ function scriptTrack(name, script, opts2 = {}) {
   }
   if (split) throw new Error(`${name} : bifurcation SPL sans MRG`);
   if (tsplit) throw new Error(`${name} : bifurcation en T (TSPL) sans TMRG`);
-  for (const d of opts2.decos || []) tr.addDeco(d);
+  for (const d of opts2.decos || []) tr.addDeco(d, {
+    exact: true
+  });
   tr.path = path;
   tr.turtle = {
     x,
@@ -15599,6 +15666,8 @@ function wallSolid(t, def, o, i, a, ux, uz) {
     s,
     c: o.c || 0,
     ph: 0
+  }, {
+    exact: true
   });
   const P = t.path, laps = def.laps > 1 ? def.laps : 1, one = laps > 1 ? (P.length - 1) / laps + 1 : P.length;
   if (!P.wallLine) P.wallLine = new Array(P.length).fill(0);
@@ -15647,6 +15716,8 @@ function buildBuiltin(def) {
         s: o.s || 1,
         c: o.c || 0,
         ph: o.ph || 0
+      }, {
+        exact: true
       });
     }
     for (const o of def.obst.filter((x) => x.wall).sort((x, y) => x.at - y.at)) {
@@ -20348,4 +20419,4 @@ Deno.serve(createHandler({
   serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   allowedOrigin: Deno.env.get("ALLOWED_ORIGIN") ?? "*"
 }));
-globalThis.__COPYTRACK_BUILD__ = "3dcf1d72c5fb42e0";
+globalThis.__COPYTRACK_BUILD__ = "e0d0222ce4fd31a3";

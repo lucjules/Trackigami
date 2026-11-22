@@ -5,10 +5,10 @@ import { CELL, MAX_LEVEL, LEVEL_H } from '../constants.js';
 import { PIECES, flagAllowed } from '../pieces.js';
 import { MODS } from './shared.js';
 import { Track } from '../track.js';
-import { spillConflicts } from '../spill.js';
+import { placementPlan } from '../placement.js';
 import { buildTileMesh } from '../trackMesh.js';
 import { buildDecoMesh } from '../decos.js';
-import { normRect, tilesInRect, decosInRect, copyRect, rotateClip, placedClip, pasteClip, shiftLevel, moveSelection, rotateSelection, checkTrack, findDuplicateSpot, duplicateSelection, duplicable } from '../editorTools.js';
+import { normRect, tilesInRect, decosInRect, copyRect, rotateClip, placedClip, pasteClip, shiftLevel, moveSelection, rotateSelection, checkTrack, findDuplicateSpot, duplicateSelection, duplicable, clipWithoutGroups } from '../editorTools.js';
 import { continuityIssues, issueText, issueLevelOrder } from '../continuity.js';
 const _P = new THREE.Vector3();
 export const selectionMethods = {
@@ -150,11 +150,12 @@ export const selectionMethods = {
   },
 
   selectAll() {
-    if (!this.track.tiles.length) return;
+    if (!this.track.tiles.length && !this.track.decos.length) return;
     this.setTool('select');
     this.selGroup = 0;
-    const xs = this.track.tiles.flatMap((t) => Track.cellsOf(t).map((c) => c[0]));
-    const zs = this.track.tiles.flatMap((t) => Track.cellsOf(t).map((c) => c[1]));
+    // (TECH-057 : l'emprise compte aussi les décorations — case de leur position, comme decosInRect — sinon celles qui sont hors des pièces échappaient à Suppr, déplacer, copier)
+    const cells = this.track.tiles.flatMap((t) => Track.cellsOf(t)).concat(this.track.decos.map((d) => [Math.floor(d.x / CELL), Math.floor(d.z / CELL)]));
+    const xs = cells.map((c) => c[0]), zs = cells.map((c) => c[1]);
     this.sel = { x0: Math.min(...xs), z0: Math.min(...zs), x1: Math.max(...xs), z1: Math.max(...zs) };
     this._selInfo();
     this._noteSel();
@@ -171,6 +172,7 @@ export const selectionMethods = {
     if (!this.sel) { this.app.ui.flash('Sélectionne d\'abord une zone (outil Sélection, Q).'); return false; }
     const clip = copyRect(this.track, this.sel, (o) => this._selOk(o));
     if (!clip) { this.app.ui.flash('Rien à copier dans cette zone.'); return false; }
+    clip.origin = this.circuitId;      // (TECH-058 : le circuit d'où vient le presse-papiers ; voir doPaste)
     this.clip = clip;
     if (!silent) this.app.ui.flash(`Copié : ${clip.tiles.length} pièce(s). Ctrl+V pour coller.`);
     this._refreshSelBar();
@@ -285,11 +287,15 @@ export const selectionMethods = {
 
   doPaste() {
     if (!this.clip || !this.hover) return;
-    const res = pasteClip(this.track, this.clip, this.hover.cx, this.hover.cz, this.level, (o) => this._layerOk(o));
+    // (TECH-058 : coller dans un AUTRE circuit — ou un prefab, dont l'origine est inconnue — remet les groupes à 0 ; dans le même circuit, ils sont gardés)
+    const foreign = !this.clip.origin || this.clip.origin !== this.circuitId;
+    const { clip, reset } = foreign ? clipWithoutGroups(this.clip) : { clip: this.clip, reset: 0 };
+    const res = pasteClip(this.track, clip, this.hover.cx, this.hover.cz, this.level, (o) => this._layerOk(o));
     this.app.audio.place();
     if (res.guarded) this.app.ui.flash(`${res.guarded} pièce(s) non collée(s) : la place est prise par un calque verrouillé ou masqué.`, 3);
     else if (res.skipped) this.app.ui.flash(`${res.skipped} pièce(s) ignorée(s) (départ en double, départ du circuit à garder, ou hors des niveaux).`, 3);
     else if (res.lift) this.app.ui.flash(`Zone posée ${res.lift} niveau${res.lift > 1 ? 'x' : ''} plus haut : une de ses pièces passerait sous le sol.`, 3);
+    else if (reset) this.app.ui.flash('Collé : les groupes de la zone viennent d’un autre circuit, ils sont remis à zéro.', 3.5);
     this._changed();
     this._commit();
   },
@@ -353,7 +359,8 @@ export const selectionMethods = {
     let bad = false;
     for (const t of P.tiles) {
       if (t.l < 0 || t.l > MAX_LEVEL) { bad = true; continue; }
-      if (this.track.conflicts(Track.normalize(t)).length || spillConflicts(this.track, Track.normalize(t)).length) bad = true;
+      // (phase 8 : le validateur commun, js/placement.js, sans remplacement : orange si la pièce collée remplace ou est refusée)
+      if (!placementPlan(this.track, t).ok) bad = true;
       this.preview.add(buildTileMesh(Track.normalize(t), this.previewMat, this.previewGlow));
     }
     for (const d of P.decos.slice(0, 40)) this.preview.add(buildDecoMesh(d, this.previewMat, this.previewGlow));
