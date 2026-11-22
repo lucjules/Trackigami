@@ -21,6 +21,7 @@ import { runWelcome } from './welcome.js';
 import { initI18n } from './i18n/boot.js';
 import { describeBuiltin, describeUser } from './trackDescriptor.js';
 import { loadSettings, saveSettings, getRecord, saveRecord, saveMyTrack, newId, formatTime, purgeOldRecords, getJSON, setJSON } from './storage.js';
+import { dayKey } from './daily.js';
 import { Telemetry } from './telemetry.js';
 import { ErrorReport } from './errorReport.js';
 import { ghostFromHash } from './replay.js';
@@ -331,53 +332,70 @@ class App {
 
   // ---- Classements en ligne --------------------------------------------------------
   // Fin de course : si c'est un record local, on l'envoie (le serveur rejoue la course).
+  // Tout ce qui suit un `await` doit se demander si CETTE arrivée est toujours celle de l'écran : le joueur a pu recommencer (la même session, donc la garde
+  // par identité d'objet ne le voit pas), quitter la course ou changer d'écran pendant l'attente. `gen` (jeton de génération de la session, incrémenté par chaque
+  // arrivée et chaque redémarrage) le dit ; un résultat périmé n'est jamais rendu (TECH-018). Les commandes et les temps intermédiaires de l'arrivée sont lus
+  // AVANT l'attente : session.lastRun et logic.splits appartiennent à la course suivante dès qu'on recommence.
   async onRaceFinished(session, time, isRecord) {
     const key = session.trackKey;
     if (!key || !/^(b-|daily-|u-)/.test(key) || session.opts.fromEditor || session.opts.spawn || session.replay) return;
     if (this.settings.onlineScores === false || !isRecord || !session.lastRun) return;
+    const gen = session._finishGen, run = session.lastRun, splits = session.logic ? session.logic.splits.slice() : [];
+    const current = () => this.session === session && session._finishGen === gen;
     const el = $('fin-online');
-    el.classList.remove('hidden');
-    el.className = 'fin-online';
-    el.textContent = '🌍 Envoi au classement…';
+    // (classList et non className : showFinish pose `hidden` sur ce bloc quand une arrivée n'est pas classable ; l'écraser le rendrait visible, TECH-018)
+    const say = (cls, text) => { el.classList.remove('hidden', 'ok', 'ko'); el.classList.add('fin-online'); if (cls) el.classList.add(cls); el.textContent = text; };
+    say('', '🌍 Envoi au classement…');
     try {
       const r = await online.submitScore({
         trackKey: key, code: key.startsWith('u-') ? (session.opts.officialTrack || session.track).encode() : '',      // variante : le code du circuit d'origine
-        inputs: session.lastRun.inputs, time, physVer: PHYS_VER,
+        inputs: run.inputs, time, physVer: PHYS_VER,
       }, this.settings.playerName);
       // Le serveur a accepté la course : on s'assure que la progression locale la contient (mise à jour sûre si l'écriture de
-      // fin de course avait échoué : stockage plein, autre onglet…). Les médailles et le menu se lisent depuis ces records.
-      this._ensureLocalRecord(key, time, session);
-      if (this.session !== session) return;
-      el.className = 'fin-online ok';
-      el.textContent = r.improved
+      // fin de course avait échoué : stockage plein, autre onglet…), avec les commandes de CETTE arrivée, même si le joueur est parti ;
+      // l'écran n'est rafraîchi que si cette écriture a changé quelque chose (TECH-066). Les médailles et le menu se lisent depuis ces records.
+      if (this._ensureLocalRecord(key, time, { inputs: run.inputs, splits })) this.refreshProgress();
+      if (!current()) return;
+      say('ok', r.improved
         ? `🌍 Classement mondial : ${r.rank}${r.rank === 1 ? 'er' : 'e'} sur ${r.total}${r.rank === 1 ? ' — meilleur temps du monde !' : ''}`
-        : `🌍 Meilleur temps en ligne : ${formatTime(r.best)} (${r.rank}${r.rank === 1 ? 'er' : 'e'} sur ${r.total})`;
+        : `🌍 Meilleur temps en ligne : ${formatTime(r.best)} (${r.rank}${r.rank === 1 ? 'er' : 'e'} sur ${r.total})`);
     } catch (e) {
-      if (this.session !== session) return;
-      el.className = 'fin-online ko';
+      if (!current()) return;
       // Version de physique différente : le plus souvent, la fonction serveur « submit-score » n'a pas été redéployée après
       // une mise à jour du jeu (ou la page est une ancienne version en cache). Le record reste enregistré sur l'appareil.
-      el.textContent = /Version du jeu différente/.test(e.message)
+      say('ko', /Version du jeu différente/.test(e.message)
         ? `🌍 Classement indisponible : serveur d'une autre version (v${PHYS_VER}). Record gardé ici. Recharge la page.`
-        : '🌍 Classement : ' + e.message;
+        : '🌍 Classement : ' + e.message);
     }
   }
 
-  // Garantit que le record local de `key` est au moins aussi bon que `time`, puis rafraîchit l'écran de sélection s'il est affiché.
-  _ensureLocalRecord(key, time, session = null) {
+  // Garantit que le record local de `key` est au moins aussi bon que `time` (commandes et temps intermédiaires de l'arrivée dans `extra`). Renvoie vrai si
+  // elle a dû l'écrire : seulement alors les listes affichées sont périmées.
+  _ensureLocalRecord(key, time, { inputs = null, splits = [] } = {}) {
     const cur = getRecord(key);
-    if (!cur || time < cur.time - 1e-9) {
-      saveRecord(key, {
-        time, splits: session && session.logic ? session.logic.splits.slice() : [], ghost: null,
-        inputs: session && session.lastRun ? session.lastRun.inputs : null, pv: PHYS_VER, date: Date.now(), name: this.settings.playerName,
-      });
-    }
-    this.refreshProgress();
+    if (cur && time >= cur.time - 1e-9) return false;
+    saveRecord(key, { time, splits, ghost: null, inputs, pv: PHYS_VER, date: Date.now(), name: this.settings.playerName });
+    return true;
   }
 
-  // Les listes (niveaux, défi du jour, mes circuits) sont reconstruites à chaque affichage : on ne fait que relancer l'écran courant.
+  // Les données de l'écran de menu affiché ont changé (record écrit après coup) : on les met à jour SANS fermer le panneau ouvert, ni voler le focus, ni
+  // perdre le défilement (TECH-066). Accueil : le seul chiffre qui en dépend ; listes (niveaux, mes circuits) : reconstruites, défilement et focus rendus.
   refreshProgress() {
-    if (this.mode === 'menu' && ['menu', 'tracks', 'mytracks'].includes(this._screen)) this.showScreen(this._screen);
+    if (this.mode !== 'menu') return;
+    const scr = this._screen;
+    if (scr === 'menu') {
+      const r = getRecord('daily-' + dayKey());
+      $('daily-best').textContent = r ? formatTime(r.time) : 'nouveau';
+      return;
+    }
+    if (scr !== 'tracks' && scr !== 'mytracks') return;
+    const root = $(scr), top = [...root.querySelectorAll('*'), root].filter((e) => e.scrollTop > 0).map((e) => [e, e.scrollTop]);
+    const focusables = () => [...root.querySelectorAll('button, [tabindex], a[href], select, input')];
+    const fi = focusables().indexOf(document.activeElement), n = focusables().length;
+    if (scr === 'tracks') this._renderTracks(); else this._renderMyTracks();
+    for (const [e, t] of top) if (e.isConnected) e.scrollTop = t;
+    const again = focusables();
+    if (fi >= 0 && again.length === n) again[fi].focus({ preventScroll: true });
   }
 
   // ------------------------------------------------------------ Garage / profil

@@ -182,6 +182,7 @@ export class RaceSession {
     this.recorder = new InputRecorder();
     this.tick = 0;          // pas de course depuis le départ (ne recule jamais, contrairement au chrono)
     this._pendingRespawn = false;
+    this._finishGen = (this._finishGen || 0) + 1;      // jeton de génération (TECH-018) : une réponse asynchrone d'une arrivée précédente de CETTE session est périmée
     this._stepping = false; this.unverifiable = false;      // un nouvel essai repart d'un enregistrement vierge : plus d'incident à reporter
     this.stats = { wallHits: 0, respawns: 0, perfects: 0, turbos: 0, rings: 0 };
     this.statsSnap = { perfects: 0, turbos: 0, rings: 0 };     // compteurs au dernier checkpoint : un retour (R) les annule

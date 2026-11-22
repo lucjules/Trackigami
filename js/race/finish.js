@@ -84,6 +84,7 @@ export const finishMethods = {
   _finish(time) {
     const app = this.app;
     this.state = 'finished';
+    this._finishGen = (this._finishGen || 0) + 1;      // une nouvelle arrivée : les réponses en attente des précédentes sont périmées (TECH-018)
     app.audio.engine(null);          // plus de bruit de moteur une fois le niveau terminé
     this.finishT = 0;
     if (this.replay) { this._replayEnded(); return; }

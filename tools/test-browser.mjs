@@ -1718,6 +1718,66 @@ try {
     await app(() => window.copytrack.showMenu('menu'));
   });
 
+  await test('cycle de vie (TECH-018) : un résultat d\'envoi arrivé après un redémarrage n\'est jamais affiché sur l\'arrivée suivante', async () => {
+    await lcClean();
+    await fakeSubmit(1500);
+    await lcStart();
+    await app(() => window.copytrack.session._finish(30));             // 1re arrivée : record, envoi lancé (réponse dans 1,5 s)
+    await waitApp(() => !document.getElementById('finish').classList.contains('hidden'));
+    assert.match(await app(() => document.getElementById('fin-online').textContent), /Envoi au classement/);
+    await app(() => window.copytrack._action('restart'));               // on recommence ; la réponse du 1er envoi arrivera pendant la 2e arrivée
+    await app(() => window.copytrack.session._finish(60));              // 2e arrivée : plus lente, pas un record
+    await page.waitForTimeout(2300);
+    const fin = await app(() => { const el = document.getElementById('fin-online'); return { hidden: el.classList.contains('hidden'), text: el.textContent }; });
+    assert.ok(fin.hidden && !/Classement mondial|meilleur temps/i.test(fin.text), `l'écran d'arrivée n'affiche pas le résultat du 1er envoi : ${JSON.stringify(fin)}`);
+    // Contrôle : sans redémarrage, le résultat s'affiche bien.
+    await app(() => window.copytrack._action('restart'));
+    await app(() => window.copytrack.session._finish(25));             // un record : envoyé
+    await waitApp(() => /Classement mondial/.test(document.getElementById('fin-online').textContent), null, 6000);
+    assert.ok(await app(() => !document.getElementById('fin-online').classList.contains('hidden')), 'le résultat attendu reste visible');
+    await lcMenu(); await lcClean();
+  });
+
+  await test('cycle de vie (TECH-066) : réponse tardive du serveur après avoir quitté la course : le panneau ouvert reste ouvert, la liste n\'est pas reconstruite', async () => {
+    await lcClean();
+    await fakeSubmit(1500);
+    // 1. un panneau de l'accueil ouvert pendant l'attente
+    await lcStart();
+    await app(() => window.copytrack.session._finish(30));
+    await app(() => { const A = window.copytrack; A.showMenu('menu'); A._menuSub('play'); });
+    await page.waitForTimeout(2300);
+    assert.equal(await app(() => window.copytrack._menuSubOpen), 'play', 'le panneau ouvert n\'est pas refermé par la réponse tardive');
+    // 2. une liste affichée : mêmes éléments (défilement et focus conservés)
+    await lcClean(); await fakeSubmit(1500);
+    await lcStart();
+    await app(() => window.copytrack.session._finish(30));
+    await app(() => { const A = window.copytrack; A.showMenu('tracks'); });
+    await waitApp(() => document.querySelectorAll('#track-list .card').length > 5);
+    await app(() => { window.__card = document.querySelector('#track-list .card:not(.daily-card):not(.season-card)'); window.__card.focus(); });
+    await page.waitForTimeout(2300);
+    assert.ok(await app(() => document.querySelector('#track-list .card:not(.daily-card):not(.season-card)') === window.__card), 'la liste n\'est pas reconstruite si rien n\'a changé');
+    // 3. Quand l'écriture de secours a VRAIMENT changé les données (record local absent) : la liste est reconstruite, défilement et focus rendus ; sur l'accueil, le panneau reste ouvert.
+    await lcClean();
+    const kept = await app(async () => {
+      const A = window.copytrack, key = A.builtins[0].key;
+      A.showMenu('tracks');
+      await new Promise((r) => setTimeout(r, 400));
+      const sc = ['tracks', 'track-list'].map((id) => document.getElementById(id)).find((e) => e && e.scrollHeight > e.clientHeight + 100);
+      if (!sc) return { noScroll: true };
+      sc.scrollTop = 300;
+      const cards = [...document.querySelectorAll('#track-list .card')]; cards[6].focus();
+      const old = cards[6], top0 = sc.scrollTop;      // (focus() a pu faire défiler jusqu'à la carte : c'est cette position qui doit survivre)
+      if (A._ensureLocalRecord(key, 41.5, { inputs: null, splits: [] })) A.refreshProgress();      // record absent : écrit, la liste est reconstruite
+      const now = [...document.querySelectorAll('#track-list .card')];
+      return { rebuilt: now[6] !== old, top0, top: sc.scrollTop, focusIdx: now.indexOf(document.activeElement) };
+    });
+    assert.ok(!kept.noScroll, 'la liste des circuits défile (le test ne serait pas probant sinon)');
+    assert.equal(kept.rebuilt, true, 'liste reconstruite quand le record écrit change ce qu\'elle affiche');
+    assert.ok(kept.top0 > 50 && Math.abs(kept.top - kept.top0) < 3, `défilement conservé (${kept.top0} → ${kept.top})`);
+    assert.equal(kept.focusIdx, 6, 'focus conservé');
+    await lcMenu(); await lcClean();
+  });
+
   await test('fantôme rival (haut d\'un classement) : affiché sur la piste, suit son enregistrement, étiquette au nom du rival', async () => {
     await app(() => window.copytrack.playBuiltin(0));
     await waitApp(() => window.copytrack.session && window.copytrack.session.state, null, 40000);
