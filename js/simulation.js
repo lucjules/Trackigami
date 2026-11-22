@@ -12,11 +12,12 @@ import { RaceLogic, placeAtStart } from './raceLogic.js';
 import { DT, OFF_TRACK_RESPAWN_S } from './constants.js';
 import { createLogic } from './sim/logic.js';
 
-// Replace la voiture au point de réapparition r (retour au checkpoint) : position, véhicule et gravité de ce moment-là.
+// Replace la voiture au point de réapparition r (retour au checkpoint) : position, véhicule, gravité et vitesse de ce moment-là. Un point de retour sans
+// vitesse (checkpoint au sol) rend la voiture à l'arrêt ; celui d'un checkpoint aérien rend la vitesse qu'elle avait au dernier sol (r.vel, r.fwd : TECH-001).
 export function placeAtRespawn(phys, r) {
-  phys.place(r.x, r.y, r.z, r.yaw, r.gs || 1);
-  phys.vehicle = r.vehicle || 'car';
+  phys.place(r.x, r.y, r.z, r.yaw, r.gs || 1, r.vehicle || 'car');      // (le véhicule avant la lecture du sol : une plaque sous le point de retour en dépend, TECH-001)
   phys.gravMul = r.grav || 1;
+  if (r.vel) { phys.vel.x = r.vel[0]; phys.vel.y = r.vel[1]; phys.vel.z = r.vel[2]; phys.fwdSpeed = r.fwd || 0; }
   // Verre sous le point de réapparition : il ne cède pas tant que la voiture ne l'a pas quitté (sinon un checkpoint posé sur du verre ramenait
   // la voiture sur une dalle qui cède, puis dans le vide, puis au checkpoint... sans fin tant que le joueur attend). Le départ, lui, n'est pas concerné.
   phys.glassSafe = phys.surfMod === 'glass' && phys.surfTile ? phys.surfTile : null;

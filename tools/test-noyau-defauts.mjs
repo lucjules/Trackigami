@@ -3,7 +3,8 @@
 // Ce fichier ne corrige rien. Chaque défaut listé est reproduit dans un `bugConnu(id, …)` (tools/harness.mjs) qui écrit ce que le jeu DEVRAIT faire : le test réussit tant que le
 // défaut existe, et échoue dès qu'il est corrigé (« retire bugConnu et garde ce test comme test de régression »). À côté, des tests ordinaires (préconditions, contrôles) prouvent
 // que la mise en scène est bonne : sans eux, un test cassé passerait pour un défaut présent.
-//   TECH-001  retour au checkpoint sur / après une plaque de transformation : le véhicule redevient une voiture (boucle de réapparitions sans fin)
+//   TECH-001  retour au checkpoint sur / après une plaque de transformation : le véhicule redevient une voiture (boucle de réapparitions sans fin) — CORRIGÉ (PHYS_VER 39) :
+//             ses reproductions sont devenues des tests de régression ordinaires (avec le retour aérien qui repartait à l'arrêt au bord du vide, même cause)
 //   TECH-013  vitesse de départ (v0) perdue au retour au point de départ
 //   TECH-014  multijoueur : règle de logique « à T s » jamais rejouée après un retour avec chrono conservé (keepClock)
 //   GAME-004  téléportation (> 3 m en un pas) à la réception sur un ruban (double looping d'« Épave Engloutie »)
@@ -34,7 +35,35 @@ function untilCheckpoint(track, maxSteps = 120 * 20) {
   throw new Error('aucun checkpoint atteint');
 }
 
-const AIR = 'start S2 S.e GC2 S3 finish';       // plaque deltaplane, vide de 2 cases, checkpoint aérien (anneau), puis la route et l'arrivée
+const AIR = 'start S2 S.e GC2 S3 finish';       // plaque deltaplane, vide de 2 cases, checkpoint aérien (anneau), puis la route et l'arrivée (circuit de l'audit)
+const AIR_UP = 'V4 start S2 S.e GC2 S3 finish';  // le même, posé au niveau 4 : un VRAI vide (au niveau 0, le « vide » est le terrain, 40 cm sous la route)
+const JUMP = 'start S3 UU GC2 S3 finish';        // voiture seule : tremplin, vide de 2 cases avec un checkpoint aérien, réception
+// Pilote du deltaplane : gaz au sol ; en l'air, ni gaz ni frein (incidence neutre : les gaz le font piquer, le frein cabrer). La voiture garde les gaz.
+const PILOT = (P) => ({ steer: 0, throttle: P.grounded || P.vehicle !== 'glider', brake: false, drift: false });
+// Une course depuis le départ avec ce pilote ; R (sim.rewind) au pas qui suit le premier checkpoint si withR. Renvoie ce qui a été vu.
+function race(code, { withR = false, seconds = 60, pilot = PILOT } = {}) {
+  const sim = new Simulation(scriptTrack('g', code));
+  sim.start();
+  const P = sim.phys, out = { cp: -1, respawns: 0, finish: null, vehAfterR: '', vehAt3: '', vehicles: new Set(), respawnVehicles: [] };
+  for (let i = 0; i < 120 * seconds && out.finish === null; i++) {
+    const ev = sim.step(pilot(P));
+    out.vehicles.add(P.vehicle);
+    if (ev && ev.type === 'checkpoint' && out.cp < 0) {
+      out.cp = i;
+      if (withR) {
+        sim.rewind();
+        out.vehAfterR = P.vehicle;
+        for (let j = 0; j < 3; j++) sim.step(pilot(P));
+        out.vehAt3 = P.vehicle;
+        out.vehicles = new Set([P.vehicle]);          // (à partir du retour)
+      }
+    }
+    if (sim.lost) { out.respawns++; sim.rewind(); out.respawnVehicles.push(P.vehicle); }
+    if (ev && ev.type === 'finish') out.finish = sim.logic.time;
+  }
+  return out;
+}
+
 test('TECH-001 mise en scène : le checkpoint aérien est franchi en deltaplane et son point de retour mémorise bien le deltaplane', () => {
   const { sim } = untilCheckpoint(scriptTrack('g', AIR));
   assert.equal(sim.phys.vehicle, 'glider');
@@ -50,24 +79,114 @@ test('TECH-001 contrôle : sans plaque, le retour au checkpoint garde la voiture
   for (let i = 0; i < 3; i++) sim.step(GAS);
   assert.equal(sim.phys.vehicle, 'car');
 });
-bugConnu('TECH-001', () => {
+test('TECH-001 (corrigé) : checkpoint aérien (plaque deltaplane puis anneau) : après retour et 3 pas, le véhicule est celui du checkpoint', () => {
   const { sim } = untilCheckpoint(scriptTrack('g', AIR));
   sim.rewind();
   assert.equal(sim.phys.vehicle, 'glider', 'juste après le retour');
   for (let i = 0; i < 3; i++) sim.step(GAS);
-  assert.equal(sim.phys.vehicle, 'glider', 'après 3 pas : la plaque ne doit pas retransformer le deltaplane en voiture');
-}, 'checkpoint aérien (plaque deltaplane puis anneau) : après retour et 3 pas, le véhicule est celui du checkpoint');
-bugConnu('TECH-001', () => {
+  assert.equal(sim.phys.vehicle, 'glider', 'après 3 pas : la plaque ne retransforme plus le deltaplane en voiture');
+});
+test('TECH-001 (corrigé) : le point de retour aérien est l\'état d\'UN instant : position, véhicule, vitesse et chrono du dernier sol', () => {
   const { sim } = untilCheckpoint(scriptTrack('g', AIR));
+  const r = sim.logic.respawn, g = sim.logic.lastGround;
+  precondition(!!g && r.snap.pre, 'un dernier sol relevé avant l\'anneau');
+  assert.deepEqual([r.x, r.y, r.z, r.yaw, r.vehicle, r.snap.steps], [g.x, g.y, g.z, g.yaw, g.vehicle, g.steps]);
+  assert.deepEqual(r.vel, g.vel); assert.equal(r.fwd, g.fwd);
   sim.rewind();
-  let respawns = 0, finished = false;
-  for (let i = 0; i < 120 * 60 && !finished; i++) {
-    const ev = sim.step(GAS);
-    if (sim.lost) { sim.rewind(); respawns++; }
-    if (ev && ev.type === 'finish') finished = true;
+  const P = sim.phys;
+  assert.deepEqual([P.vel.x, P.vel.y, P.vel.z, P.fwdSpeed], [...g.vel, g.fwd], 'la voiture repart avec la vitesse de cet instant');
+  assert.equal(sim.logic.steps, g.steps, 'et le chrono de cet instant');
+});
+test('TECH-001 (corrigé) : dernier sol pris AVANT la plaque (en voiture), anneau franchi en deltaplane : le retour rend la VOITURE à cet endroit, la plaque la transforme, elle arrive', () => {
+  const sim = new Simulation(scriptTrack('g', AIR_UP));
+  sim.start();
+  const P = sim.phys;
+  let before = null, ring = null, fin = null, lost = 0, transforms = 0;
+  for (let i = 0; i < 120 * 60 && fin === null; i++) {
+    if (before && !ring) sim.logic.lastGround = before;       // (comme si aucun sol n'avait été relevé sur la plaque : le dernier sol est celui d'avant)
+    const ev = sim.step(PILOT(P));
+    if (!before && P.ev.transform) { before = sim.logic.lastGround; precondition(before && before.vehicle === 'car', 'un dernier sol relevé en voiture avant la plaque'); }
+    if (ev && ev.type === 'checkpoint' && !ring) {
+      ring = { veh: P.vehicle, r: sim.logic.respawn };
+      precondition(ring.veh === 'glider', 'anneau franchi en deltaplane');
+      assert.equal(ring.r.vehicle, 'car', 'le point de retour garde le véhicule du dernier sol, pas celui de l\'anneau');
+      assert.deepEqual([ring.r.x, ring.r.z, ring.r.snap.steps], [before.x, before.z, before.steps]);
+      sim.rewind();
+      assert.equal(P.vehicle, 'car'); assert.equal(P.plateLock, '');
+      continue;
+    }
+    if (ring && P.ev.transform) transforms++;
+    if (sim.lost) { lost++; sim.rewind(); }
+    if (ev && ev.type === 'finish') fin = sim.logic.time;
   }
-  assert.ok(respawns <= 3, `${respawns} réapparitions en 60 s de gaz à fond : chute en boucle (la voiture revient en voiture à chaque fois)`);
-}, 'pas de chute en boucle après le retour (60 s, gaz à fond ; l\'audit mesure 43 à 45 réapparitions, jamais d\'arrivée)');
+  assert.equal(transforms, 1, 'la plaque transforme la voiture une fois');
+  assert.ok(fin !== null && lost === 0, `arrivée ${fin}, ${lost} réapparitions`);
+});
+// L'audit mesurait « 43 à 45 réapparitions en 60 s de gaz à fond, jamais d'arrivée » sur AIR après un retour. Ce critère ne mesure pas TECH-001 : AIR ne se finit
+// PAS, même sans aucun retour (au niveau 0, la voiture roule de la route sur le terrain juste après l'anneau : hors piste), et les gaz font piquer le deltaplane.
+// Les deux contrôles ci-dessous le prouvent ; l'arrivée après un retour est vérifiée sur AIR_UP (même circuit, vrai vide) et sur JUMP (voiture seule).
+test('TECH-001 contrôle : le circuit de l\'audit (AIR, niveau 0) ne se finit pas, même SANS retour au checkpoint (gaz à fond ou pilote du deltaplane)', () => {
+  for (const pilot of [() => GAS, PILOT]) {
+    const o = race(AIR, { pilot, seconds: 30 });
+    precondition(o.cp > 0, 'l\'anneau est franchi');
+    assert.equal(o.finish, null, 'arrivée inattendue');
+    assert.ok(o.respawns > 10, `${o.respawns} réapparitions automatiques`);
+  }
+});
+test('TECH-001 (corrigé) : AIR, 60 s de gaz à fond après le retour : la voiture ne redevient JAMAIS une voiture (chaque retour rend le deltaplane)', () => {
+  const o = race(AIR, { withR: true, pilot: () => GAS });
+  assert.equal(o.vehAfterR, 'glider'); assert.equal(o.vehAt3, 'glider');
+  precondition(o.respawns > 10, 'des retours automatiques (le circuit ne se finit pas, voir le contrôle)');
+  assert.deepEqual([...new Set(o.respawnVehicles)], ['glider'], 'véhicule rendu à chaque retour');
+  assert.deepEqual([...o.vehicles], ['glider'], 'véhicules vus pendant les 60 s');
+});
+test('TECH-001 (corrigé) : AIR_UP (vrai vide) : après le retour, deltaplane, plus aucune chute en boucle, arrivée atteinte au même chrono que sans retour', () => {
+  const ref = race(AIR_UP);
+  precondition(ref.finish !== null && ref.respawns === 0, 'sans retour, le circuit se finit');
+  const o = race(AIR_UP, { withR: true });
+  assert.equal(o.vehAfterR, 'glider'); assert.equal(o.vehAt3, 'glider');
+  assert.ok(o.respawns <= 3, `${o.respawns} réapparitions après le retour : chute en boucle`);
+  assert.ok(o.finish !== null, 'arrivée atteinte après le retour');
+  assert.ok(Math.abs(o.finish - ref.finish) < 0.1, `chrono ${o.finish} contre ${ref.finish} sans retour (le retour ramène au chrono du dernier sol)`);
+});
+test('TECH-001 (corrigé) : JUMP (voiture seule, tremplin et anneau au-dessus d\'un vide) : après le retour, plus de chute en boucle, arrivée atteinte', () => {
+  const ref = race(JUMP);
+  precondition(ref.finish !== null && ref.respawns === 0, 'sans retour, le circuit se finit');
+  const o = race(JUMP, { withR: true });
+  assert.equal(o.vehAfterR, 'car');
+  assert.ok(o.respawns <= 3, `${o.respawns} réapparitions après le retour (la voiture repartait à l'arrêt au bord du vide : saut impossible)`);
+  assert.ok(o.finish !== null, 'arrivée atteinte après le retour');
+  assert.ok(Math.abs(o.finish - ref.finish) < 0.1, `chrono ${o.finish} contre ${ref.finish} sans retour`);
+});
+
+// La voiture rendue AVEC sa vitesse peut être déjà en l'air au relevé suivant du dernier sol : le dernier sol ne doit jamais être un point de l'essai abandonné.
+test('TECH-001 (corrigé) : un sol relevé AU-DELÀ de l\'anneau pendant un essai abandonné n\'est jamais le point de retour (R, nouvel anneau, R : même point, même chrono ; arrivée acceptée)', () => {
+  for (const code of ['V4 start S2 S.e GC2 S3 S3 finish', 'start S3 UU GC2 S3 S3 finish']) {
+    const sim = new Simulation(scriptTrack('s', code));
+    sim.start();
+    const P = sim.phys;
+    let ring = null, phase = 0, fin = null, missing = false;
+    for (let i = 0; i < 120 * 60 && fin === null && !missing; i++) {
+      const g = sim.logic.lastGround;
+      if (phase === 0 && ring && g && g.steps > ring.steps && g.z < ring.z) { sim.rewind(); phase = 1; }      // R après un sol relevé au-delà de l'anneau
+      const ev = sim.step(PILOT(P));
+      if (ev && ev.type === 'checkpoint') {
+        const r = sim.logic.respawn;
+        if (!ring) ring = { steps: sim.logic.steps, z: P.pos.z, rz: r.z, rsteps: r.snap.steps };
+        else if (phase === 1) {
+          assert.deepEqual([r.z, r.snap.steps], [ring.rz, ring.rsteps], `${code} : le 2e passage de l'anneau garde le point de retour d'avant l'anneau`);
+          sim.rewind(); phase = 2;
+          assert.deepEqual([P.pos.z, sim.logic.steps, sim.logic.collected.size], [ring.rz, ring.rsteps, 0]);
+        }
+      }
+      if (sim.lost) sim.rewind();
+      if (ev && ev.type === 'finish') fin = sim.logic.time;
+      if (ev && ev.type === 'missing') missing = true;
+    }
+    precondition(phase === 2, `${code} : les deux retours ont eu lieu`);
+    assert.ok(fin !== null && !missing, `${code} : arrivée ${fin}${missing ? ', refusée (checkpoint manquant)' : ''}`);
+  }
+});
 
 // Checkpoint posé SUR une plaque (option cp d'une pièce de route ; la pièce est modifiée avant la création de la simulation, qui lit la liste des checkpoints).
 const PLATES = [['moto', 'o', 'moto'], ['bateau', 'n', 'boat'], ['deltaplane', 'e', 'glider']];
@@ -87,13 +206,56 @@ for (const [label, code, veh] of PLATES) {
     assert.ok(!sim.logic.respawn.snap.pre, 'checkpoint au sol, pas un anneau');
     assert.equal(sim.phys.surfMod, surf, 'la voiture est bien sur la plaque');
   });
-  bugConnu('TECH-001', () => {
+  test(`TECH-001 (corrigé) : checkpoint au sol sur la plaque ${label} : après retour et 3 pas, le véhicule est celui du checkpoint ; puis l'arrivée est atteinte dans ce véhicule`, () => {
     const { sim } = untilCheckpoint(plateTrack(code, surf));
     sim.rewind();
+    assert.equal(sim.phys.plateLock, surf, 'la plaque sous le point de retour est verrouillée');
     for (let i = 0; i < 3; i++) sim.step(GAS);
     assert.equal(sim.phys.vehicle, veh, `après retour et 3 pas, le véhicule doit être celui du checkpoint (${veh})`);
-  }, `checkpoint au sol sur la plaque ${label} : après retour et 3 pas, le véhicule est celui du checkpoint`);
+    let fin = false, lost = 0;
+    for (let i = 0; i < 120 * 60 && !fin; i++) { const ev = sim.step(GAS); assert.equal(sim.phys.vehicle, veh, `pas ${i}`); if (sim.lost) { lost++; sim.rewind(); } if (ev && ev.type === 'finish') fin = true; }
+    assert.ok(fin && lost === 0, `arrivée ${fin}, ${lost} réapparitions`);
+  });
 }
+// La conception est gardée : la plaque verrouillée au retour se déverrouille dès qu'on la quitte, et la repasser ramène la voiture.
+for (const [label, code, veh] of PLATES.filter((p) => p[2] !== 'boat')) {      // (le bateau ne recule pas sur la route)
+  const surf = veh;
+  test(`TECH-001 conception gardée : après un retour sur la plaque ${label}, la quitter puis revenir dessus (marche arrière) ramène la voiture`, () => {
+    const { sim } = untilCheckpoint(plateTrack(code, surf));
+    sim.rewind();
+    const P = sim.phys, seq = [];
+    let off = -1;
+    for (let i = 0; i < 120 * 12 && !seq.length; i++) {
+      sim.step(off < 0 || i < off + 60 ? GAS : { steer: 0, throttle: false, brake: true, drift: false });
+      if (off < 0 && P.grounded && P.surfMod !== surf) { off = i; assert.equal(P.plateLock, '', 'plaque quittée : déverrouillée'); }
+      if (P.ev.transform) seq.push(P.vehicle);
+      precondition(!sim.lost, 'pas de chute pendant la manœuvre');
+    }
+    precondition(off > 0, 'la voiture a quitté la plaque');
+    assert.deepEqual(seq, ['car'], 'repasser sur la même plaque ramène la voiture');
+  });
+}
+test('TECH-001 : posée sur une plaque avec un AUTRE véhicule (la plaque n\'a pas encore été prise), la plaque agit au premier contact', () => {
+  for (const [, code, veh] of PLATES) {
+    for (const from of ['car', 'moto', 'boat', 'glider'].filter((v) => v !== veh)) {
+      const tr = scriptTrack('p', `start S2 S.${code} S3 finish`);
+      const plate = tr.tiles.find((t) => t.s === veh);
+      const sim = new Simulation(tr); sim.start();
+      const P = sim.phys;
+      P.place(plate.x * 32 + 16, 0.4, plate.z * 32 + 16, 0, 1, from);
+      assert.equal(P.vehicle, from); assert.equal(P.plateLock, '', `${from} sur la plaque ${veh} : pas de verrou`);
+      sim.step(IDLE);
+      assert.equal(P.vehicle, veh, `${from} sur la plaque ${veh} : la plaque transforme`);
+    }
+    // Le véhicule de la plaque : verrouillée, aucune transformation.
+    const tr = scriptTrack('p', `start S2 S.${code} S3 finish`), plate = tr.tiles.find((t) => t.s === veh);
+    const sim = new Simulation(tr); sim.start();
+    sim.phys.place(plate.x * 32 + 16, 0.4, plate.z * 32 + 16, 0, 1, veh);
+    assert.equal(sim.phys.plateLock, veh);
+    for (let i = 0; i < 30; i++) sim.step(IDLE);
+    assert.equal(sim.phys.vehicle, veh);
+  }
+});
 
 // ---------------------------------------------------------------------------------------------------------------------------------- TECH-013
 console.log('TECH-013 : vitesse de départ (v0) et retour au départ');
