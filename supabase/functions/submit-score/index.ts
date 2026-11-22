@@ -7182,8 +7182,10 @@ function createLogic(track, phys, race) {
     zone: 0,
     veh: "",
     started: false,
-    ver: 0
+    ver: 0,
+    tDone: 0
   };
+  let catchUp = false;
   const fx = [];
   const log = [];
   let debug = false;
@@ -7263,6 +7265,19 @@ function createLogic(track, phys, race) {
       if (r.on[0] === kind && test(r.on)) run(r, i);
     });
   };
+  const fireTime = () => {
+    if (!catchUp) {
+      fire("time", (on) => on[1] === race.steps);
+      return;
+    }
+    catchUp = false;
+    const from = st.tDone, due = [];
+    L4.rules.forEach((r, i) => {
+      if (r.on[0] === "time" && r.on[1] > from && r.on[1] <= race.steps) due.push(i);
+    });
+    due.sort((a, b) => L4.rules[a].on[1] - L4.rules[b].on[1] || a - b);
+    for (const i of due) run(L4.rules[i], i);
+  };
   return {
     logic: L4,
     state: st,
@@ -7280,8 +7295,10 @@ function createLogic(track, phys, race) {
       st.zone = 0;
       st.veh = "";
       st.started = false;
+      st.tDone = 0;
       fx.length = 0;
       log.length = 0;
+      catchUp = false;
       apply();
     },
     snapshot() {
@@ -7297,7 +7314,8 @@ function createLogic(track, phys, race) {
         ],
         zone: st.zone,
         veh: st.veh,
-        started: st.started
+        started: st.started,
+        tDone: st.tDone
       };
     },
     restore(s) {
@@ -7307,7 +7325,14 @@ function createLogic(track, phys, race) {
       st.zone = s.zone;
       st.veh = s.veh;
       st.started = s.started;
+      st.tDone = s.tDone | 0;
+      catchUp = false;
       apply();
+    },
+    // Retour au checkpoint avec chrono conservé (Simulation.rewind, keepClock), juste après restore : au prochain pas, les règles « temps » dont l'échéance
+    // est tombée depuis l'instantané sont rejouées (voir l'en-tête). Sans effet en solo (le chrono revient avec l'instantané : rien n'est jamais appelé).
+    catchUp() {
+      catchUp = true;
     },
     // Après les règles de course d'un pas (Simulation.score) : ev = l'évènement de course de ce pas (checkpoint, tour, arrivée) ou null.
     onStep(ev) {
@@ -7319,7 +7344,8 @@ function createLogic(track, phys, race) {
       }
       if (ev && ev.type === "checkpoint") fire("cp", (on) => on[1] === 0 || on[1] === ev.index);
       if (ev && ev.type === "lap") fire("lap", (on) => on[1] === race.lap);
-      fire("time", (on) => on[1] === race.steps);
+      fireTime();
+      st.tDone = race.steps;
       const zt = phys.rib ? phys.rib.tile : phys.surfTile;
       const z = zt && zt.g ? zt.g : 0;
       if (z !== st.zone) {
@@ -9460,7 +9486,7 @@ function forkPath(tile, branch, reverse) {
 // js/version.js
 var GAME_NAME = "Trackigami";
 var FILE_PREFIX = GAME_NAME.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-var PHYS_VER = 38;
+var PHYS_VER = 39;
 
 // js/tracks.js
 var BUILTIN_TRACKS = [
@@ -17208,7 +17234,9 @@ var CarPhysics = class {
     this.bz0 = b.minZ - m;
     this.bz1 = b.maxZ + m;
   }
-  place(x, y, z, yaw, gs = 1) {
+  // (Re)pose la voiture à l'arrêt en (x, y, z), cap yaw, sens de gravité gs, avec le véhicule `vehicle` (départ : celui du circuit ; retour au
+  // checkpoint : celui du point de retour). Le véhicule est posé ICI, avant la lecture du sol, parce que la plaque sous la voiture en dépend (voir plus bas).
+  place(x, y, z, yaw, gs = 1, vehicle = "car") {
     this.pos.x = x;
     this.pos.y = y;
     this.pos.z = z;
@@ -17268,7 +17296,7 @@ var CarPhysics = class {
     }
     this.rib = null;
     this.gravMul = 1;
-    this.vehicle = "car";
+    this.vehicle = vehicle;
     this.gSign = gs < 0 ? -1 : 1;
     this.lost = false;
     this._flipNow = false;
@@ -17298,6 +17326,7 @@ var CarPhysics = class {
     this.prev.y = s.h;
     this.grounded = true;
     this._setGround(s, false);
+    if (PLATES[this.surfMod] && PLATES[this.surfMod] === this.vehicle) this.plateLock = this.surfMod;
     this.glassSafe = null;
     this._updateFwd();
   }
@@ -18135,11 +18164,8 @@ var RaceLogic = class {
     this.finished = false;
     this.steps = 0;
     this.lap = 1;
-    const T = this.track;
     this.respawn = {
-      ...this.spawnPoint(),
-      vehicle: T.veh0 || "car",
-      grav: (T.g0 || 100) / 100,
+      ...startState(this.track, this.spawnPoint()),
       snap: this._snap()
     };
     this.inFinish = false;
@@ -18164,6 +18190,18 @@ var RaceLogic = class {
   // reviennent, eux, à l'état du checkpoint.
   rewind({ keepClock = false } = {}) {
     const s = this.respawn.snap;
+    const r = this.respawn;
+    this.lastGround = s && s.steps > 0 ? {
+      x: r.x,
+      y: r.y,
+      z: r.z,
+      yaw: r.yaw,
+      gs: r.gs || 1,
+      vehicle: r.vehicle || "car",
+      vel: r.vel,
+      fwd: r.fwd,
+      steps: s.steps
+    } : null;
     if (s) {
       if (!keepClock) this.steps = s.steps;
       this.splits.length = Math.min(this.splits.length, s.splits);
@@ -18173,10 +18211,14 @@ var RaceLogic = class {
     }
     this.finished = false;
     this.inFinish = false;
-    return this.respawn;
+    return r;
   }
   // Point de réapparition d'un checkpoint aérien : la dernière route roulable traversée
   // (mémorisée par la course), sinon l'anneau lui-même au niveau de sa base.
+  // Le point de retour est l'état d'UN instant (TECH-001) : la position du dernier sol, le véhicule ET la vitesse qu'avait la voiture à ce moment-là, avec le
+  // chrono de ce moment (snap.steps, voir update). Avant, le véhicule était celui de l'anneau (une plaque entre les deux l'annulait aussitôt : retour en voiture,
+  // chute… sans fin) et la voiture repartait à l'arrêt, souvent à quelques mètres du vide qu'elle venait de sauter : saut impossible, chute, retour… sans fin,
+  // en voiture comme en deltaplane. Le reste de l'état est celui de tout (re)départ (place : rotation, glisse, turbo à zéro).
   _ringRespawn(tile, phys) {
     if (this.lastGround) {
       const g = this.lastGround;
@@ -18185,7 +18227,10 @@ var RaceLogic = class {
         y: g.y,
         z: g.z,
         yaw: g.yaw,
-        gs: g.gs || 1
+        gs: g.gs || 1,
+        vehicle: g.vehicle,
+        vel: g.vel,
+        fwd: g.fwd
       };
     }
     const c = tileCenter(tile), gs = tile.v ? -1 : 1, y = baseY(tile);
@@ -18198,7 +18243,8 @@ var RaceLogic = class {
       y,
       z: c.z,
       yaw: phys.yaw,
-      gs
+      gs,
+      vehicle: phys.vehicle
     };
   }
   get time() {
@@ -18216,6 +18262,13 @@ var RaceLogic = class {
         z: p.z,
         yaw: phys.yaw,
         gs: phys.gSign,
+        vehicle: phys.vehicle,
+        vel: [
+          phys.vel.x,
+          phys.vel.y,
+          phys.vel.z
+        ],
+        fwd: phys.fwdSpeed,
         steps: this.steps
       };
     }
@@ -18245,20 +18298,12 @@ var RaceLogic = class {
         const rr = this._ringRespawn(tile, phys);
         this.collected.add(tile);
         this.splits.push(this.steps);
-        const old = this.respawn;
         this.respawn = rr ? {
           ...rr,
-          vehicle: phys.vehicle,
           grav: phys.gravMul,
           snap
         } : {
-          x: old.x,
-          y: old.y,
-          z: old.z,
-          yaw: old.yaw,
-          gs: old.gs,
-          vehicle: old.vehicle,
-          grav: old.grav,
+          ...this.respawn,
           snap
         };
         event = {
@@ -18358,24 +18403,40 @@ var RaceLogic = class {
     return event;
   }
 };
-function placeAtStart(phys, logic, sp = logic.spawnPoint()) {
-  const T = logic.track;
-  phys.place(sp.x, sp.y, sp.z, sp.yaw, sp.gs || 1);
-  phys.vehicle = T.veh0 || "car";
-  phys.gravMul = (T.g0 || 100) / 100;
-  const v0 = (T.v0 || 0) / 3.6;
+function startState(track, sp) {
+  const st = {
+    ...sp,
+    vehicle: track.veh0 || "car",
+    grav: (track.g0 || 100) / 100
+  };
+  const v0 = (track.v0 || 0) / 3.6;
   if (v0 > 0) {
-    phys.vel.x = -dsin(sp.yaw) * v0;
-    phys.vel.z = -dcos(sp.yaw) * v0;
-    phys.fwdSpeed = v0;
+    st.vel = [
+      -dsin(sp.yaw) * v0,
+      0,
+      -dcos(sp.yaw) * v0
+    ];
+    st.fwd = v0;
   }
+  return st;
+}
+function placeState(phys, r) {
+  phys.place(r.x, r.y, r.z, r.yaw, r.gs || 1, r.vehicle || "car");
+  phys.gravMul = r.grav || 1;
+  if (r.vel) {
+    phys.vel.x = r.vel[0];
+    phys.vel.y = r.vel[1];
+    phys.vel.z = r.vel[2];
+    phys.fwdSpeed = r.fwd || 0;
+  }
+}
+function placeAtStart(phys, logic, sp = logic.spawnPoint()) {
+  placeState(phys, startState(logic.track, sp));
 }
 
 // js/simulation.js
 function placeAtRespawn(phys, r) {
-  phys.place(r.x, r.y, r.z, r.yaw, r.gs || 1);
-  phys.vehicle = r.vehicle || "car";
-  phys.gravMul = r.grav || 1;
+  placeState(phys, r);
   phys.glassSafe = phys.surfMod === "glass" && phys.surfTile ? phys.surfTile : null;
 }
 var Simulation = class {
@@ -18400,11 +18461,7 @@ var Simulation = class {
     const T = this.track;
     this.logic.reset();
     const sp = spawn || this.logic.spawnPoint();
-    if (spawn) this.logic.respawn = {
-      ...sp,
-      vehicle: T.veh0 || "car",
-      grav: (T.g0 || 100) / 100
-    };
+    if (spawn) this.logic.respawn = startState(T, sp);
     placeAtStart(this.phys, this.logic, sp);
     this.groundT = 0;
     this.idle = 0;
@@ -18418,6 +18475,7 @@ var Simulation = class {
       keepClock
     });
     placeAtRespawn(this.phys, r);
+    if (keepClock && this.lgc && r.snap && r.snap.ext) this.lgc.catchUp();
     this.groundT = 0;
     this.sank = false;
     this.lost = "";
@@ -20187,4 +20245,4 @@ Deno.serve(createHandler({
   serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   allowedOrigin: Deno.env.get("ALLOWED_ORIGIN") ?? "*"
 }));
-globalThis.__COPYTRACK_BUILD__ = "d6a1f5cf7990bcfd";
+globalThis.__COPYTRACK_BUILD__ = "92bde34143470928";

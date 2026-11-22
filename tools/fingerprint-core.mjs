@@ -17,6 +17,7 @@ import { BUILTIN_TRACKS, buildBuiltin } from '../js/tracks.js';
 import { Track, scriptTrack } from '../js/track.js';
 import { CarPhysics } from '../js/physics.js';
 import { InputRecorder, GhostRunner } from '../js/replay.js';
+import { Simulation } from '../js/simulation.js';
 import { dailyChallenge } from '../js/daily.js';
 import { PHYS_VER } from '../js/version.js';
 import { dsin, datan2, hypot2 } from '../js/dmath.js';
@@ -98,6 +99,45 @@ function runDirect(track, spawn, steps, inputFn) {
     if (i % 30 === 0) sampleState(h, phys, i);
   }
   sampleState(h, phys, steps);
+  return h.hex();
+}
+
+// Commandes d'une conduite qui dépend de l'état (pilote : gaz au sol ; en deltaplane en l'air, ni gaz ni frein), avec des retours au checkpoint (R) quand
+// rAt(i, sim) le dit : jouée une fois par Simulation pour PRODUIRE les commandes (le drapeau « retour » est écrit avec la commande du pas où le retour est
+// fait, comme en course) ; le hachage ne lit que leur rejeu par GhostRunner (runGhost), le chemin du serveur.
+function pilotInputs(track, steps, rAt) {
+  const sim = new Simulation(track), rec = new InputRecorder();
+  sim.start();
+  for (let i = 0; i < steps && !sim.logic.finished; i++) {
+    const P = sim.phys;
+    const inp = { steer: 0, throttle: P.grounded || P.vehicle !== 'glider', brake: false };
+    const r = rAt(i, sim);
+    if (r) sim.rewind();
+    rec.push(inp, r);
+    sim.step(inp);
+    if (sim.lost) sim.rewind();
+  }
+  return rec.encode();
+}
+
+// Retours avec chrono conservé (multijoueur : keepClock, que GhostRunner ne fait pas) : la Simulation elle-même, état de la voiture ET de la logique du circuit hachés.
+function runKeepClock(track, steps, inputFn, rAt) {
+  const h = new Hash();
+  const sim = new Simulation(track);
+  sim.start();
+  for (let i = 0; i < steps && !sim.logic.finished; i++) {
+    if (rAt.includes(i)) sim.rewind({ keepClock: true });
+    sim.step(inputFn(i));
+    if (sim.lost) sim.rewind({ keepClock: true });
+    if (i % 30 === 0) {
+      sampleState(h, sim.phys, sim.logic.steps);
+      const L = sim.lgc.state;
+      for (const g of [...L.hidden].sort((a, b) => a - b)) h.i(g);
+      h.i(0xffff); for (const v of L.vars) h.i(v);
+    }
+  }
+  sampleState(h, sim.phys, sim.logic.steps);
+  h.i(sim.logic.finished ? 1 : 0);
   return h.hex();
 }
 
@@ -209,6 +249,65 @@ function customScenarios() {
   out['v2:glider:bot'] = runGhost(gl, { bot: true }, 120 * 90);
   const vs = scriptTrack('vehicules-v2', 'start S2 S.o S2 S.a S2 S.n S2 S.e S2 S.f V4 S2^ S.f^ V-4 S2 finish'); vs.setParams({ pm: 'sim' });
   out['v2:all-sim:noise'] = runGhost(vs, { inputs: randomInputs(97, 4000) }, 4000);
+  // 10. Retour au checkpoint (PHYS_VER 39 : TECH-001, TECH-013, TECH-014) : l'état au point de retour est rendu en bloc.
+  // a. Checkpoint posé SUR chaque plaque (moto, bateau, deltaplane) : deux retours après le checkpoint ; le véhicule de la plaque reste.
+  for (const [veh, code] of [['moto', 'o'], ['boat', 'n'], ['glider', 'e']]) {
+    const tr = () => { const t = scriptTrack('retour-plaque', `start S2 S.${code} S3 finish`); t.tiles.find((x) => x.s === veh).cp = 1; return t; };
+    let cp = -1;
+    const inputs = pilotInputs(tr(), 120 * 40, (i, sim) => { if (cp < 0 && sim.logic.splits.length) cp = i; return cp > 0 && (i === cp + 1 || i === cp + 40); });
+    out['respawn:on-plate:' + veh] = runGhost(tr(), { inputs }, 120 * 40);
+  }
+  // b. Checkpoint aérien APRÈS chaque plaque, sur un parcours que ce véhicule sait finir (deltaplane : vrai vide au niveau 4 ; moto : tremplin ; bateau :
+  // anneau au-dessus d'un bassin) ; retour juste après l'anneau : position, véhicule, vitesse et chrono du dernier sol.
+  const after = {
+    moto: () => scriptTrack('retour-apres', 'start S2 S.o S UU GC2 S3 finish'),
+    boat: () => { const t = scriptTrack('retour-apres', 'start S2 S.n S4.a finish'); t.tiles.filter((x) => x.s === 'water')[2].cp = 2; return t; },
+    glider: () => scriptTrack('retour-apres', 'V4 start S2 S.e GC2 S3 finish'),
+  };
+  for (const veh of ['moto', 'boat', 'glider']) {
+    let cp = -1;
+    const inputs = pilotInputs(after[veh](), 120 * 40, (i, sim) => { if (cp < 0 && sim.logic.splits.length) cp = i; return cp > 0 && i === cp + 1; });
+    out['respawn:after-plate:' + veh] = runGhost(after[veh](), { inputs }, 120 * 40);
+  }
+  // c. Saut en voiture (anneau au-dessus d'un vide) : retour après un sol relevé AU-DELÀ de l'anneau, puis après le deuxième passage de l'anneau.
+  {
+    const tr = () => scriptTrack('retour-saut', 'start S3 UU GC2 S3 S3 finish');
+    let ring = null, phase = 0;
+    const inputs = pilotInputs(tr(), 120 * 40, (i, sim) => {
+      const L = sim.logic, g = L.lastGround;
+      if (!ring && L.splits.length) ring = { steps: L.steps, z: sim.phys.pos.z, n: 1 };
+      if (phase === 0 && ring && g && g.steps > ring.steps && g.z < ring.z) { phase = 1; return true; }
+      if (phase === 1 && L.splits.length) { phase = 2; ring.at = i; }
+      if (phase === 2 && i === ring.at + 1) { phase = 3; return true; }
+      return false;
+    });
+    out['respawn:ring-jump:car'] = runGhost(tr(), { inputs }, 120 * 40);
+  }
+  // d. Départ sur une plaque moto, en moto (veh0) : la plaque sous le départ ne ramène plus la voiture ; un retour au départ non plus.
+  {
+    const tr = () => { const t = scriptTrack('depart-plaque', 'start S3 C S2 finish'); t.startTile.s = 'moto'; t.veh0 = 'moto'; return t; };
+    out['respawn:start-plate:moto'] = runGhost(tr(), { inputs: pilotInputs(tr(), 120 * 30, (i) => i === 90) }, 120 * 30);
+  }
+  // e. Vitesse de départ (v0 = 200 km/h) : retours avant le premier checkpoint (= Recommencer, lancé) et après.
+  {
+    const tr = () => { const t = scriptTrack('retour-v0', 'start S3 C S3 S3 finish'); t.v0 = 200; return t; };
+    out['respawn:v0-200'] = runGhost(tr(), { inputs: pilotInputs(tr(), 120 * 30, (i) => i === 30 || i === 120 || i === 400) }, 120 * 30);
+    const grid = byId('eclats'); grid.setParams({ v0: 100 });
+    out['respawn:v0-100:noise'] = runGhost(grid, { inputs: randomInputs(101, 3000) }, 3000);
+  }
+  // f. Chrono conservé (multijoueur) : un pont montré « à 6 s », une gravité réglée par deux règles « temps » listées à l'envers, une bascule ; la voiture
+  // attend au départ, retour à 8 s (rattrapage des échéances), puis roule : sans le pont elle tomberait.
+  {
+    const t = scriptTrack('retour-chrono', 'start S3 C S3 S3 S3 finish');
+    const c = t.tiles.findIndex((x) => x.t === 'checkpoint');
+    t.tiles[c + 2].g = 2; t.tiles[c + 3].g = 2;
+    t.setLogic({ off: [2, 9], vars: 1, rules: [
+      { on: ['time', 720], do: [['show', 2]] },
+      { on: ['time', 840], do: [['grav', 80]] }, { on: ['time', 780], do: [['grav', 120], ['var', 0, '+', 1]] },
+      { on: ['time', 900], do: [['toggle', 9]] },
+    ] });
+    out['respawn:keepclock:logic'] = runKeepClock(t, 120 * 40, (i) => ({ steer: 0, throttle: i >= 1080, brake: false }), [960, 2400]);
+  }
   return out;
 }
 

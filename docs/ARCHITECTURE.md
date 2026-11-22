@@ -49,7 +49,7 @@ correspond ; elle n'a rien à déclarer d'autre.
 
 `Simulation` (`js/simulation.js`) enchaîne, à chaque pas de 1/120 s :
 
-1. *(retour demandé : touche R, ou commande « retour » d'un replay)* `rewind()` : le chrono, les checkpoints et le tour reviennent au dernier checkpoint, la voiture y est replacée avec son véhicule et sa gravité ;
+1. *(retour demandé : touche R, ou commande « retour » d'un replay)* `rewind()` : le chrono, les checkpoints et le tour reviennent au dernier checkpoint, la voiture y est replacée dans l'**état du point de retour** (voir plus bas) ;
 2. `drive(commandes)` : l'horloge de la physique devient le chrono de la course (`CarPhysics.clock` : position des pièces mobiles et des obstacles), puis `CarPhysics.step` (sol, air, rubans, murs, obstacles) ;
 3. `score()` : `RaceLogic.update` (checkpoints, tour, arrivée), suivi du hors-piste ; une réapparition automatique est demandée après 0,5 s hors piste ou en cas de noyade (`lost`).
    L'arrivée franchie l'emporte sur une réapparition du même pas.
@@ -58,6 +58,14 @@ correspond ; elle n'a rien à déclarer d'autre.
 outils (`tools/sim.mjs`, `tools/lab.mjs`) font `step()` d'un trait. Aucune de ces boucles n'a sa propre copie de l'ordre des opérations.
 
 Les commandes d'un pas sont quantifiées (volant au centième, trois drapeaux : gaz, frein, retour) : c'est tout ce que contient un enregistrement (`InputRecorder`, `SHG1:` pour les fantômes partagés).
+
+**L'état au point de retour** (0.16.4, `PHYS_VER` 39 ; `js/raceLogic.js`, en tête de `startState`). Un point de retour est un seul objet : position, cap, sens de la gravité, véhicule,
+gravité, vitesse (absente = à l'arrêt) et l'instantané de la course (`snap` : chrono, checkpoints, tour, logique du circuit). `placeState` est le seul code qui le pose,
+pour le départ comme pour un retour ; `CarPhysics.place` remet le reste à zéro et verrouille la plaque de transformation sous la voiture si c'est celle de son véhicule.
+Le point de retour initial est l'état de départ complet (`startState` : vitesse de départ comprise), donc un retour avant le premier checkpoint est un « Recommencer ».
+Un checkpoint au sol rend la voiture à l'arrêt ; un checkpoint aérien (anneau) rend l'état du dernier sol relevé (position, véhicule, vitesse, chrono de cet instant).
+Au retour, le dernier sol devient le point où l'on revient (celui de l'essai abandonné est oublié). Avec le chrono conservé (multijoueur), les règles « temps » de la
+logique échues depuis l'instantané sont rejouées au pas suivant (`sim/logic.js : catchUp`). Les deux chemins de pas appellent le même `Simulation.rewind`.
 
 **Fantômes.** Un `GhostRunner` ne dépend pas du joueur : il garde l'historique de ses poses et la course en direct lit la ligne correspondant à *son* chrono. Un retour au checkpoint ou un redémarrage ne rejoue
 donc pas le fantôme depuis le départ.
@@ -71,7 +79,7 @@ Règles pour tout fichier du noyau (la fermeture des imports de `js/verify.js` :
 - pas d'horloge ni de hasard (le défi du jour dérive d'une graine, la date UTC est une entrée) ;
 - `abs`, `min`, `max`, `floor`, `round`, `trunc`, `sign`, `sqrt` restent permis : leur résultat est imposé.
 
-`tools/phys-fingerprint.mjs` rejoue 182 scénarios (pilote automatique et commandes pseudo-aléatoires sur les 72 circuits, défis du jour, obstacles, pièces mobiles, bifurcation, revêtements, véhicules) et
+`tools/phys-fingerprint.mjs` rejoue 204 scénarios (pilote automatique et commandes pseudo-aléatoires sur les 72 circuits, défis du jour, obstacles, pièces mobiles, bifurcation, revêtements, véhicules, retours au checkpoint) et
 condense l'état exact de la voiture (bits des flottants) en un hachage par scénario, enregistré dans `tools/phys-fingerprint.json`. L'empreinte doit être **identique sous Node, Deno et Chromium** : la CI
 la recalcule sous Deno (`deno run -A tools/phys-fingerprint.mjs`) et dans un navigateur (`tools/test-browser.mjs`).
 
@@ -89,7 +97,8 @@ Des règles ÉVÉNEMENT → CONDITIONS → ACTIONS (champ `lg` du circuit) exéc
 donc identiques en course, dans les fantômes, les replays et la vérification serveur. Elles agissent sur les **groupes** (E9) : une pièce cachée n'a plus de
 collision, par le même chemin que les dalles de verre brisées (`CarPhysics.excl` : sans logique, c'est l'ensemble du verre lui-même, mêmes calculs qu'avant).
 Leur état (groupes cachés, compteurs, déclenchements) fait partie de l'instantané d'un checkpoint (`RaceLogic._snap`, champ `ext`) ; un checkpoint déjà pris
-garde l'état d'APRÈS ses règles. La logique et l'appartenance aux groupes entrent dans la signature. Effets visuels et sonores : une file que seule la course
+garde l'état d'APRÈS ses règles. En multijoueur le retour garde le chrono : les règles « temps » dont l'heure est passée depuis l'instantané sont rejouées au pas
+suivant, une fois chacune, dans l'ordre de leurs heures (l'instantané sait jusqu'où il les a traitées, `tDone` : rien n'est appliqué deux fois). La logique et l'appartenance aux groupes entrent dans la signature. Effets visuels et sonores : une file que seule la course
 en direct lit (`RaceSession._logicSync`).
 
 L'éditeur de logique (`js/editor/logicUi.js`, bouton ⚙ ou F6) n'écrit que ce format, par `Track.setLogic` (donc annulable). Chaque règle s'y lit en une
