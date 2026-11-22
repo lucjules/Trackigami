@@ -3,7 +3,7 @@
 Jeu de course contre-la-montre **low-poly** dans le navigateur, avec éditeur de circuits.
 C'est un jeu original : décors, véhicules, pièces, musique et circuits ont été conçus pour ce projet.
 
-Version actuelle : **bêta 0.16.2** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
+Version actuelle : **bêta 0.16.3** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
 
 ## Jouer
 
@@ -180,7 +180,7 @@ La clé secrète n'est jamais dans le jeu : seule la fonction serveur l'utilise,
 3. **Redéployer la fonction `submit-score`** dans Supabase avec le nouveau `index.ts` : sans cela, les temps des circuits changés sont refusés en ligne.
 4. Les records d'un circuit repartent de zéro dès que son tracé change (la clé de classement contient son empreinte) : rien à nettoyer côté base.
 5. Si le temps d'un circuit change volontairement : `node tools/golden.mjs --update`, puis `node tools/medals.mjs --check` pour revoir ses médailles.
-6. Publier la branche (GitHub Pages sert le dossier racine) ; le numéro de version est dans `js/version.js` et `package.json` (les deux doivent concorder, un test le vérifie).
+6. Publier : fusionner sur `main` (déploiement ordonné tests → fonction → barrière → site : [docs/DEPLOIEMENT.md](docs/DEPLOIEMENT.md) ; sinon, GitHub Pages sert le dossier racine de la branche) ; le numéro de version est dans `js/version.js` et `package.json` (les deux doivent concorder, un test le vérifie).
 
 ## Commandes par défaut
 

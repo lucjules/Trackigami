@@ -128,7 +128,17 @@ Ce que corrige l'étape 17 (détail, preuves et gravité : `docs/AUDIT-PHASE5-SE
 
 `revoke insert on public.tracks from authenticated` : plus aucun circuit n'entre dans la base sans passer par le rejeu de la course de l'auteur.
 
-## Déployer les fonctions
+## Déploiement automatique : base → fonction → site
+
+Depuis la 0.16.3, les fonctions se déploient par `.github/workflows/deploiement.yml` (procédure, secret et réglages : [docs/DEPLOIEMENT.md](../docs/DEPLOIEMENT.md)). **Ordre : 1. étape SQL (à la main, SQL Editor, compatible avec l'ancienne fonction) ; 2. fonctions `ice` puis `submit-score` ; 3. barrière `tools/check-deployed.mjs` ; 4. site.** Le site n'est publié que si la barrière passe. **Fenêtre résiduelle inévitable** : les pages déjà ouvertes gardent l'ancien code jusqu'au rechargement ; si `PHYS_VER` change, leurs temps sont refusés (message : « ton jeu n'est plus à jour, recharge la page »). Un site publié AVANT sa fonction (publication par branche, ou fonction pas encore à jour) affiche « le serveur est en cours de mise à jour, réessaie dans quelques minutes ».
+Cette automatisation n'a jamais tourné sur GitHub ni sur Supabase : tant qu'un déploiement n'a pas été lu et vérifié par le propriétaire, la procédure manuelle ci-dessous reste valable.
+
+### Contrôle des droits de lecture (TECH-021)
+
+`verify-prod.sql` contient des lignes « lisibilité (TECH-021) » : `has_column_privilege` sur les colonnes que le jeu lit (`scores` : track_key, player, time, phys_ver, track_name, updated_at, has_ghost, ghost_veh, splits ; `players` : name, title), pour `authenticated` et `anon`, et sur celles qu'il ne doit pas lire (`scores.inputs`, `scores.ghost`).
+**Un ÉCART « ILLISIBLES : ghost_veh » sur `scores` est ATTENDU** tant que le correctif SQL de la phase 13 n'est pas appliqué : aucune étape du dépôt n'accorde cette lecture (exécuté sur une base locale PGlite avec les étapes 1 à 19 : ces deux lignes, et elles seules, sortent en ÉCART). Ne pas « corriger » ce constat avec un `grant` improvisé. La tâche optionnelle `verification-base.yml` (désactivée par défaut) le tolère explicitement tout en l'affichant ; vider `ECARTS_ATTENDUS` dans ce fichier après la phase 13.
+
+## Déployer les fonctions (à la main, si le workflow n'est pas en service)
 
 ```bash
 npm run build:function

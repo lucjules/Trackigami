@@ -6,6 +6,18 @@ multijoueurs y sont liés. Une version qui change `PHYS_VER` impose de **redépl
 
 *Les nombres des sections anciennes (portées en cases, vitesses de saut…) sont ceux du monde de leur époque ; le monde est passé de cases de 24 m à 32 m en 0.9.11.*
 
+## Bêta 0.16.3 — déploiement ordonné : la fonction avant le site, avec une barrière visible
+
+**`PHYS_VER` reste 38**, rien ne change dans la course ni dans la fermeture de `js/verify.js` (la fonction générée est inchangée).
+
+Audit : `COMPLETE-005` (déploiement serveur sûr), partie « contrôle » de `TECH-021`, `TRANS-15`. Rien de ceci n'a été exécuté sur GitHub ni sur Supabase ; procédure du propriétaire : `docs/DEPLOIEMENT.md`.
+
+- **Workflow `deploiement.yml`** : tests → construction → (approbation de l'environnement `production`) → déploiement de `ice` et `submit-score` → barrière `tools/barriere.sh` (`check-deployed.mjs`, écart ou point non vérifié = échec) → site par GitHub Pages seulement si la barrière passe. Lancement sur `main` ou à la main, « à blanc » par défaut ; un seul secret (`SUPABASE_ACCESS_TOKEN`). Le site est aujourd'hui publié depuis une branche : les réglages à changer sont dans `docs/DEPLOIEMENT.md`.
+- **Le refus de version est reconnu par son drapeau** (`versionMismatch`), plus par le texte français ; le joueur lit « le serveur est en cours de mise à jour, réessaie dans quelques minutes » (serveur en retard) ou « recharge la page » (page périmée).
+- **`verify-prod.sql`** vérifie la lisibilité des colonnes lues par le jeu (`has_column_privilege`) : un ÉCART sur `scores.ghost_veh` est attendu jusqu'au correctif SQL de la phase 13 (`MIGRATIONS.md`).
+- **`verification-base.yml`** (optionnel, désactivé par défaut) : `verify-prod.sql` en lecture seule avec `SUPABASE_DB_URL`.
+- Tests : `test-barriere.mjs`, `test-version-serveur.mjs`, `test-verify-prod-report.mjs`, un parcours dans `test-browser.mjs`.
+
 ## Bêta 0.16.2 — le cycle de vie d'une course : plus de record faux, plus de jeu figé, plus de résultat périmé
 
 **`PHYS_VER` reste 38**, rien ne change dans la course : records, replays, fantômes, médailles et classements restent valables. Aucune commande enregistrée ne change pour une course sans erreur (le test live ↔ rejeu reste vert) ; aucun fichier de la fermeture de `js/verify.js` n'est touché.
