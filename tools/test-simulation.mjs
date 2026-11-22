@@ -171,7 +171,7 @@ console.log('Retour au checkpoint : sur / après les plaques de transformation, 
 // en course (InputRecorder : le drapeau « retour » est écrit avec la commande du pas où le retour est fait), puis rejouée par GhostRunner (vérification serveur).
 // Le pilote : gaz au sol ; en deltaplane en l'air, incidence neutre (les gaz le font piquer).
 const PILOT = (P) => ({ steer: 0, throttle: P.grounded || P.vehicle !== 'glider', brake: false, drift: false });
-function liveThenReplay(track, rAfterCp = [1]) {
+function liveThenReplay(track, rAfterCp = [1], rAt = []) {
   const sim = new Simulation(track), rec = new InputRecorder();
   sim.start();
   let cp = -1, fin = null, auto = 0;
@@ -179,7 +179,7 @@ function liveThenReplay(track, rAfterCp = [1]) {
   for (let i = 0; i < 120 * 90 && fin === null; i++) {
     const inp = PILOT(sim.phys);
     inp.steer = quantSteer(inp.steer);
-    const r = cp >= 0 && rAfterCp.includes(i - cp);
+    const r = (cp >= 0 && rAfterCp.includes(i - cp)) || rAt.includes(i);
     if (r) { sim.rewind(); vehAfterR.push(sim.phys.vehicle); }
     rec.push(inp, r);
     const ev = sim.step(inp);
@@ -223,6 +223,18 @@ test('saut en voiture (tremplin, anneau au-dessus d\'un vide) : retour après l\
   assert.ok(o.cp > 0 && o.fin !== null && o.auto === 0, `checkpoint ${o.cp}, arrivée ${o.fin}, ${o.auto} retours automatiques`);
   assert.equal(o.replay, o.fin);
   assert.ok(o.same);
+});
+
+test('vitesse de départ (v0 = 200) : retour avant le premier checkpoint (R au pas 30 et 200), la voiture repart lancée ; course et rejeu du serveur identiques (TECH-013)', () => {
+  const tr = scriptTrack('v', 'start S3 C S3 finish'); tr.v0 = 200;
+  const sim = new Simulation(tr); sim.start();
+  for (let i = 0; i < 30; i++) sim.step(GAS);
+  sim.rewind();
+  assert.ok(Math.abs(Math.hypot(sim.phys.vel.x, sim.phys.vel.z) - 200 / 3.6) < 1e-9, 'repart à 200 km/h');
+  const o = liveThenReplay(tr, [], [30, 200]);
+  assert.ok(o.fin !== null && o.auto === 0, `arrivée ${o.fin}`);
+  assert.equal(o.replay, o.fin, 'rejeu : même chrono au pas près');
+  assert.ok(o.same, 'rejeu : même position finale au bit près');
 });
 
 finish('Tous les tests de la simulation passent.');

@@ -5,7 +5,7 @@
 // que la mise en scène est bonne : sans eux, un test cassé passerait pour un défaut présent.
 //   TECH-001  retour au checkpoint sur / après une plaque de transformation : le véhicule redevient une voiture (boucle de réapparitions sans fin) — CORRIGÉ (PHYS_VER 39) :
 //             ses reproductions sont devenues des tests de régression ordinaires (avec le retour aérien qui repartait à l'arrêt au bord du vide, même cause)
-//   TECH-013  vitesse de départ (v0) perdue au retour au point de départ
+//   TECH-013  vitesse de départ (v0) perdue au retour au point de départ — CORRIGÉ (PHYS_VER 39) : test de régression ordinaire
 //   TECH-014  multijoueur : règle de logique « à T s » jamais rejouée après un retour avec chrono conservé (keepClock)
 //   GAME-004  téléportation (> 3 m en un pas) à la réception sur un ruban (double looping d'« Épave Engloutie »)
 // Corriger l'un d'eux change PHYS_VER (fermeture de js/verify.js) : voir docs/ARCHITECTURE.md, « Changer la physique ».
@@ -272,15 +272,55 @@ test('TECH-013 contrôle : v0 = 200 → 55,6 m/s au départ et après « Recomme
   const none = new Simulation(v0Track(0)); none.start();
   assert.equal(speed(none), 0);
 });
-bugConnu('TECH-013', () => {
+test('TECH-013 (corrigé) : v0 = 200, 30 pas, sim.rewind() : la vitesse de départ est rétablie', () => {
   const sim = new Simulation(v0Track(200));
   sim.start();
   for (let i = 0; i < 30; i++) sim.step(GAS);
   sim.rewind();
   assert.equal(sim.logic.steps, 0, 'le chrono revient à zéro');
   assert.ok(Math.abs(speed(sim) - 200 / 3.6) < 0.01, `après le retour au point de départ la vitesse devrait être celle du départ (55,6 m/s), elle est de ${speed(sim).toFixed(2)} m/s`);
-}, 'v0 = 200, 30 pas, sim.rewind() : la vitesse de départ est rétablie');
-
+});
+// « Retour au checkpoint » avant le premier checkpoint = « Recommencer » : même état de la voiture au bit près, puis la même course pas à pas.
+const SNAP_KEYS = ['x', 'y', 'z'];
+const state = (sim) => {
+  const P = sim.phys;
+  return [...SNAP_KEYS.map((k) => P.pos[k]), ...SNAP_KEYS.map((k) => P.vel[k]), P.yaw, P.fwdSpeed, P.vehicle, P.gravMul, P.gSign, P.plateLock, P.grounded, P.omega, P.steer, sim.logic.steps, sim.logic.collected.size];
+};
+function sameAsRestart(track, spawn = null, label = '') {
+  const a = new Simulation(track), b = new Simulation(track);
+  a.start(spawn); b.start(spawn);
+  if (spawn) { a.logic.respawn.snap = a.logic._snap(); b.logic.respawn.snap = b.logic._snap(); }      // (comme RaceSession.restart en championnat : la grille sert de point de retour)
+  for (let i = 0; i < 30; i++) a.step(GAS);
+  a.rewind();
+  assert.deepEqual(state(a), state(b), `${label} : état juste après le retour`);
+  for (let i = 0; i < 600; i++) {
+    const inp = { steer: ((i * 37) % 21 - 10) / 10, throttle: i % 50 < 42, brake: i % 50 >= 46, drift: false };
+    a.step(inp); b.step(inp);
+    if (a.lost) a.rewind();
+    if (b.lost) b.rewind();
+    const sa = state(a), sb = state(b);
+    if (sa.some((v, k) => !Object.is(v, sb[k]))) assert.fail(`${label} : pas ${i} après le retour, la course diffère de « Recommencer » : ${JSON.stringify(sa)} contre ${JSON.stringify(sb)}`);
+  }
+}
+test('TECH-013 (corrigé) : retour avant le premier checkpoint ≡ « Recommencer » au bit près (vitesse de départ, véhicule et gravité de départ), puis 600 pas identiques', () => {
+  const tr = scriptTrack('v', 'start S3 C S3 finish'); tr.v0 = 200;
+  sameAsRestart(tr, null, 'v0 200');
+  const mix = scriptTrack('v', 'start S3 C S3 finish'); mix.v0 = 100; mix.veh0 = 'moto'; mix.g0 = 60;
+  sameAsRestart(mix, null, 'v0 100, moto, gravité 60 %');
+  sameAsRestart(v0Track(0), null, 'sans v0 (inchangé : à l\'arrêt)');
+});
+test('TECH-013 (corrigé) : grille de championnat (départ imposé, Simulation.start(spawn)) : le point de retour porte la vitesse de départ ; retour ≡ départ de la grille', async () => {
+  const { gridSpawn } = await import('../js/net/progress.js');
+  const tr = scriptTrack('v', 'start S3 C S3 finish'); tr.v0 = 200;
+  const sim = new Simulation(tr);
+  for (const slot of [0, 3, 5]) {
+    sim.logic.reset();
+    const sp = gridSpawn(sim.logic.spawnPoint(), slot, 6);
+    sim.start(sp);
+    assert.deepEqual(sim.logic.respawn.vel, [sim.phys.vel.x, sim.phys.vel.y, sim.phys.vel.z], `place ${slot} : le point de retour porte la vitesse de départ`);
+    sameAsRestart(tr, sp, `grille, place ${slot}`);
+  }
+});
 // ---------------------------------------------------------------------------------------------------------------------------------- TECH-014
 console.log('TECH-014 : logique « temps » et retour avec chrono conservé (keepClock)');
 // Une route d'un seul tenant dont les cases 3 et 4 forment le groupe 2 (« Pont »), caché au départ ; la règle le montre à 6 s (720 pas). Aucun checkpoint : le retour ramène au départ.

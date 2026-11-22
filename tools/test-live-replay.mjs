@@ -76,11 +76,11 @@ async function boot() {
 }
 
 // Lance un circuit et prend la main : la session n'avance plus que par nos appels (« tenue »), avec le pilote automatique bruité comme source des commandes.
-async function launch(id, seed, amp = 0.2) {
-  await page.evaluate(async ({ id, seed, amp }) => {
+async function launch(id, seed, amp = 0.2, modeId = '') {
+  await page.evaluate(async ({ id, seed, amp, modeId }) => {
     const A = window.copytrack;
     const [{ RaceSession }, { Autopilot }] = await Promise.all([import('/js/race.js'), import('/js/autopilot.js')]);
-    const L = window.__lr = { hold: true, inject: false, trace: [], inputRespawns: 0, autoRespawns: 0, rBack: [] };
+    const L = window.__lr = { hold: true, inject: false, trace: [], inputRespawns: 0, autoRespawns: 0, rBack: [], rSpeed: [] };
     const proto = RaceSession.prototype;
     if (!proto.__real) {
       proto.__real = proto.update;
@@ -97,7 +97,11 @@ async function launch(id, seed, amp = 0.2) {
     }
     const idx = A.builtins.findIndex((b) => b.def.id === id);
     L.index = idx; L.key = A.builtins[idx].key;
-    A.playBuiltin(idx);
+    if (modeId) {                                                    // mode de jeu (règles appliquées à une copie du circuit : App.playMode), sans clé de classement
+      const { BUILTIN_MODES } = await import('/js/rules.js');
+      A.playMode(BUILTIN_MODES.find((m) => m.id === modeId), A.builtins[idx].track);
+      L.key = null;
+    } else A.playBuiltin(idx);
     const S = L.S = A.session;
     if (!(S && S.constructor === RaceSession && !S.demo)) throw new Error('la session de course n\'est pas là');
     // Pilote automatique bruité, graine fixe : bruit de volant lissé (processus AR(1) à entrées centrées) + freinages brefs. Une seule lecture par pas de course.
@@ -117,8 +121,8 @@ async function launch(id, seed, amp = 0.2) {
     const stepOnce = S._stepOnce.bind(S);
     S._stepOnce = () => { const was = S.state; stepOnce(); if (was === 'racing') L.trace.push(S.phys.pos.x, S.phys.pos.y, S.phys.pos.z, S.logic.steps); };
     const respawn = S.respawn.bind(S);
-    S.respawn = (fromInput) => { const was = S.state; respawn(fromInput); if (was === 'racing') { if (fromInput === true) { L.inputRespawns++; L.rBack.push(S.logic.steps); } else L.autoRespawns++; bot.reset(S.phys); } };
-  }, { id, seed, amp });
+    S.respawn = (fromInput) => { const was = S.state; respawn(fromInput); if (was === 'racing') { if (fromInput === true) { L.inputRespawns++; L.rBack.push(S.logic.steps); L.rSpeed.push(Math.hypot(S.phys.vel.x, S.phys.vel.z)); } else L.autoRespawns++; bot.reset(S.phys); } };
+  }, { id, seed, amp, modeId });
 }
 
 // Avance la course (update, dt = 0,1 s : douze pas fixes par appel) jusqu'au pas de course `tick` (ou l'arrivée).
@@ -154,7 +158,8 @@ async function finishRace() {
   precondition(s.state === 'finished', `la course est allée jusqu'à l'arrivée (état : ${s.state}, pas ${s.tick})`);
   return page.evaluate(() => {
     const L = window.__lr, S = L.S, A = window.copytrack;
-    return { inputs: S.lastRun.inputs, time: S.lastRun.time, liveTime: S.logic.time, splits: S.logic.splits.slice(), code: S.track.encode(), key: L.key, trace: L.trace.slice(), inputRespawns: L.inputRespawns, autoRespawns: L.autoRespawns, rBack: L.rBack.slice(), ticks: S.tick, statsRespawns: S.stats.respawns, finishShown: !document.getElementById('finish').classList.contains('hidden'), mode: A.mode };
+    const run = S.opts.mode ? { inputs: S.recorder.encode(), time: S.logic.time } : S.lastRun;      // (mode de jeu : ni record ni lastRun, l'enregistreur reste)
+    return { inputs: run.inputs, time: run.time, liveTime: S.logic.time, rSpeed: L.rSpeed.slice(), splits: S.logic.splits.slice(), code: S.track.encode(), key: L.key, trace: L.trace.slice(), inputRespawns: L.inputRespawns, autoRespawns: L.autoRespawns, rBack: L.rBack.slice(), ticks: S.tick, statsRespawns: S.stats.respawns, finishShown: !document.getElementById('finish').classList.contains('hidden'), mode: A.mode };
   });
 }
 async function release() {
@@ -216,6 +221,27 @@ try {
       } finally { await release(); }
     });
   }
+
+  // TECH-013 : mode « Départ lancé » (v0 = 200 km/h) ; la VRAIE touche R avant le premier checkpoint ramène au départ : la voiture repart lancée, comme « Recommencer ».
+  await pageTest('mode « Départ lancé » sur « Premiers Éclats » : touche R avant le premier checkpoint → retour au départ à 200 km/h (chrono à zéro) ; course puis rejeu identiques', async () => {
+    await launch('eclats', 11, 0.2, 'lancee');
+    try {
+      let s = await advance(1);
+      precondition(s.state === 'racing', `la course est partie (état : ${s.state})`);
+      const v0 = await page.evaluate(() => { const S = window.__lr.S; return { v0: S.track.v0, mode: S.opts.mode && S.opts.mode.id }; });
+      precondition(v0.v0 === 200 && v0.mode === 'lancee', `mode « Départ lancé » appliqué (${JSON.stringify(v0)})`);
+      s = await advance(s.tick + 60);
+      precondition(s.state === 'racing' && s.splits === 0, `avant le premier checkpoint (${s.splits} pris)`);
+      await pressR();
+      s = await advance(s.tick + 1);
+      const d0 = await page.evaluate(() => ({ rBack: window.__lr.rBack.slice(), rSpeed: window.__lr.rSpeed.slice() }));
+      assert.deepEqual(d0.rBack, [0], 'retour au départ : chrono à zéro');
+      assert.ok(Math.abs(d0.rSpeed[0] - 200 / 3.6) < 1e-6, `vitesse juste après le retour : ${(d0.rSpeed[0] * 3.6).toFixed(1)} km/h (attendu 200)`);
+      const d = await finishRace();
+      assert.equal(d.inputRespawns, 1);
+      compareLiveToReplay(d);
+    } finally { await release(); }
+  });
 
   // Sans retour : le même circuit, mêmes commandes bruitées : témoin que la comparaison passe aussi quand rien d'autre que la conduite n'intervient.
   await pageTest('témoin : « Premiers Éclats » sans aucun retour (ni touche R, ni erreur) : même comparaison, même résultat', async () => {

@@ -43,8 +43,9 @@ export class RaceLogic {
     this.finished = false;
     this.steps = 0;
     this.lap = 1;
-    const T = this.track;
-    this.respawn = { ...this.spawnPoint(), vehicle: T.veh0 || 'car', grav: (T.g0 || 100) / 100, snap: this._snap() };
+    // Le point de retour initial est l'état de départ COMPLET (startState : véhicule, gravité, vitesse de départ) : un retour avant le premier checkpoint
+    // est un « Recommencer » (TECH-013 : la vitesse de départ v0 était perdue, la voiture repartait à l'arrêt).
+    this.respawn = { ...startState(this.track, this.spawnPoint()), snap: this._snap() };
     this.inFinish = false;
   }
 
@@ -203,12 +204,33 @@ export class RaceLogic {
   }
 }
 
+// « L'état au point de retour » (TRANS-04) : tout ce qu'un (re)départ rend à la voiture, en un seul objet, posé en bloc par placeState.
+//   x, y, z, yaw, gs   position, cap, sens de la gravité
+//   vehicle, grav      véhicule et gravité (plaque, règle g0, logique du circuit)
+//   vel, fwd           vitesse (m/s, repère monde) et vitesse d'avancement : absentes = à l'arrêt. Départ : la vitesse de départ v0 du circuit ;
+//                      checkpoint aérien : la vitesse qu'avait la voiture au dernier sol (raceLogic.js : _ringRespawn) ; checkpoint au sol : à l'arrêt.
+//   snap               (points de retour seulement) l'état de la course à rétablir : chrono, checkpoints, tour, logique du circuit (RaceLogic._snap)
+// Le reste (rotation, glisse, turbo, verre, minuteries de grâce) est remis à zéro par CarPhysics.place, et la plaque sous la voiture est verrouillée si
+// elle est celle du véhicule rendu (place, TECH-001).
+
+// État de départ au point sp (par défaut celui du circuit) : véhicule, gravité et vitesse de départ du niveau. Sert à « Recommencer » ET au point de
+// retour initial (RaceLogic.reset, Simulation.start), qui sont donc le même départ.
+export function startState(track, sp) {
+  const st = { ...sp, vehicle: track.veh0 || 'car', grav: (track.g0 || 100) / 100 };
+  const v0 = (track.v0 || 0) / 3.6;
+  if (v0 > 0) { st.vel = [-dsin(sp.yaw) * v0, 0, -dcos(sp.yaw) * v0]; st.fwd = v0; }
+  return st;
+}
+
+// Pose la voiture dans l'état r (départ ou point de retour) : le seul endroit où cet état est appliqué.
+export function placeState(phys, r) {
+  phys.place(r.x, r.y, r.z, r.yaw, r.gs || 1, r.vehicle || 'car');      // (le véhicule avant la lecture du sol : une plaque sous la voiture en dépend, TECH-001)
+  phys.gravMul = r.grav || 1;
+  if (r.vel) { phys.vel.x = r.vel[0]; phys.vel.y = r.vel[1]; phys.vel.z = r.vel[2]; phys.fwdSpeed = r.fwd || 0; }
+}
+
 // Place la voiture au départ avec les paramètres du niveau (véhicule, gravité, vitesse
 // de départ). sp : point de départ (par défaut celui du circuit).
 export function placeAtStart(phys, logic, sp = logic.spawnPoint()) {
-  const T = logic.track;
-  phys.place(sp.x, sp.y, sp.z, sp.yaw, sp.gs || 1, T.veh0 || 'car');
-  phys.gravMul = (T.g0 || 100) / 100;
-  const v0 = (T.v0 || 0) / 3.6;
-  if (v0 > 0) { phys.vel.x = -dsin(sp.yaw) * v0; phys.vel.z = -dcos(sp.yaw) * v0; phys.fwdSpeed = v0; }
+  placeState(phys, startState(logic.track, sp));
 }
