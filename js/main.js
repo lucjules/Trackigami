@@ -15,7 +15,7 @@ import { RaceSession } from './race.js';
 import { BUILTIN_TRACKS, buildBuiltin, authorLabel } from './tracks.js';
 import { Track, hashString, lossText, lossBlocking } from './track.js';
 import { VERSION, PHYS_VER, GAME_NAME } from './version.js';
-import { online } from './online.js';
+import { online, versionMismatchText } from './online.js';
 import { account } from './account.js';
 import { runWelcome } from './welcome.js';
 import { initI18n } from './i18n/boot.js';
@@ -361,11 +361,9 @@ class App {
         : `🌍 Meilleur temps en ligne : ${formatTime(r.best)} (${r.rank}${r.rank === 1 ? 'er' : 'e'} sur ${r.total})`);
     } catch (e) {
       if (!current()) return;
-      // Version de physique différente : le plus souvent, la fonction serveur « submit-score » n'a pas été redéployée après
-      // une mise à jour du jeu (ou la page est une ancienne version en cache). Le record reste enregistré sur l'appareil.
-      say('ko', /Version du jeu différente/.test(e.message)
-        ? `🌍 Classement indisponible : serveur d'une autre version (v${PHYS_VER}). Record gardé ici. Recharge la page.`
-        : '🌍 Classement : ' + e.message);
+      // Version de physique différente (drapeau `versionMismatch` du serveur, devenu le code 'version-mismatch' : online.js) : soit la fonction serveur « submit-score »
+      // est en cours de mise à jour (le site est en avance sur elle), soit cette page est périmée. Le record reste enregistré sur l'appareil.
+      say('ko', e && e.code === 'version-mismatch' ? versionMismatchText(e, PHYS_VER) : '🌍 Classement : ' + e.message);
     }
   }
 

@@ -1738,6 +1738,29 @@ try {
     await lcMenu(); await lcClean();
   });
 
+  await test('refus du serveur pour cause de version (COMPLETE-005) : l\'écran d\'arrivée dit « en cours de mise à jour, réessaie dans quelques minutes » (serveur en retard) ou « recharge la page » (page périmée), sans lire le texte du serveur ; le record reste local', async () => {
+    await lcClean();
+    const refuse = (serverPhysVer) => app(async (sv) => {
+      const { online, OnlineError } = await import('/js/online.js');
+      online.submitScore = async () => { const e = new OnlineError('(texte du serveur sans importance)', 'version-mismatch', 422); e.serverPhysVer = sv; throw e; };
+    }, serverPhysVer);
+    const finishAndRead = async (t) => {
+      await lcStart();
+      await app((t) => window.copytrack.session._finish(t), t);
+      await waitApp(() => /Classement indisponible/.test(document.getElementById('fin-online').textContent), null, 6000);
+      return app(() => document.getElementById('fin-online').textContent);
+    };
+    await refuse(await app(async () => (await import('/js/version.js')).PHYS_VER - 1));
+    const behind = await finishAndRead(30);
+    assert.match(behind, /en cours de mise à jour, réessaie dans quelques minutes/); assert.doesNotMatch(behind, /Recharge/);
+    assert.ok(await app(async () => (await import('/js/storage.js')).getRecord(window.copytrack.session.trackKey)), 'le record reste enregistré sur l\'appareil');
+    await lcMenu(); await lcClean();
+    await refuse(await app(async () => (await import('/js/version.js')).PHYS_VER + 1));
+    const ahead = await finishAndRead(30);
+    assert.match(ahead, /Recharge la page/); assert.doesNotMatch(ahead, /quelques minutes/);
+    await lcMenu(); await lcClean();
+  });
+
   await test('cycle de vie (TECH-066) : réponse tardive du serveur après avoir quitté la course : le panneau ouvert reste ouvert, la liste n\'est pas reconstruite', async () => {
     await lcClean();
     await fakeSubmit(1500);
