@@ -377,9 +377,21 @@ test('checkpoint aérien franchi avant le premier relevé de position (vitesse d
   const P = sim.phys;
   assert.equal(P.surfType, 'road', 'la voiture réapparaît sur une route');
   assert.equal(sim.logic.collected.size, 0, 'l\'anneau reste à repasser');
-  let lost = 0;
-  for (let i = 0; i < 240; i++) { sim.step(IDLE); if (sim.lost) lost++; }
-  assert.equal(lost, 0, 'aucun rappel automatique : plus de boucle');
+  // 0.16.4 (TECH-013, PHYS_VER 39) : ce point de retour est le départ, et le départ rend la vitesse de départ (un retour au départ = « Recommencer »). Le contrôle
+  // d'origine (« 2 s sans commande : aucun rappel ») supposait une voiture rendue À L'ARRÊT : lancée à 300 km/h, elle roule sur le terrain du « vide » (au niveau 0, le
+  // vide est le terrain) et elle est rappelée, exactement comme après « Recommencer » (57 rappels dans les deux cas). Il devient : même état que « Recommencer », et,
+  // là où le saut est possible (vrai vide, réception plus bas), plus aucune boucle : la voiture arrive (à l'arrêt, elle ne pouvait pas sauter : rappels sans fin).
+  const fresh = new Simulation(tr); fresh.start();
+  assert.deepEqual([P.pos.x, P.pos.y, P.pos.z, P.vel.x, P.vel.y, P.vel.z, P.vehicle, P.gravMul], [fresh.phys.pos.x, fresh.phys.pos.y, fresh.phys.pos.z, fresh.phys.vel.x, fresh.phys.vel.y, fresh.phys.vel.z, fresh.phys.vehicle, fresh.phys.gravMul], 'le retour rend l\'état du départ (« Recommencer »)');
+  const t3 = scriptTrack('a', 'V4 start GC2 V-1 S6 finish'); t3.setParams({ v0: 300 });
+  const s3 = new Simulation(t3); s3.start();
+  let cp3 = false;
+  for (let i = 0; i < 120 && !cp3; i++) { const ev = s3.step(GAS); cp3 = !!ev && ev.type === 'checkpoint'; if (s3.lost) s3.rewind(); }
+  assert.ok(cp3 && s3.logic.lastGround === null, 'vrai vide : l\'anneau est franchi avant le premier relevé');
+  s3.rewind();
+  let lost = 0, fin = false;
+  for (let i = 0; i < 120 * 30 && !fin; i++) { const ev = s3.step(GAS); if (s3.lost) { lost++; s3.rewind(); } fin = !!ev && ev.type === 'finish'; }
+  assert.ok(fin && lost === 0, `après le retour, plus de boucle : arrivée ${fin}, ${lost} rappel(s)`);
   // Un anneau posé AU-DESSUS d'une route garde son centre pour point de retour (comportement d'origine).
   const t2 = new Track('b');
   t2.add({ t: 'start', x: 0, z: 3, l: 0, r: 0 }); t2.add({ t: 'straight', x: 0, z: 2, l: 0, r: 0 }); t2.add({ t: 'cpRing', x: 0, z: 2, l: 0, r: 0 });
