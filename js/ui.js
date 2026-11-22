@@ -198,8 +198,12 @@ export class UI {
       });
       a.appendChild(btn);
     }
+    // Le focus clavier appartient à la fenêtre : sans cela, Entrée activerait encore le bouton focalisé DERRIÈRE elle (« Rejouer » de l'arrivée, par exemple).
+    // On ne met le focus sur aucun bouton (rien à activer par un Entrée tenu) : sur la fenêtre elle-même ; Tab et les flèches y entrent. Rendu à la fermeture.
+    if (!this.modalOpen) this._returnFocus = document.activeElement;
     $('modal').classList.remove('hidden');
     this.modalOpen = true;
+    if (!panel.contains(document.activeElement)) { panel.tabIndex = -1; panel.focus({ preventScroll: true }); }
     // Un Échap appuyé AVANT l'ouverture (pas encore lu par la boucle) ne doit pas refermer cette fenêtre au tour suivant.
     if (this.app.input && this.app.input.pressed) this.app.input.pressed.delete('Escape');
     this._syncInput();
@@ -208,9 +212,14 @@ export class UI {
   _fireModalClose() { const f = this._onModalClose; this._onModalClose = null; if (f) f(); }
 
   closeModal() {
+    const wasOpen = this.modalOpen;
     $('modal').classList.add('hidden');
     this.modalOpen = false;
     this._syncInput();
+    // Le focus revient où il était avant la fenêtre (s'il y est encore et visible) : le clavier ne perd pas sa place.
+    const back = this._returnFocus;
+    this._returnFocus = null;
+    if (wasOpen && back && back.isConnected && back !== document.body && back.offsetParent !== null) back.focus({ preventScroll: true });
     this._fireModalClose();
   }
 

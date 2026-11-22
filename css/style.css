@@ -287,6 +287,7 @@ kbd {
 .fin-record { color: var(--good); font-weight: 700; }
 
 .modal-panel { width: min(560px, 100%); }
+.modal-panel:focus { outline: none; }      /* (le focus clavier est posé sur la fenêtre à son ouverture, js/ui.js : rien à entourer) */
 .modal-panel textarea {
   width: 100%;
   min-height: 120px;

@@ -45,6 +45,9 @@ export const pointerMethods = {
       blur: () => this._endShiftY(),
       key: (e) => {
         if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
+        // Sous une fenêtre (« Circuit », calques, logique…) ou une capture de liaison, l'éditeur n'a pas la main : ni « ? » ni raccourcis Ctrl (TECH-033).
+        // Même cause que TECH-017 : EditorSession.update() ignore déjà les autres touches, cet écouteur global non.
+        if (this.app.input.ctx !== 'editor') return;
         if (e.key === '?') { e.preventDefault(); this.app.editorHelp(); return; }
         if (!(e.ctrlKey || e.metaKey)) return;
         const k = e.key.toLowerCase();

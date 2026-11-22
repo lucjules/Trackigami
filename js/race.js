@@ -464,7 +464,12 @@ export class RaceSession {
 
     if (this.replay) return this._updateReplay(dt);
 
-    if (!this.demo) {
+    if (!this.demo && app.ui.modalOpen) {
+      // Une fenêtre ouverte (Commandes, Classement, bilan, confirmation…) prend les entrées : aucune action de course ne lui passe dessous (TECH-017).
+      // En solo, l'ouvrir en pleine course met la course en pause (jamais en multijoueur : les autres courent) ; elle ne reprend qu'au choix du joueur.
+      if (!this.multi && (this.state === 'racing' || this.state === 'countdown')) this.pause();
+      if (this.state === 'paused') return this.render(dt, this.acc / DT);
+    } else if (!this.demo) {
       if (this.multi && input.act('pause')) { app.confirmLeaveMulti(); return; }     // pas de pause : les autres courent
       if (input.act('pause') || (this.state === 'paused' && input.hit('Escape'))) {
         if (this.state === 'paused') this.resume();

@@ -7,17 +7,20 @@ export const replayMethods = {
   // ---- Replay -------------------------------------------------------------
   _updateReplay(dt) {
     const app = this.app, input = app.input;
-    if (input.hit('Escape') || input.act('pause')) { app.endReplay(this.opts.replay); return; }
-    if (input.hit('Space')) { this.replayPaused = !this.replayPaused; this._replayHud(); }
-    const speeds = [0.25, 0.5, 1, 2, 4];
-    if (input.hit('ArrowRight') || input.hit('ArrowUp')) { this.replaySpeed = speeds[Math.min(4, speeds.indexOf(this.replaySpeed) + 1)]; this._replayHud(); }
-    if (input.hit('ArrowLeft') || input.hit('ArrowDown')) { this.replaySpeed = speeds[Math.max(0, speeds.indexOf(this.replaySpeed) - 1)]; this._replayHud(); }
-    if (input.act('restart')) { this.restart(); this._replayHud(); return; }
-    if (input.act('camera')) {
-      this.replayCam = (this.replayCam + 1) % (this.camList.length + REPLAY_CAMS.length);
-      const name = this.replayCam < this.camList.length ? this.camList[this.replayCam].name : REPLAY_CAMS[this.replayCam - this.camList.length].name;
-      if (this.replayCam < this.camList.length) this.camMode = this.replayCam;
-      app.ui.flash(`Caméra : ${name}`, 1.2);
+    // Sous une fenêtre ouverte, les touches du replay (pause, vitesse, caméra, recommencer, quitter) ne comptent pas (TECH-017) ; la lecture continue.
+    if (!app.ui.modalOpen) {
+      if (input.hit('Escape') || input.act('pause')) { app.endReplay(this.opts.replay); return; }
+      if (input.hit('Space')) { this.replayPaused = !this.replayPaused; this._replayHud(); }
+      const speeds = [0.25, 0.5, 1, 2, 4];
+      if (input.hit('ArrowRight') || input.hit('ArrowUp')) { this.replaySpeed = speeds[Math.min(4, speeds.indexOf(this.replaySpeed) + 1)]; this._replayHud(); }
+      if (input.hit('ArrowLeft') || input.hit('ArrowDown')) { this.replaySpeed = speeds[Math.max(0, speeds.indexOf(this.replaySpeed) - 1)]; this._replayHud(); }
+      if (input.act('restart')) { this.restart(); this._replayHud(); return; }
+      if (input.act('camera')) {
+        this.replayCam = (this.replayCam + 1) % (this.camList.length + REPLAY_CAMS.length);
+        const name = this.replayCam < this.camList.length ? this.camList[this.replayCam].name : REPLAY_CAMS[this.replayCam - this.camList.length].name;
+        if (this.replayCam < this.camList.length) this.camMode = this.replayCam;
+        app.ui.flash(`Caméra : ${name}`, 1.2);
+      }
     }
     if (!this.replayPaused && this.state !== 'finished') {
       this.acc += Math.min(dt, 0.1) * this.replaySpeed;

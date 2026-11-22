@@ -1464,6 +1464,59 @@ try {
     await app(() => window.copytrack.showMenu('menu'));
   });
 
+  await test('entrées (TECH-017) : fenêtre ouverte : P, T, C, H, R sans effet sous elle ; en course elle met en pause (jamais en multijoueur)', async () => {
+    await startRaceNow();
+    // Fenêtre ouverte pendant la course : pause automatique.
+    await app(() => window.copytrack.ui.modal({ title: 'Test', body: '<p>x</p>', actions: [{ label: 'Fermer' }] }));
+    await settle();
+    assert.equal(await app(() => window.copytrack.session.state), 'paused', 'ouvrir une fenêtre en course met la course en pause');
+    // Sous la fenêtre : aucune touche de course n'agit (P relancerait la course ; T la recommencerait).
+    const probe = () => app(() => { const s = window.copytrack.session; return { state: s.state, steps: s.logic.steps, cam: s.camMode, resp: s.stats.respawns }; });
+    const p0 = await probe();
+    await app(() => { window.__horn = 0; const a = window.copytrack.audio, h = a.horn; a.horn = (...x) => { window.__horn++; return h.apply(a, x); }; });
+    for (const k of ['p', 't', 'c', 'h', 'r']) { await page.keyboard.press(k); await settle(); }
+    await settle();
+    const p1 = await probe();
+    assert.deepEqual(p1, p0, 'rien ne se passe sous la fenêtre');
+    assert.equal(await app(() => window.__horn), 0, 'pas de klaxon sous la fenêtre');
+    // À la fermeture : retour sur le menu pause (la course n'a pas repris toute seule).
+    await app(() => window.copytrack.ui.closeModal());
+    await settle();
+    assert.equal((await probe()).state, 'paused', 'la pause est restée ouverte derrière la fenêtre');
+    // Arrivée › Classement puis T : la course ne se relance pas derrière.
+    await app(() => window.copytrack.session.resume());
+    await waitApp(() => window.copytrack.session.state === 'racing');
+    await app(() => window.copytrack.session._finish(window.copytrack.session.logic.steps / 120));
+    await waitApp(() => window.copytrack.session.state === 'finished');
+    await app(() => window.copytrack.ui.modal({ title: 'Classement', body: '<p>x</p>', actions: [{ label: 'Fermer' }] }));
+    await page.keyboard.press('t'); await page.keyboard.press('Enter');
+    await settle();
+    assert.equal((await probe()).state, 'finished', 'T / Entrée sous « Classement » ne relancent pas la course');
+    await app(() => window.copytrack.ui.closeModal());
+    await leaveToMenu();
+  });
+
+  await test('entrées (TECH-033) : éditeur : Ctrl+Z / Y / A / X / D / V sans effet sous la fenêtre « Circuit »', async () => {
+    await click('[data-action="editor"]');
+    await waitApp(() => window.copytrack.mode === 'editor' && window.copytrack.session && window.copytrack.session.track);
+    await settle();
+    // Trois pièces posées, pour que l'annulation ait de quoi défaire.
+    await app(() => { const s = window.copytrack.session; s.setTool('straight'); });
+    await page.mouse.move(640, 360); await page.waitForTimeout(150);
+    for (const [x, y] of [[700, 330], [760, 300], [820, 270]]) { await page.mouse.click(x, y); await page.waitForTimeout(200); }
+    const snap = () => app(() => { const s = window.copytrack.session; return JSON.stringify({ n: s.track.tiles.length, sel: s.sel ? JSON.stringify(s.sel) : null, pasting: !!s.pasting, h: s.hIndex, hn: s.history.length }); });
+    const n0 = await app(() => window.copytrack.session.track.tiles.length);
+    await app(() => window.copytrack.session.openParams());
+    await waitApp(() => window.copytrack.ui.modalOpen);
+    const before = await snap();
+    for (const k of ['z', 'z', 'y', 'a', 'x', 'd', 'v']) { await page.keyboard.press('Control+' + k); await page.waitForTimeout(80); }
+    await settle();
+    assert.equal(await snap(), before, `rien ne change derrière la fenêtre (circuit de ${n0} pièces)`);
+    await app(() => window.copytrack.ui.closeModal());
+    await app(() => window.copytrack.leaveEditor());
+    await waitApp(() => window.copytrack.mode === 'menu');
+  });
+
   await test('fantôme rival (haut d\'un classement) : affiché sur la piste, suit son enregistrement, étiquette au nom du rival', async () => {
     await app(() => window.copytrack.playBuiltin(0));
     await waitApp(() => window.copytrack.session && window.copytrack.session.state, null, 40000);
