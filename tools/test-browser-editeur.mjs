@@ -295,6 +295,41 @@ try {
     assert.ok(r.kept, 'l\'ancien record reste en place');
     await ctx.close();
   });
+  // Phase 8 (TECH-003) : avec une option armée que la pièce choisie refuse (« Mur gauche » sur un départ), l'aperçu montré sous la vraie souris annonce exactement ce que le clic
+  // fait : la pièce normalisée, sans le volume fantôme de l'option ; la ligne droite du niveau 2 n'est ni annoncée ni supprimée.
+  await test('TECH-003 : « Mur gauche » armé, départ visé en (0, 0) sous la souris : l\'aperçu et la pose donnent le même résultat ; la ligne droite du niveau 2 reste', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await page.evaluate(async () => {
+      const { Track } = await import('/js/track.js');
+      const t = new Track('Sonde');
+      t.add({ t: 'start', x: 6, z: 0, l: 0, r: 0 }); t.add({ t: 'straight', x: 0, z: 0, l: 2, r: 0 }); t.add({ t: 'straight', x: 1, z: 0, l: 0, r: 0 });
+      await window.copytrack.openEditor({ code: t.encode(), name: 'Sonde' });
+    });
+    await page.waitForFunction(() => window.copytrack.session && window.copytrack.session.kind === 'editor' && window.copytrack.session.track.name === 'Sonde', null, { timeout: 30000, polling: 100 });
+    await page.evaluate(() => { const A = window.copytrack, E = A.session; A.ui.closeModal(); E.setTool('start'); E._optClick('o', 1); E.setLevel(0); E.target.set(16, E.levelY(), 16); E.dist = 160; });
+    await page.waitForTimeout(500);
+    const pt = await page.evaluate(async () => {
+      const THREE = await import('/js/vendor/three.module.min.js');
+      const A = window.copytrack, E = A.session, r = A.renderer.domElement.getBoundingClientRect();
+      const v = new THREE.Vector3(16, E.levelY(), 16).project(A.camera);
+      return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height, opts: { ...E.opts } };
+    });
+    if (!pt.opts.o) throw new Error('précondition : l\'option « Mur gauche » est armée');
+    await page.mouse.move(pt.x, pt.y);
+    await page.waitForFunction(() => { const E = window.copytrack.session; return E.hover && E.hover.cx === 0 && E.hover.cz === 0 && E._previewPlan && E._previewPlan.norm.x === 0 && E._previewPlan.norm.z === 0; }, null, { timeout: 8000, polling: 50 });
+    const pv = await ed(page, () => { const E = window.copytrack.session, p = E._previewPlan; return { ok: p.ok, o: p.norm.o, dropped: p.dropped, remove: p.remove.map((t) => `${t.t}@${t.x},${t.z},${t.l}`).sort(), red: E.previewMat.emissive.getHex() !== 0, visible: E.preview.visible }; });
+    assert.equal(pv.ok, true); assert.equal(pv.o, 0, 'aperçu : la pièce normalisée (sans mur)'); assert.deepEqual(pv.dropped, ['o']);
+    assert.deepEqual(pv.remove, ['start@6,0,0'], 'aperçu : seul l\'ancien départ sera retiré');
+    assert.equal(pv.red, false, 'aperçu : aucune pièce remplacée (pas de rouge)');
+    const before = await ed(page, () => window.copytrack.session.track.tiles.map((t) => `${t.t}@${t.x},${t.z},${t.l}`).sort());
+    await page.mouse.down(); await page.mouse.up();
+    await page.waitForFunction(() => window.copytrack.session.track.tiles.some((t) => t.t === 'start' && t.x === 0), null, { timeout: 8000, polling: 50 });
+    const after = await ed(page, () => window.copytrack.session.track.tiles.map((t) => `${t.t}@${t.x},${t.z},${t.l}`).sort());
+    assert.deepEqual(before.filter((k) => !after.includes(k)), pv.remove, 'la pose retire exactement ce que l\'aperçu annonçait');
+    assert.ok(after.includes('straight@0,0,2'), 'la ligne droite du niveau 2 est toujours là');
+    assert.equal(after.filter((k) => k.startsWith('start')).length, 1);
+    await ctx.close();
+  });
   await test('rangement 0.12 sur téléphone (844 × 390) : le panneau est un tiroir, il se referme après un choix ; la vue reste dégagée', async () => {
     const { ctx, page } = await open(844, 390);
     const drawer = () => page.evaluate(() => { const r = document.getElementById('ed-palette').getBoundingClientRect(); return r.right > 60 && r.left < 70; });

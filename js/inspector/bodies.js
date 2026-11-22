@@ -39,8 +39,10 @@ export const bodyMethods = {
     rows.push(h('div', { class: 'insp-row' }, h('span', {}, 'Cap'), rot));
     const setOri = (n) => {
       if (n === tileOri(t)) return true;
+      ed._lastRefusal = null;
       const ok = n === 3 ? ed.track.toggleFlag(t, 'v') : ed.track.toggleFlag(t, 'o', ORI_TO_O[n]);      // (id d'orientation -> valeur de tile.o : 4 = incliné gauche -> 3…)
-      if (!ok) ed.app.ui.flash(n === 3 ? 'Pas la place à l’envers : monte d’abord, ou libère le niveau en dessous.' : n ? 'Pas la place pour un mur : la route descend de 2 niveaux sous son niveau (monte d’abord, libère le niveau en dessous).' : 'Pas la place pour revenir au sol.');
+      // (phase 8 : un refus du validateur de l'éditeur — débordement d'une pente au mur… — dit sa raison)
+      if (!ok) ed.app.ui.flash(ed._refusalText(ed._lastRefusal) || (n === 3 ? 'Pas la place à l’envers : monte d’abord, ou libère le niveau en dessous.' : n ? 'Pas la place pour un mur : la route descend de 2 niveaux sous son niveau (monte d’abord, libère le niveau en dessous).' : 'Pas la place pour revenir au sol.'));
       return ok || false;
     };
     const oriOff = (n) => (n === 0 || n === 3 ? false : !flagAllowed(t.t, 'o', null, ORI_TO_O[n]));

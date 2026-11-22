@@ -80,6 +80,9 @@ export class Track {
     this.resetRules();
     this.vt = 0;      // temps de vérification (secondes) de l'auteur
     this.vh = '';     // signature du circuit au moment de la vérification
+    // Phase 8 (TECH-052) : garde de placement de l'éditeur (js/placement.js), consultée par les modifications de pièce du modèle (_reshape : options, orientation,
+    // mouvement ; setMover) : (pièce candidate normalisée, pièce remplacée) → vrai si permis. null hors de l'éditeur (course, serveur) ; jamais copiée par clone().
+    this.placementGuard = null;
     for (const t of tiles) this.add(t);
   }
 

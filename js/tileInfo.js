@@ -1,7 +1,7 @@
 // Aides « pures » (sans DOM ni 3D) de l'éditeur et de l'inspecteur, faciles à tester.
 import { PIECES, rotVec } from './pieces.js';
 import { centerlineWorld } from './ribbons.js';
-import { Track } from './track.js';
+import { placementPlan } from './placement.js';
 import { familyOf, FAMILIES } from './families.js';
 import { CELL } from './constants.js';
 
@@ -46,13 +46,11 @@ export function retypePlacement(track, tile, type) {
   for (let dx = Math.min(lo, hi); dx <= Math.max(lo, hi); dx++) for (let dz = Math.min(lo, hi); dz <= Math.max(lo, hi); dz++) offsets.push([dx, dz]);
   // Puis le reste, au cas où l'ancre « centrée » est prise.
   for (let dx = Math.min(0, -d); dx <= Math.max(0, -d); dx++) for (let dz = Math.min(0, -d); dz <= Math.max(0, -d); dz++) if (!offsets.some(([a, b]) => a === dx && b === dz)) offsets.push([dx, dz]);
-  track.remove(tile);
-  try {
-    for (const [dx, dz] of offsets) {
-      const cand = Track.normalize({ ...tile, t: type, x: tile.x + dx, z: tile.z + dz });
-      if (Track.placeable(cand) && !track.conflicts(cand).length) return cand;
-    }
-  } finally { track._insert(tile); }
+  // (phase 8, TECH-052 : chaque ancre passe par le validateur de l'éditeur, js/placement.js — débordement d'une pente au mur compris ; la pièce remplacée est ignorée)
+  for (const [dx, dz] of offsets) {
+    const plan = placementPlan(track, { ...tile, t: type, x: tile.x + dx, z: tile.z + dz }, { self: tile });
+    if (plan.ok) return plan.norm;
+  }
   return null;
 }
 

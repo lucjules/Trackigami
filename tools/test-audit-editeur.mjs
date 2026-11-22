@@ -13,6 +13,8 @@ import { MAX_DECOS } from '../js/constants.js';
 import { DECO_ORDER } from '../js/decoData.js';
 import { shiftLevel, pasteClip, copyRect, clipLift, placedClip, checkTrack } from '../js/editorTools.js';
 import { Simulation } from '../js/simulation.js';
+import { spillConflicts } from '../js/spill.js';
+import { placementPlan } from '../js/placement.js';
 import { STARTERS, starterClip } from '../js/prefabs.js';
 import { test, finish } from './harness.mjs';
 
@@ -27,6 +29,7 @@ const session = (track) => {
     app: { audio: noop, ui: { flash() {}, modal() {} } }, _refreshUI() {}, _applyDecor() {}, gridKey: '', tool: 'select', sel: null, pasting: false, level: 0, focusLevel: false,
     _refreshSelBar() {}, _clearPreview() {}, setTool(t) { this.tool = t; }, setLevel(l) { this.level = l; }, hover: null, view: noop,
   });
+  self._guardTrack();      // (phase 8 : la garde de placement de l'éditeur, comme le constructeur : options et mouvement passent par le validateur)
   return self;
 };
 const cleanup = (s) => clearTimeout(s._draftT);
@@ -49,6 +52,8 @@ function structure(track) {
     for (const k of Object.keys(nrm)) if (JSON.stringify(nrm[k]) !== JSON.stringify(t[k])) errs.push(`pièce non normalisée ${t.t}.${k}`);
   }
   if (track.count('start') > 1) errs.push('plusieurs départs');
+  // (phase 8, TECH-052 : aucune pièce traversée par le bord incliné d'une pente posée au mur)
+  for (const t of track.tiles) if (spillConflicts(track, t).length) errs.push(`débordement ${t.t}@${t.x},${t.z},${t.l}`);
   if (track.decos.length > MAX_DECOS) errs.push('trop de décorations');
   for (const d of track.decos) if (![d.x, d.y, d.z, d.ry, d.s].every(Number.isFinite)) errs.push('décoration non finie');
   const code = track.encode(), back = Track.decode(code);
@@ -195,8 +200,9 @@ test('aucune opération ne corrompt le circuit ; l\'état courant est toujours u
       else if (x < 0.78) {
         op = 'poser';
         const t = { t: pick(r, TYPES), x: Math.floor(r() * 10) - 2, z: Math.floor(r() * 10) - 2, l: Math.floor(r() * 5), r: Math.floor(r() * 4), s: r() < 0.3 ? pick(r, SURFACE_ORDER) : '', v: r() < 0.1 ? 1 : 0, o: r() < 0.1 ? 1 + Math.floor(r() * 2) : 0, nb: r() < 0.1, tn: r() < 0.1, mv: r() < 0.1 ? 1 + Math.floor(r() * 3) : 0, cp: r() < 0.1 ? 1 : 0, tb: r() < 0.05 };
-        const nrm = Track.normalize(t);
-        if (!(t.t === 'start' && track.startTile) && Track.inBounds(nrm) && !track.conflicts(nrm).length) { track.add(t); s._changed(); s._commit(); }
+        // (phase 8 : le validateur de placement de l'éditeur, js/placement.js : niveaux, place libre, débordement, départ unique)
+        const plan = placementPlan(track, t);
+        if (plan.ok) { track.add(t); s._changed(); s._commit(); }
       } else if (x < 0.86) {
         op = 'option'; const t = pick(r, track.tiles);
         if (t) { const f = pick(r, ['v', 'nb', 'tn', 'mv', 'cp', 'tb', 'th', 'o']); track.toggleFlag(t, f, f === 'mv' ? 1 + Math.floor(r() * 3) : f === 'o' ? Math.floor(r() * 3) : f === 'th' ? 1 + Math.floor(r() * 3) : 1); s._changed(); s._commit(); }

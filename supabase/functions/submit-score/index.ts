@@ -6833,8 +6833,11 @@ var editMethods = {
   },
   // Remplace `tile` par `cand` (normalisée : options devenues impossibles retirées, revêtement incompatible effacé) si la place et les niveaux
   // le permettent ; sinon rien ne change. Même objet : la sélection de l'inspecteur reste valable.
+  // Phase 8 (TECH-052) : dans l'éditeur, la garde de placement (placementGuard, js/placement.js) a aussi son mot à dire : débordement d'une pente posée au mur,
+  // départ unique, niveaux de l'éditeur. Hors de l'éditeur (course, serveur) elle est absente (null) : rien ne change.
   _reshape(tile, cand) {
     const n = Track.normalize(cand);
+    if (this.placementGuard && !this.placementGuard(n, tile)) return false;
     this.remove(tile);
     if (this.conflicts(n).length || !Track.inBounds(n)) {
       this._insert(tile);
@@ -6854,6 +6857,7 @@ var editMethods = {
       ms: m.ms,
       ma: m.ma
     };
+    if (this.placementGuard && !this.placementGuard(Track.normalize(cand), tile)) return false;
     this.remove(tile);
     if (this.conflicts(cand).length || !Track.inBounds(cand)) {
       this._insert(tile);
@@ -7805,6 +7809,7 @@ var Track = class _Track {
     this.resetRules();
     this.vt = 0;
     this.vh = "";
+    this.placementGuard = null;
     for (const t of tiles) this.add(t);
   }
   static cellsOf(t) {
@@ -20348,4 +20353,4 @@ Deno.serve(createHandler({
   serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   allowedOrigin: Deno.env.get("ALLOWED_ORIGIN") ?? "*"
 }));
-globalThis.__COPYTRACK_BUILD__ = "3dcf1d72c5fb42e0";
+globalThis.__COPYTRACK_BUILD__ = "97d7eb5d1fd41f18";

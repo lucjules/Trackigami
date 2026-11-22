@@ -46,6 +46,7 @@ export class EditorSession {
       this.track.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 });
     }
     if (state.name) this.track.name = state.name;
+    this._guardTrack();      // (phase 8, TECH-052 : options, orientation, mouvement du circuit passent par le validateur de placement de l'éditeur, js/placement.js)
     this.entryId = state.entryId || null;
     // Phase 4 : un circuit dont la lecture a perdu des pièces (version plus récente du jeu) ou n'a pas pu être lue ne doit JAMAIS réécrire l'original : l'éditeur se détache de l'entrée
     // (un nouvel enregistrement crée une copie) et le dit. Avant, un code abîmé ouvrait un circuit vide et le premier enregistrement écrasait le circuit d'origine.

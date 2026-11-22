@@ -3,7 +3,7 @@
 import { PIECES, flagAllowed, clearConflicts, roadHalf } from './pieces.js';
 import { ROAD_HALF } from './constants.js';
 import { Track } from './track.js';
-import { spillConflicts } from './spill.js';
+import { placementPlan } from './placement.js';
 import { tileEnds, endsTouch, placementsAfter, compatiblePlacement, rollGap, ROLL_TOLERANCE } from './connect.js';
 import { endOrientation } from './continuity.js';
 import { oriIdOfEnd, entryOrientation, transitionPath, oriLabel } from './orient.js';
@@ -28,8 +28,14 @@ export function lastOpenTile(track) {
   return null;
 }
 
-// type : pièce à poser ; opts : options armées dans l'éditeur (v, o, nb, tn…). Renvoie { tile, inferred } ou { why }.
-export function extendPlan(track, from, type, opts = {}) {
+// Phase 8 (TECH-052, TECH-053) : chaque pièce proposée — la pièce, ses raccords de largeur et d'orientation — passe par le validateur de l'éditeur (js/placement.js :
+// niveaux, pièces déjà posées, débordement d'une pente au mur) ; un départ prolongé retire l'ancien départ (`remove`), comme la pose ordinaire.
+// Les pièces SUPPRIMÉES par le plan ne peuvent être que des départs, jamais une pièce d'un calque verrouillé ou masqué (place.layerOk).
+const fits = (track, tile, place) => placementPlan(track, tile, { start: 'replace', layerOk: place.layerOk });
+
+// type : pièce à poser ; opts : options armées dans l'éditeur (v, o, nb, tn…) ; place : { layerOk } (calques protégés de l'éditeur).
+// Renvoie { tile, inferred, remove } ou { why } (remove : départs que la pose retire).
+export function extendPlan(track, from, type, opts = {}, place = {}) {
   const P = PIECES[type];
   if (!P || P.kind === 'ring' || P.kind === 'area') return { why: `${P ? P.label : type} ne se pose pas au bout d'une route : choisis une pièce de route.` };
   if (!from) return { why: 'Aucune pièce où prolonger : pose d\'abord le départ.' };
@@ -56,7 +62,7 @@ export function extendPlan(track, from, type, opts = {}) {
   const changer = !!(P.hw && !same(P.hw[0], P.hw[1]));
   const revFirst = changer && same(endW, P.hw[1]) && !same(endW, P.hw[0]);
   if (!changer && lineLike && !same(endW, roadHalf(P, 0))) {
-    const wb = widthBridge(track, end, endW, roadHalf(P, 0), type, tries[tries.length - 1].opts);
+    const wb = widthBridge(track, end, endW, roadHalf(P, 0), type, tries[tries.length - 1].opts, place);
     if (wb) return wb;
   }
   // D'abord dans le sens de la pièce ; sinon à contresens (retour d'une vrille, d'un tire-bouchon, courbe symétrique) : la pièce est alors parcourue de sa sortie vers son entrée.
@@ -68,22 +74,24 @@ export function extendPlan(track, from, type, opts = {}) {
       const c = compatiblePlacement(end, type, t.opts, { reverse });
       if (!c) continue;
       found = true;
-      const tile = Track.normalize(c);
-      if (!Track.placeable(tile)) { blocked = blocked || 'sort des niveaux autorisés (monte ou descends la route d\'avant)'; continue; }
-      if (track.conflicts(tile).length || spillConflicts(track, tile).length) { blocked = blocked || 'tomberait sur une pièce déjà posée'; continue; }
-      return { tile, inferred: t.inferred, end, reverse };
+      const plan = fits(track, c, place);
+      if (plan.why === 'bounds') { blocked = blocked || 'sort des niveaux autorisés (monte ou descends la route d\'avant)'; continue; }
+      if (plan.why === 'locked') { blocked = blocked || 'remplacerait le départ d\'un calque verrouillé ou masqué'; continue; }
+      if (!plan.ok) { blocked = blocked || 'tomberait sur une pièce déjà posée'; continue; }
+      return { tile: plan.norm, inferred: t.inferred, end, reverse, remove: plan.remove };
     }
     if (found) break;
   }
   if (blocked) return { why: `${P.label} se raccorde ici mais ${blocked}.` };
   // Phase 3 : raccordement AUTOMATIQUE. La route arrive dans une orientation et la pièce choisie commence dans une autre : on insère les transitions qui manquent (chemin le plus court,
   // 45° comprises), si la pièce et toutes les transitions tiennent (niveaux, pièces déjà posées). Rien n'est posé tant que tout le chemin n'est pas possible : le plan est rendu tel quel.
-  const chain = autoBridge(track, end, type, opts);
+  const chain = autoBridge(track, end, type, opts, place);
   if (chain && chain.tile) return chain;
   if (inferTry && armed) {
     // (orientation choisie impossible à raccorder : on retombe sur celle de la route, comme avant la phase 3)
     const c = compatiblePlacement(end, type, inferTry.opts, {});
-    if (c) { const tile = Track.normalize(c); if (Track.placeable(tile) && !track.conflicts(tile).length) return { tile, inferred: true, end, reverse: false, note: chain && chain.why ? chain.why : '' }; }
+    const plan = c && fits(track, c, place);
+    if (plan && plan.ok) return { tile: plan.norm, inferred: true, end, reverse: false, note: chain && chain.why ? chain.why : '', remove: plan.remove };
   }
   if (chain && chain.why) return { why: chain.why };
   // Aucun raccord : géométrie ou roulis ?
@@ -98,29 +106,32 @@ export function extendPlan(track, from, type, opts = {}) {
 // 0.12.0 : raccord de largeur + pièce : { tile, chain, widened: true } ou null. Le raccord est celui (rétrécissement, élargissement) dont un bout a la largeur de la route
 // et l'autre celle de la pièce, posé dans le sens qui convient.
 const WIDTH_CHANGERS = ['narrowIn', 'wideIn', 'wideInN'];
-function widthBridge(track, end, fromW, toW, type, opts) {
+// (phase 8 : le raccord et la pièce passent par le validateur, débordement compris — TECH-052 ; le raccord posé le temps du calcul est retiré même si le calcul échoue)
+function widthBridge(track, end, fromW, toW, type, opts, place) {
   const same = (a, b) => Math.abs(a - b) < 0.01;
   for (const id of WIDTH_CHANGERS) {
     const hw = PIECES[id].hw, reverse = same(hw[1], fromW) && same(hw[0], toW);
     if (!reverse && !(same(hw[0], fromW) && same(hw[1], toW))) continue;
     const c = compatiblePlacement(end, id, {}, { reverse });
     if (!c) return null;
-    const a = Track.normalize(c);
-    if (!Track.placeable(a) || track.conflicts(a).length) return null;
+    const pa = placementPlan(track, c);
+    if (!pa.ok) return null;
+    const a = pa.norm;
     const added = track.add(a);
-    const next = tileEnds(added).find((e) => (reverse ? e.entry : e.exit));
-    const p = next && compatiblePlacement(next, type, opts, {});
-    const tile = p ? Track.normalize(p) : null;
-    const ok = tile && Track.placeable(tile) && !track.conflicts(tile).length;
-    track.remove(added);
-    if (!ok) return null;
-    return { tile, chain: [{ ...a }, tile], widened: true, bridged: false, end };
+    let plan = null;
+    try {
+      const next = tileEnds(added).find((e) => (reverse ? e.entry : e.exit));
+      const p = next && compatiblePlacement(next, type, opts, {});
+      plan = p ? fits(track, p, place) : null;
+    } finally { track.remove(added); }
+    if (!plan || !plan.ok) return null;
+    return { tile: plan.norm, chain: [{ ...a }, plan.norm], widened: true, bridged: false, end, remove: plan.remove };
   }
   return null;
 }
 
 // Chaîne de transitions + pièce : { tile, chain: [tuiles dans l'ordre de pose], bridged: true } ou { why } ou null (pas de problème d'orientation à résoudre).
-function autoBridge(track, end, type, opts) {
+function autoBridge(track, end, type, opts, place) {
   const from = oriIdOfEnd(end);
   const want = entryOrientation(type, opts);
   if (from === null || want === null || from === want) return null;
@@ -128,20 +139,22 @@ function autoBridge(track, end, type, opts) {
   if (!path) return { why: `Aucune suite de transitions ne mène de la route (${oriLabel(from)}) à la pièce (${oriLabel(want)}).` };
   const placed = [];
   const undo = () => { for (const t of placed.reverse()) track.remove(t); };
-  let cur = end;
-  for (const id of [...path, type]) {
-    const o = id === type ? opts : {};
-    const c = compatiblePlacement(cur, id, o, {});
-    if (!c) { undo(); return { why: `${PIECES[id].label} ne se raccorde pas ici : la chaîne de transitions (${path.map((x) => PIECES[x].label).join(' → ')}) ne tient pas.` }; }
-    const tile = Track.normalize(c);
-    if (!Track.placeable(tile)) { undo(); return { why: `${PIECES[id].label} sortirait des niveaux autorisés (monte ou descends la route d'avant).` }; }
-    if (track.conflicts(tile).length || spillConflicts(track, tile).length) { undo(); return { why: `${PIECES[id].label} tomberait sur une pièce déjà posée.` }; }
-    const added = track.add(tile);
-    placed.push(added);
-    cur = tileEnds(added).find((e) => e.exit);
-    if (!cur) { undo(); return { why: `${PIECES[id].label} n'a pas de sortie.` }; }
-  }
-  const chain = placed.map((t) => ({ ...t }));
-  undo();
-  return { tile: chain[chain.length - 1], chain, bridged: true, end };
+  let cur = end, remove = [];
+  try {
+    for (const id of [...path, type]) {
+      const o = id === type ? opts : {};
+      const c = compatiblePlacement(cur, id, o, {});
+      if (!c) return { why: `${PIECES[id].label} ne se raccorde pas ici : la chaîne de transitions (${path.map((x) => PIECES[x].label).join(' → ')}) ne tient pas.` };
+      const plan = id === type ? fits(track, c, place) : placementPlan(track, c);
+      if (plan.why === 'bounds') return { why: `${PIECES[id].label} sortirait des niveaux autorisés (monte ou descends la route d'avant).` };
+      if (!plan.ok) return { why: `${PIECES[id].label} tomberait sur une pièce déjà posée.` };
+      remove = plan.remove;
+      const added = track.add(plan.norm);
+      placed.push(added);
+      cur = tileEnds(added).find((e) => e.exit);
+      if (!cur) return { why: `${PIECES[id].label} n'a pas de sortie.` };
+    }
+    const chain = placed.map((t) => ({ ...t }));
+    return { tile: chain[chain.length - 1], chain, bridged: true, end, remove };
+  } finally { undo(); }
 }

@@ -70,13 +70,27 @@ test('les circuits existants ne changent pas : emprise inchangée, rien n’est 
   for (const d of BUILTIN_TRACKS) { const tr = buildBuiltin(d); for (const x of tr.tiles) assert.deepEqual(spillConflicts(tr, x), [], d.id); }
 });
 
-test('branchements : pose, aperçu, prolonger, collage et déplacement de sélection vérifient le débordement', () => {
+// Phase 8 (TECH-052) : avant, cinq chemins sur douze appelaient spillConflicts chacun à sa façon. Le débordement est désormais vérifié en UN endroit, le validateur de
+// placement de l'éditeur (js/placement.js), et tous les chemins de modification d'une pièce passent par lui (comportement vérifié chemin par chemin : tools/test-editor.mjs).
+test('branchements : le débordement est vérifié par le validateur de placement, et tous les chemins de l\'éditeur passent par lui', () => {
   const src = (f) => readFileSync(new URL('../js/' + f, import.meta.url), 'utf8');
-  assert.match(src('editor/tools.js'), /spillConflicts\(this\.track, norm, conflicts\)/);
-  assert.match(src('editor/pointer.js'), /spillConflicts\(this\.track, Track\.normalize\(cand\), conflicts\)/);
-  assert.equal((src('extend.js').match(/spillConflicts\(track, tile\)/g) || []).length, 2);
-  assert.match(src('editorTools.js'), /spillConflicts\(track, n, cs\)/); assert.match(src('editorTools.js'), /spillConflicts\(track, n, tiles\)/);
-  assert.match(src('editor/selection.js'), /spillConflicts\(this\.track, Track\.normalize\(t\)\)/);
+  assert.match(src('placement.js'), /spillConflicts\(track, norm, \[\.\.\.skip, \.\.\.remove\]\)/, 'le validateur vérifie le débordement');
+  // Plus aucun contrôle de débordement « à part » : une seule règle.
+  for (const f of ['editor/tools.js', 'editor/pointer.js', 'editor/selection.js', 'extend.js', 'editorTools.js', 'inspector.js', 'tileInfo.js', 'inspector/gizmo.js', 'inspector/bodies.js']) {
+    assert.doesNotMatch(src(f), /spillConflicts\(/, f + ' : contrôle de débordement à part');
+  }
+  const uses = {
+    'editor/tools.js': [/_placePlan\(tile\)/, /placementPlan\(this\.track, tile\)/, /reshapeTile\(this\.track, tile, \{ \.\.\.tile, t: type \}\)/, /reshapeTile\(this\.track, tile, cand\)/, /track\.placementGuard = /],      // pose, remplissage, type, patch (inspecteur, gizmo, Maj + glisser), garde
+    'editor/pointer.js': [/this\._placePlan\(cand\)/],                                                          // aperçu de la pose
+    'editor/selection.js': [/placementPlan\(this\.track, t\)/],                                                 // aperçu du collage
+    'editorTools.js': [/placementPlan\(track, t, \{ replace: true/, /placementPlan\(track, \{ \.\.\.t/, /placementPlan\(track, t, \{ ignore: tiles \}\)/],      // collage, duplication de zone, déplacement / rotation / niveau de sélection
+    'extend.js': [/placementPlan\(track, \{ start: 'replace'|placementPlan\(track, tile, \{ start: 'replace'/, /placementPlan\(track, c\)/],            // Prolonger, raccords
+    'inspector.js': [/placementPlan\(ed\.track/],                                                               // Ctrl+D de la pièce inspectée
+    'tileInfo.js': [/placementPlan\(track, \{ \.\.\.tile, t: type/],                                           // caractéristique de famille
+    'track/edit.js': [/this\.placementGuard && !this\.placementGuard\(n, tile\)/, /this\.placementGuard && !this\.placementGuard\(Track\.normalize\(cand\), tile\)/],      // options (toggleFlag / _reshape), mouvement
+    'editor.js': [/this\._guardTrack\(\)/],
+  };
+  for (const [f, res] of Object.entries(uses)) for (const re of res) assert.match(src(f), re, f);
 });
 
 await finish('Les pentes posées au mur réservent leur bord : seule leur continuation peut s’y poser.');

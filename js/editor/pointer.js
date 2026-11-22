@@ -4,7 +4,6 @@ import * as THREE from '../vendor/three.module.min.js';
 import { CELL, LEVEL_H, MAX_LEVEL } from '../constants.js';
 import { PIECES, surfaceAllowed, flagAllowed } from '../pieces.js';
 import { Track } from '../track.js';
-import { spillConflicts } from '../spill.js';
 import { DECORS } from '../themes.js';
 import { buildTileMesh } from '../trackMesh.js';
 import { tint } from '../trackGeometry.js';
@@ -214,7 +213,7 @@ export const pointerMethods = {
           this._yAcc -= step;
           if (l !== obj.l) {
             if (this._applyTilePatch(obj, { l })) { this.level = l; this._changed(); }
-            else { this._yAcc = 0; if (!this._yWarn) { this._yWarn = true; this.app.ui.flash('Place occupée à cette hauteur'); } }
+            else { this._yAcc = 0; if (!this._yWarn) { this._yWarn = true; this.app.ui.flash(this._refusalText(this._lastRefusal) || 'Place occupée à cette hauteur'); } }
           }
         }
       }
@@ -496,14 +495,14 @@ export const pointerMethods = {
     if (key === this.previewKey) return;
     this.previewKey = key;
     this._clearPreview();
-    const conflicts = this.track.conflicts(cand);
-    if (!Track.placeable(Track.normalize(cand))) conflicts.push(null);
-    if (spillConflicts(this.track, Track.normalize(cand), conflicts).length) conflicts.push(null);      // (0.12.6 : débordement d'une pente au mur, js/spill.js)
-    const nc = Track.normalize(cand);
-    const same = conflicts.length === 1 && conflicts[0] && ['t', 'x', 'z', 'l', 'r'].every((k) => conflicts[0][k] === cand[k]) && OPT_KEYS.every((k) => (conflicts[0][k] | 0) === (nc[k] | 0));
-    this.previewMat.emissive.set(conflicts.length && !same ? '#ff2244' : '#000000');
+    // Phase 8 (TECH-003) : le MÊME plan que la pose (tools.js : _placePlan, js/placement.js) : la pièce normalisée, ses conflits réels. Rouge : la pose
+    // remplacerait des pièces, ou serait refusée (hors des niveaux, calque protégé, débordement d'une pente au mur) ; caché : la même pièce est déjà là.
+    const plan = this._placePlan(cand);
+    this._previewPlan = plan;
+    const same = plan.why === 'same';
+    this.previewMat.emissive.set(!same && (!plan.ok || plan.conflicts.length) ? '#ff2244' : '#000000');
     this.previewMat.emissiveIntensity = 0.45;
-    this.preview.add(buildTileMesh(Track.normalize(cand), this.previewMat, this.previewGlow));
+    this.preview.add(buildTileMesh(plan.norm, this.previewMat, this.previewGlow));
     this.preview.visible = !same;
   },
 

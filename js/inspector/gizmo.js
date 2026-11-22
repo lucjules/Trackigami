@@ -73,15 +73,14 @@ export const gizmoMethods = {
       let patch;
       if (this.mode === 'translate') {
         const size = PIECES[obj.t].size;
-        patch = {
-          x: Math.round(p.position.x / CELL - size / 2),
-          z: Math.round(p.position.z / CELL - size / 2),
-          l: Math.max(0, Math.min(MAX_LEVEL, Math.round((p.position.y - ROAD_TOP) / LEVEL_H))),
-        };
+        patch = { x: Math.round(p.position.x / CELL - size / 2), z: Math.round(p.position.z / CELL - size / 2) };
+        // Phase 8 (TECH-037) : le niveau ne change que si l'axe vertical est tiré (flèche Y ou plans qui la contiennent), et par DEMI-niveaux, comme partout ailleurs
+        // (inspecteur, Maj + glisser, pentes douces). Avant, il était arrondi à l'entier à chaque geste : une pièce au niveau 0,5 glissée d'une case passait au niveau 1.
+        if (this.tc.axis && this.tc.axis.includes('Y')) patch.l = Math.max(0, Math.min(MAX_LEVEL, Math.round(((p.position.y - ROAD_TOP) / LEVEL_H) * 2) / 2));
       } else patch = { r: ((Math.round(-yawOf(p.quaternion) / (Math.PI / 2)) % 4) + 4) % 4 };
       if (Object.keys(patch).every((k) => patch[k] === obj[k])) return;
       if (ed._applyTilePatch(obj, patch)) ed._changed();
-      else if (!this._warned) { this._warned = true; ed.app.ui.flash('Place occupée : la pièce reste où elle est'); }
+      else if (!this._warned) { this._warned = true; ed.app.ui.flash(ed._refusalText(ed._lastRefusal) || 'Place occupée : la pièce reste où elle est'); }      // (phase 8 : débordement d'une pente au mur… dit sa raison)
     } else {
       if (this.mode === 'translate') {
         const [x, z] = ed._snapPos(p.position.x, p.position.z);

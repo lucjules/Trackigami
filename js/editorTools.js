@@ -3,7 +3,7 @@
 import { CELL, LEVEL_H, MAX_LEVEL, SURF_PHYS } from './constants.js';
 import { PIECES, forkBranchX, localToWorld, baseY, cpKind, toLocal, sampleLocal } from './pieces.js';
 import { Track } from './track.js';
-import { spillConflicts } from './spill.js';
+import { placementPlan, applyPlacement } from './placement.js';
 import { centerlineWorld } from './ribbons.js';
 import { junctionEnds } from './connect.js';
 import { mapGeometry, fitView, drawTrackMap } from './ui/trackMap.js';
@@ -168,14 +168,12 @@ export function pasteClip(track, clip, cx, cz, level, ok = null) {
   let skipped = 0, added = 0, guarded = 0;
   for (const t of P.tiles) {
     // Dernier garde-fou (zone trop haute, ou qu'aucun décalage ne sauve) : une pièce hors des niveaux est ignorée et comptée, jamais posée sous le sol.
-    const n = Track.normalize(t);
-    if (t.l < 0 || t.l > MAX_LEVEL || !Track.placeable(n)) { skipped++; continue; }
-    const cs = track.conflicts(n), start = track.startTile;
-    if (ok && cs.some((c) => !ok(c))) { guarded++; continue; }
-    if (spillConflicts(track, n, cs).length) { skipped++; continue; }      // (0.12.6 : débordement d'une pente au mur, js/spill.js)
-    if (t.t === 'start' ? start && !cs.includes(start) : cs.includes(start)) { skipped++; continue; }
-    for (const c of cs) track.remove(c);
-    track.add(t);
+    // (phase 8 : le validateur commun de l'éditeur, js/placement.js : pièce normalisée, calques protégés, débordement d'une pente au mur, départ unique et jamais effacé)
+    if (t.l < 0 || t.l > MAX_LEVEL) { skipped++; continue; }
+    const plan = placementPlan(track, t, { replace: true, layerOk: ok, start: 'refuse', keepStart: true });
+    if (plan.why === 'locked') { guarded++; continue; }
+    if (!plan.ok) { skipped++; continue; }
+    applyPlacement(track, plan);
     added++;
   }
   for (const d of P.decos) if (track.addDeco(d)) added++;
@@ -193,10 +191,8 @@ export function findDuplicateSpot(track, rect, tiles) {
   const tries = [];
   for (const dl of [0, 1, -1]) for (const [dx, dz] of flat) tries.push({ dx, dz, dl });
   for (const { dx, dz, dl } of tries) {
-    const ok = src.every((t) => {
-      const c = Track.normalize({ ...t, col: t.col ? { ...t.col } : null, x: t.x + dx, z: t.z + dz, l: t.l + dl });
-      return t.l + dl >= 0 && t.l + dl <= MAX_LEVEL && Track.placeable(c) && track.conflicts(c).length === 0;
-    });
+    // (phase 8, TECH-052 : chaque copie passe par le validateur commun, js/placement.js, débordement d'une pente au mur compris)
+    const ok = src.every((t) => t.l + dl >= 0 && t.l + dl <= MAX_LEVEL && placementPlan(track, { ...t, col: t.col ? { ...t.col } : null, x: t.x + dx, z: t.z + dz, l: t.l + dl }).ok);
     if (ok) return { dx, dz, dl };
   }
   return null;
@@ -229,11 +225,8 @@ export function duplicateSelection(track, tiles, decos, { dx, dz, dl }) {
 const scriptsIn = (track, r) => (track.scripts || []).filter((s) => inRect(r, s.x, s.z));
 function replaceTiles(track, tiles, moved) {
   // 1. Contrôle SANS toucher au circuit : chaque pièce à sa nouvelle place doit être dans les bornes et ne gêner aucune pièce qui reste.
-  const sel = new Set(tiles);
-  for (const t of moved) {
-    const n = Track.normalize(t);
-    if (!Track.placeable(n) || t.l < 0 || t.l > MAX_LEVEL || track.conflicts(n).some((c) => !sel.has(c)) || spillConflicts(track, n, tiles).length) return false;
-  }
+  // (phase 8 : le validateur commun, js/placement.js, les pièces de la sélection ignorées)
+  for (const t of moved) if (t.l < 0 || t.l > MAX_LEVEL || !placementPlan(track, t, { ignore: tiles }).ok) return false;
   // 2. Application : l'ordre des pièces dans le circuit est conservé (le code partagé et la signature n'en changent pas pour rien).
   const order = track.tiles.slice(), repl = new Map();
   for (const t of tiles) track.remove(t);

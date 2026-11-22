@@ -7,7 +7,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import { TransformControls } from './vendor/TransformControls.js';
 import { MAX_LEVEL, DIRS } from './constants.js';
-import { Track } from './track.js';
+import { placementPlan, applyPlacement } from './placement.js';
 import { PIECES } from './pieces.js';
 import { DECO_LABELS } from './decoData.js';
 import { tileBounds, decoBounds, pickObjects, LAYER_ALL } from './editorPick.js';
@@ -241,9 +241,10 @@ export class Inspector {
       const tries = [[f[0] * n, f[1] * n, obj.l + P.rise], [rt[0] * n, rt[1] * n, obj.l], [-rt[0] * n, -rt[1] * n, obj.l], [-f[0] * n, -f[1] * n, obj.l - P.rise], [0, 0, obj.l + Math.max(P.rise, 0) + Math.max(P.clearance || 0, obj.o ? 2 : 0) + 1]];
       for (const [dx, dz, l] of tries) {
         if (l < 0 || l > MAX_LEVEL) continue;
-        const cand = Track.normalize({ ...obj, col: obj.col ? { ...obj.col } : null, x: obj.x + dx, z: obj.z + dz, l });
-        if (!Track.placeable(cand) || ed.track.conflicts(cand).length) continue;
-        added = ed.track.add(cand);
+        // (phase 8, TECH-052 : le validateur commun de l'éditeur, js/placement.js, débordement d'une pente au mur compris)
+        const plan = placementPlan(ed.track, { ...obj, col: obj.col ? { ...obj.col } : null, x: obj.x + dx, z: obj.z + dz, l });
+        if (!plan.ok) continue;
+        added = applyPlacement(ed.track, plan);
         break;
       }
       if (!added) { ed.app.ui.flash('Pas de place pour une copie.'); ed.app.audio.error(); return false; }

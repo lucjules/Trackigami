@@ -271,6 +271,10 @@ export default {
   'Refaire un meilleur temps': 'Set a better time',
   'Inspecte une pièce (I), puis Ctrl+D.': 'Inspect a piece (I), then Ctrl+D.',
   'Un seul départ par circuit.': 'Only one start per track.',
+  // Phase 8 (TECH-003, TECH-052, TECH-053) : validateur de placement de l'éditeur (js/placement.js), Prolonger avec le départ.
+  'Place occupée': 'Spot occupied',
+  '{a} posée : l’ancien départ est retiré (un seul départ par circuit).': '{a} placed: the old start is removed (only one start per track).',
+  'remplacerait le départ d\'un calque verrouillé ou masqué': 'would replace the start of a locked or hidden layer',
   'Pas de place pour une copie.': 'No room for a copy.',
   'Pas de place pour une copie de toute la sélection.': 'No room for a copy of the whole selection.',
   'Rien à dupliquer dans cette zone.': 'Nothing to duplicate in this area.',

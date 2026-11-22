@@ -67,8 +67,11 @@ export const editMethods = {
 
   // Remplace `tile` par `cand` (normalisée : options devenues impossibles retirées, revêtement incompatible effacé) si la place et les niveaux
   // le permettent ; sinon rien ne change. Même objet : la sélection de l'inspecteur reste valable.
+  // Phase 8 (TECH-052) : dans l'éditeur, la garde de placement (placementGuard, js/placement.js) a aussi son mot à dire : débordement d'une pente posée au mur,
+  // départ unique, niveaux de l'éditeur. Hors de l'éditeur (course, serveur) elle est absente (null) : rien ne change.
   _reshape(tile, cand) {
     const n = Track.normalize(cand);
+    if (this.placementGuard && !this.placementGuard(n, tile)) return false;
     this.remove(tile);
     if (this.conflicts(n).length || !Track.inBounds(n)) { this._insert(tile); return false; }
     Object.assign(tile, n);
@@ -82,6 +85,7 @@ export const editMethods = {
     const m = clampMover(tile.mv, ms === undefined ? tile.ms : ms, ma === undefined ? tile.ma : ma);
     if (m.ms === (tile.ms || 0) && m.ma === (tile.ma || 0)) return true;
     const cand = { ...tile, ms: m.ms, ma: m.ma };
+    if (this.placementGuard && !this.placementGuard(Track.normalize(cand), tile)) return false;      // (phase 8 : garde de l'éditeur, voir _reshape)
     this.remove(tile);
     if (this.conflicts(cand).length || !Track.inBounds(cand)) { this._insert(tile); return false; }
     tile.ms = m.ms; tile.ma = m.ma;
