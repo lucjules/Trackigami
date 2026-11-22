@@ -273,6 +273,8 @@ export default {
   'Un seul départ par circuit.': 'Only one start per track.',
   // Phase 8 (TECH-003, TECH-052, TECH-053) : validateur de placement de l'éditeur (js/placement.js), Prolonger avec le départ.
   'Place occupée': 'Spot occupied',
+  // Phase 9 (TECH-058).
+  'Collé : les groupes de la zone viennent d’un autre circuit, ils sont remis à zéro.': 'Pasted: the groups of this area come from another track, they are reset to none.',
   '{a} posée : l’ancien départ est retiré (un seul départ par circuit).': '{a} placed: the old start is removed (only one start per track).',
   'remplacerait le départ d\'un calque verrouillé ou masqué': 'would replace the start of a locked or hidden layer',
   'Pas de place pour une copie.': 'No room for a copy.',

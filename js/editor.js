@@ -11,7 +11,7 @@ import { DECO_LABELS } from './decoData.js';
 import { setEditorDraft } from './storage.js';
 import { Inspector } from './inspector.js';
 import { ERASE_FILTERS } from './editorPick.js';
-import { MODS, NO_OPTS, TOOLS, fillBase, isFill, toFill } from './editor/shared.js';
+import { MODS, NO_OPTS, TOOLS, fillBase, isFill, toFill, newCircuitId } from './editor/shared.js';
 import { paletteMethods } from './editor/palette.js';
 import { pointerMethods } from './editor/pointer.js';
 import { toolMethods } from './editor/tools.js';
@@ -47,6 +47,7 @@ export class EditorSession {
     }
     if (state.name) this.track.name = state.name;
     this._guardTrack();      // (phase 8, TECH-052 : options, orientation, mouvement du circuit passent par le validateur de placement de l'éditeur, js/placement.js)
+    this.circuitId = newCircuitId();      // (TECH-058 : identifie le circuit ouvert ; change au chargement d'un autre : Nouveau, Importer)
     this.entryId = state.entryId || null;
     // Phase 4 : un circuit dont la lecture a perdu des pièces (version plus récente du jeu) ou n'a pas pu être lue ne doit JAMAIS réécrire l'original : l'éditeur se détache de l'entrée
     // (un nouvel enregistrement crée une copie) et le dit. Avant, un code abîmé ouvrait un circuit vide et le premier enregistrement écrasait le circuit d'origine.

@@ -122,6 +122,15 @@ export function copyRect(track, r, ok = null) {
   };
 }
 
+// Presse-papiers sans numéros de groupe (TECH-058) : les groupes sont ceux d'UN circuit (calques, cibles de logique) ; collés dans un autre, ils rangeraient les pièces dans
+// un calque masqué ou une cible de logique qui n'est pas la leur. Renvoie { clip, reset } : reset = nombre d'objets qui avaient un groupe.
+export function clipWithoutGroups(clip) {
+  let reset = 0;
+  const strip = (o) => { if (!o.g) return o; reset++; const n = { ...o }; delete n.g; return n; };
+  const out = { ...clip, tiles: clip.tiles.map(strip), decos: clip.decos.map(strip) };
+  return { clip: out, reset };
+}
+
 // Rotation d'un quart de tour (le nord devient l'est), puis recalage sur (0, 0).
 export function rotateClip(clip, keepRect = false) {
   const tiles = clip.tiles.map((t) => {
@@ -134,6 +143,7 @@ export function rotateClip(clip, keepRect = false) {
   const mx = keepRect ? -clip.h : Math.min(...tiles.map((t) => t.x), ...decos.map((d) => Math.floor(d.x / CELL)));
   const mz = keepRect ? 0 : Math.min(...tiles.map((t) => t.z), ...decos.map((d) => Math.floor(d.z / CELL)));
   return {
+    ...(clip.origin ? { origin: clip.origin } : {}),
     w: clip.h, h: clip.w,
     tiles: tiles.map((t) => ({ ...t, x: t.x - mx, z: t.z - mz })),
     decos: decos.map((d) => ({ ...d, x: d.x - mx * CELL, z: d.z - mz * CELL })),

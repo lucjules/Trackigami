@@ -141,8 +141,8 @@ export function checkLogic(track, lg) {
 export function scriptsToLogic(track) {
   const scripts = track.scripts || [];
   if (!scripts.length) return null;
-  const used = new Set(track.usedGroups ? track.usedGroups() : []);
-  for (const [g] of track.groupNames ? track.groupNames() : []) used.add(g);
+  // (TECH-038 : sont aussi pris les groupes que la logique cite — cachés au départ, cibles de règles — même vidés de leurs pièces)
+  const used = new Set(track.reservedGroups ? track.reservedGroups() : [...(track.usedGroups ? track.usedGroups() : []), ...(track.groupNames ? track.groupNames().map(([g]) => g) : [])]);
   const free = []; for (let g = 1; g <= 63; g++) if (!used.has(g)) free.push(g);
   const byCell = new Map();
   for (const s of scripts) { const k = s.x + ',' + s.z; if (!byCell.has(k)) byCell.set(k, []); byCell.get(k).push(s); }

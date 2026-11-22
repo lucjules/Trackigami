@@ -189,7 +189,7 @@ export const historyMethods = {
       history: this.history, hIndex: this.hIndex, histSel: this.histSel, histRect: this.histRect,
       clip: this.clip, opts: { ...this.opts }, famTraits: { ...this.famTraits }, deco: { ...this.deco }, surfParam: { ...this.surfParam },
       hiddenGroups: this.hiddenGroups ? [...this.hiddenGroups] : [], lockedGroups: this.lockedGroups ? [...this.lockedGroups] : [],
-      focusLevel: this.focusLevel, freeCam: !!this.freeCam, showGrid: this.showGrid, lastBrush: this._lastBrush, hinted: this._hinted ? [...this._hinted] : [],
+      circuitId: this.circuitId, focusLevel: this.focusLevel, freeCam: !!this.freeCam, showGrid: this.showGrid, lastBrush: this._lastBrush, hinted: this._hinted ? [...this._hinted] : [],
       savedSnap: this._savedSnap, lastTile: this._lastTile ? this.track.tiles.indexOf(this._lastTile) : -1, ui: this._uiKeep ? this._uiKeep() : null,
     };
   },
@@ -199,6 +199,7 @@ export const historyMethods = {
     this.clip = k.clip; this.opts = { ...this.opts, ...k.opts }; this.famTraits = k.famTraits; this.deco = { ...this.deco, ...k.deco }; this.surfParam = k.surfParam;
     if (k.hiddenGroups.length) { this.hiddenGroups = new Set(k.hiddenGroups); for (const g of k.hiddenGroups) this.view.setGroupVisible(g, false); }
     if (k.lockedGroups.length) this.lockedGroups = new Set(k.lockedGroups);
+    if (k.circuitId) this.circuitId = k.circuitId;
     this.focusLevel = k.focusLevel; if (k.focusLevel) this.needsRebuild = true;
     this.freeCam = k.freeCam; this.showGrid = k.showGrid; this._lastBrush = k.lastBrush; this._hinted = new Set(k.hinted);
     this._savedSnap = k.savedSnap;

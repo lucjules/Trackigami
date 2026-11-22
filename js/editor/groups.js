@@ -65,13 +65,19 @@ export const groupMethods = {
     this._selInfo();
   },
 
+  // Premier numéro de groupe libre : ni rangé dans une pièce ou une décoration, ni nommé, ni cité par la logique (TECH-038) ; undefined s'il n'y en a plus.
+  _freeGroup() {
+    const taken = new Set(this.track.reservedGroups());
+    return Array.from({ length: MAX_GROUP }, (_, i) => i + 1).find((g) => !taken.has(g));
+  },
+
   openGroups() {
     const body = document.createElement('div');
     body.className = 'ed-groups';
     const render = () => {
       const counts = this._groupCounts();
-      const ids = [...new Set([...counts.keys(), ...this.track.groupNames().map(([g]) => g)])].sort((a, b) => a - b);
-      const free = Array.from({ length: MAX_GROUP }, (_, i) => i + 1).find((g) => !ids.includes(g));
+      const ids = [...new Set([...counts.keys(), ...this.track.groupNames().map(([g]) => g), ...this.track.logicGroups()])].sort((a, b) => a - b);      // (TECH-038 : les groupes cités par la logique sont réservés, vides ou non)
+      const free = this._freeGroup();
       const hasSel = this._selTiles().length + this._selDecos().length > 0;
       body.innerHTML = `<p class="meta">Un groupe rassemble des pièces et des décorations : un calque à masquer ou verrouiller pendant l'édition, et la cible des règles de logique du circuit. ${hasSel ? '' : 'Sélectionne des pièces (outil Sélection, Q) pour les ranger dans un groupe.'}</p>
         ${ids.length ? `<table class="ed-gtable"><thead><tr><th>N°</th><th>Nom</th><th>Contenu</th><th>Calque</th><th></th></tr></thead><tbody>${ids.map((g) => {

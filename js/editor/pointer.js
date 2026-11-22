@@ -317,6 +317,8 @@ export const pointerMethods = {
     if (!this.hover) return null;
     let best = null, bd = Infinity;
     for (const d of this.track.decos) {
+      // (TECH-036 : jamais une décoration d'un calque verrouillé ou masqué — gomme, clic droit en pose de décorations et pipette passent par ici ; comme le rayon, _pickTarget)
+      if (!this._layerOk(d)) continue;
       const dd = Math.hypot(d.x - this.hover.x, d.z - this.hover.z) - 1.5 * d.s;
       if (dd < bd && dd < maxD) { bd = dd; best = d; }
     }

@@ -454,6 +454,23 @@ export class Track {
     return [...s].sort((a, b) => a - b);
   }
 
+  // Numéros de groupe CITÉS par la logique du circuit (cachés au départ, cibles de zone, conditions, actions), même si aucune pièce n'y est rangée (TECH-038).
+  logicGroups() {
+    const L = sanitizeLogic(this.lg), s = new Set();
+    if (!L) return [];
+    for (const g of L.off) s.add(g);
+    for (const r of L.rules) {
+      if (r.on[0] === 'zone') s.add(r.on[1]);
+      for (const c of r.if) if (c[0] === 'shown' || c[0] === 'hidden') s.add(c[1]);
+      for (const a of r.do) if (a[0] === 'show' || a[0] === 'hide' || a[0] === 'toggle') s.add(a[1]);
+    }
+    return [...s].sort((a, b) => a - b);
+  }
+  // Groupes RÉSERVÉS : ceux qui contiennent quelque chose, qui ont un nom ou que la logique cite (un « nouveau groupe » ne doit jamais en réutiliser un).
+  reservedGroups() {
+    return [...new Set([...this.usedGroups(), ...this.groupNames().map(([g]) => g), ...this.logicGroups()])].sort((a, b) => a - b);
+  }
+
   // ---- Sérialisation -----------------------------------------------------
   encode() {
     const arr = [];

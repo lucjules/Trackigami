@@ -415,4 +415,85 @@ test('sélection : déplacer, pivoter, monter une zone avec des décorations lib
   while (s.hIndex < n - 1) { s.redo(); assert.equal(s._snapshot(), s.history[s.hIndex]); }
   done(s);
 });
+
+// ======================================================================================================================================================
+// Phase 9 : défauts indépendants de l'éditeur (TECH-036, 038, 054, 055, 056, 057, 058, 059, 062).
+import { scriptsToLogic } from '../js/logicText.js';
+import { clipWithoutGroups } from '../js/editorTools.js';
+const layerSession = (track, extra = {}) => { const s = session(track, extra); s.hiddenGroups = new Set(); s.lockedGroups = new Set(); s.view = { setGroupVisible() {}, rebuild() {} }; s.circuitId = 'c-test'; return s; };
+
+console.log('TECH-036 : calques verrouillés ou masqués et décorations');
+test('gomme et clic droit (outil décoration) n\'effacent pas une décoration d\'un calque verrouillé ou masqué ; la pipette ne la reprend pas ; un calque libre reste effaçable', () => {
+  for (const mode of ['locked', 'hidden']) {
+    const tr = decoTrack(); const s = layerSession(tr);
+    const d = tr.addDeco({ k: 'cone', x: 20, y: 0, z: 20, ry: 0, s: 1, g: 2 });
+    if (mode === 'locked') s.setGroupLocked(2, true); else s.setGroupHidden(2, true);
+    s.eraseFilter = 'all'; s.ndc = { x: 9, y: 9 }; s.raycaster = { setFromCamera() {} };      // (aucun rayon : repli « décoration la plus proche »)
+    aim(s, 0, 0); s.hover.x = 20; s.hover.z = 20;
+    for (const tool of ['erase', 'deco:cone']) { s.tool = tool; s._erase(); assert.deepEqual(tr.decos, [d], `${mode} / ${tool}`); }
+    s.tool = 'deco:tree'; s._pick();
+    assert.equal(s.tool, 'deco:tree', mode + ' : la pipette ne reprend pas la décoration du calque');
+    assert.equal(s._nearestDeco(), null);
+    if (mode === 'locked') s.setGroupLocked(2, false); else s.setGroupHidden(2, false);
+    s.tool = 'erase'; s._erase();
+    assert.equal(tr.decos.length, 0, mode + ' : calque libre : la gomme efface');
+    done(s);
+  }
+});
+
+console.log('TECH-038 : groupes cités par la logique');
+test('un groupe cité par la logique (caché au départ, vidé de ses pièces) n\'est pas proposé par « Nouveau groupe » ni réattribué par la conversion des déclencheurs', () => {
+  const tr = decoTrack(); const s = layerSession(tr);
+  tr.add({ t: 'straight', x: 0, z: -1, l: 0, r: 0 });
+  tr.setLogic({ v: 1, off: [1], vars: 0, rules: [{ on: ['zone', 2], if: [['hidden', 3]], do: [['show', 1], ['toggle', 4]], once: true }] });
+  assert.deepEqual(tr.usedGroups(), [], 'mise en scène : aucune pièce rangée dans un groupe');
+  assert.deepEqual(tr.logicGroups(), [1, 2, 3, 4]);
+  assert.equal(s._freeGroup(), 5, '« Nouveau groupe » ne redonne ni 1, ni 2, 3, 4');
+  tr.setParams({ scripts: [{ a: 'msg', x: 0, z: -1, v: 'Ici' }] });
+  const conv = scriptsToLogic(tr);
+  assert.ok(conv, 'la conversion est possible');
+  assert.deepEqual(conv.assign.map(([, g]) => g), [5], 'la route de la case est rangée dans le groupe 5, pas dans un groupe de la logique');
+  assert.deepEqual(layerSession(new Track('x'))._freeGroup(), 1);
+  done(s);
+});
+
+console.log('TECH-057 : tout sélectionner');
+test('Tout sélectionner : les décorations hors de l\'emprise des pièces sont incluses (Suppr, copier, déplacer les prennent) ; un circuit sans pièce mais avec décorations se sélectionne', () => {
+  const tr = decoTrack(); const s = layerSession(tr);
+  const far = tr.addDeco({ k: 'tree', x: 400, y: 0, z: -300, ry: 0, s: 1 });
+  tr.addDeco({ k: 'tree', x: -90, y: 0, z: 70, ry: 0, s: 1 });
+  s.selectAll();
+  assert.equal(s._selDecos().length, 2);
+  assert.ok(s._selDecos().includes(far));
+  s.deleteSel(true);
+  assert.equal(tr.decos.length, 0);
+  const only = new Track('d'); only.addDeco({ k: 'tree', x: 50, y: 0, z: 50, ry: 0, s: 1 });
+  const s2 = layerSession(only); s2.selectAll();
+  assert.ok(s2.sel && s2._selDecos().length === 1);
+  done(s); done(s2);
+});
+
+console.log('TECH-058 : coller dans un autre circuit');
+test('coller dans un AUTRE circuit (ou un prefab) remet les groupes à 0 ; dans le même circuit, ils sont gardés', () => {
+  const src = decoTrack(); const s1 = layerSession(src);
+  src.add({ t: 'straight', x: 0, z: -1, l: 0, r: 0, g: 3 }); src.addDeco({ k: 'tree', x: 20, y: 0, z: -40, ry: 0, s: 1, g: 3 });
+  s1.sel = { x0: 0, z0: -2, x1: 0, z1: -1 }; assert.equal(s1.copySel(true), true);
+  const clip = s1.clip;
+  assert.ok(clip.tiles.some((t) => t.g === 3), 'mise en scène : le presse-papiers porte le groupe 3');
+  // même circuit
+  aim(s1, 5, 5); s1.doPaste();
+  assert.ok(src.tiles.filter((t) => t.g === 3).length >= 2 && src.decos.every((d) => d.g === 3), 'même circuit : groupe gardé');
+  // autre circuit (autre session) : groupes à 0
+  const dst = decoTrack(); const s2 = layerSession(dst); s2.circuitId = 'c-autre'; s2.clip = clip; aim(s2, 5, 5); s2.doPaste();
+  assert.ok(dst.tiles.length > 1 && dst.tiles.every((t) => !t.g) && dst.decos.length && dst.decos.every((d) => !d.g), 'autre circuit : groupes à 0');
+  assert.match(s2.app.ui.last || s2.flash.join('|'), /groupes/);
+  // prefab (origine inconnue)
+  const s3 = layerSession(decoTrack()); const bare = { ...clip }; delete bare.origin; s3.clip = bare; aim(s3, 5, 5); s3.doPaste();
+  assert.ok(s3.track.tiles.every((t) => !t.g));
+  assert.equal(clipWithoutGroups({ ...clip }).reset, 2);
+  // rotation du presse-papiers : l'origine suit
+  s1.clip = clip; s1.rotateClipboard(); assert.equal(s1.clip.origin, 'c-test');
+  done(s1); done(s2); done(s3);
+});
+
 await finish('Éditeur : pot de peinture, validateur de placement (TECH-003, 052, 053), gizmo (TECH-037), décorations normalisées (TECH-034, 035).');

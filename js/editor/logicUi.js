@@ -17,7 +17,7 @@ const opt = (list, cur) => list.map(([k, l]) => `<option value="${esc(String(k))
 export const logicUiMethods = {
   // Groupes proposés dans les listes : ceux qui contiennent quelque chose ou qui ont un nom.
   _logicGroups() {
-    const ids = [...new Set([...this.track.usedGroups(), ...this.track.groupNames().map(([g]) => g)])].sort((a, b) => a - b);
+    const ids = this.track.reservedGroups();
     return ids.map((g) => [g, this.track.groups[g] || `Groupe ${g}`]);
   },
 
