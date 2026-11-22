@@ -10,6 +10,7 @@ import { RaceSession } from '../race.js';
 import { Track } from '../track.js';
 import { DECORS } from '../themes.js';
 import { PHYS_VER } from '../version.js';
+import { decodeInputs } from '../replay.js';
 import { medalFor, MEDALS } from '../medals.js';
 import { medalIcon } from '../ui.js';
 import { online } from '../online.js';
@@ -44,6 +45,9 @@ export function favRefOf(desc) {
   if (desc.source === 'community' && desc.communityId) return 'c:' + desc.communityId;
   return '';
 }
+
+// Les commandes enregistrées d'un record se décodent-elles ? (le décodage lève sur du base64 invalide ou un enregistrement trop long)
+const readableInputs = (s) => { try { decodeInputs(s); return true; } catch { return false; } };
 
 export const raceHubMethods = {
   // Lance une course à partir d'un descripteur : c'est le seul chemin (cartes, hub, circuit suivant, course rapide). extra : fromHub, rivals.
@@ -297,7 +301,9 @@ export const raceHubMethods = {
   _renderHubRecords() {
     const d = this._hub.desc;
     const rec = personalRecord(d, getRecord);
-    const can = !!(rec && rec.inputs && rec.pv === PHYS_VER);
+    const current = !!(rec && rec.inputs && rec.pv === PHYS_VER);
+    const readable = current && readableInputs(rec.inputs);      // (commandes décodables ? un import de sauvegarde ou le cloud peuvent en apporter d'illisibles, TECH-016)
+    const can = readable;
     const h = this._hub, ranked = d.key && /^(b-|daily-|u-)/.test(d.key);
     const opts = [['', 'Rien'], ...(d.track.path ? [['gold', 'Le fantôme or']] : []), ...(ranked ? [['world', 'Le record mondial']] : []), ...(h.rivals.size ? [['rivals', `Mes rivaux choisis (${h.rivals.size})`]] : [])];
     if (!opts.some(([k]) => k === h.compare)) h.compare = '';
@@ -305,7 +311,7 @@ export const raceHubMethods = {
       <label class="hub-cmp"><span>Comparer avec</span><select id="hub-cmp"${can ? '' : ' disabled'}>${opts.map(([k, l]) => `<option value="${k}"${k === h.compare ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
       <button class="btn" id="hub-watch"${can ? '' : ' disabled'}>🎬 Regarder mon record${rec ? ` (${formatTime(rec.time)})` : ''}</button>
       <button class="btn" id="hub-lab"${can ? '' : ' disabled'} title="Rejouer les commandes de ton record sous deux réglages physiques et comparer">🧪 Laboratoire</button>
-      <p class="meta">${can ? 'Replay Theater : ta course exacte, une barre de temps pour aller et venir, caméras libre et cinématique, et l’analyse (trajectoires, vitesses, secteurs) face à la course choisie.' : rec ? 'Ce record vient d’une ancienne version du jeu : il ne se rejoue plus.' : 'Termine une course pour pouvoir la revoir.'}</p>`;
+      <p class="meta">${can ? 'Replay Theater : ta course exacte, une barre de temps pour aller et venir, caméras libre et cinématique, et l’analyse (trajectoires, vitesses, secteurs) face à la course choisie.' : current ? 'Les commandes enregistrées de ce record sont illisibles : il ne se rejoue pas.' : rec ? 'Ce record vient d’une ancienne version du jeu : il ne se rejoue plus.' : 'Termine une course pour pouvoir la revoir.'}</p>`;
     if (can) {
       $('hub-cmp').onchange = (e) => { h.compare = e.target.value; };
       $('hub-watch').onclick = () => { this.audio.click(); this.watchRecord(d, rec, h.compare); };

@@ -31,7 +31,10 @@ export const editorFlowMethods = {
   },
 
   _keysOf(action) {
-    const k = (this.input.bindings[action] || []).filter(Boolean).map(keyLabel);
+    // (Pendant un déplacement silencieux du Replay Theater, `app.input` est un objet muet : ses « liaisons » n'ont rien d'une liste. Les messages qui citent une touche
+    // — « bloqué », fin de replay — sont alors calculés pour rien ; ils ne doivent pas lever d'exception.)
+    const b = this.input.bindings[action];
+    const k = (Array.isArray(b) ? b : []).filter(Boolean).map(keyLabel);
     return k.length ? k.join(' / ') : '—';
   },
 

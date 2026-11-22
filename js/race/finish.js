@@ -63,12 +63,32 @@ export const finishMethods = {
     this.app.telemetry.record({ trackKey: this.trackKey, outcome: 'quit', time: steps * DT, progress, respawns: this.stats.respawns });
   },
 
+  // Arrivée d'une course interrompue par une erreur au milieu d'un pas (App._loopError) : l'enregistrement ne reproduit plus fidèlement la course, donc
+  // RIEN n'en est tiré : pas de record (ni local, ni envoyé), pas de fantôme, pas de médaille ni de récompense, pas de replay (`lastRun` vide), pas
+  // d'avancement de leçon ou de mode. Règle : on n'écrit jamais un record dont les commandes ne reproduisent pas le temps. Le choix pour le record LOCAL :
+  // ne pas le garder non plus (le temps vient d'un état incertain ; un faux record bloquerait les vrais, qui doivent le battre). Le joueur voit son temps
+  // et la raison, et peut recommencer.
+  _finishUnverified(time) {
+    const app = this.app;
+    this.lastRun = null;
+    this.lastRunWasRecord = false;
+    this._tmDone = true;                  // pas de statistique d'abandon
+    app.audio.finish(false);
+    app.ui.showFinish({
+      time, prevTime: null, isRecord: false, medal: null, newMedal: false, medals: null, xp: null, goal: null, reward: null, verified: false, derived: null,
+      unverifiedUser: false, incident: true, fromEditor: !!this.opts.fromEditor, hasNext: false, canReplay: false, canBoard: false, canHub: false, canShareGhost: false,
+    });
+    app.ui.hud.time(time, true);
+  },
+
   _finish(time) {
     const app = this.app;
     this.state = 'finished';
+    this._finishGen = (this._finishGen || 0) + 1;      // une nouvelle arrivée : les réponses en attente des précédentes sont périmées (TECH-018)
     app.audio.engine(null);          // plus de bruit de moteur une fois le niveau terminé
     this.finishT = 0;
     if (this.replay) { this._replayEnded(); return; }
+    if (this.unverifiable && !this.multi) { this._finishUnverified(time); return; }      // un incident pendant le pas : l'arrivée n'est pas enregistrée (TECH-015)
     if (this.opts.academy) {       // leçon de l'Académie : ni record, ni pièces de circuit, ni statistiques ; l'écran de bilan est celui de l'Académie
       app.audio.finish(false);
       app.onAcademyFinished(this, time);

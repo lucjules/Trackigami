@@ -19,7 +19,8 @@ export const theaterAppMethods = {
     this.mode = 'race';
     this.ui.showScreen(null);
     this.ui.setMode('race');
-    this.session = new RaceSession(this, track, { ...opts, replay: { inputs: main.inputs, time: main.time }, trackKey: null, medals: opts.medals || null, theater: { label: main.label, compare, panel } });
+    try { this.session = new RaceSession(this, track, { ...opts, replay: { inputs: main.inputs, time: main.time }, trackKey: null, medals: opts.medals || null, theater: { label: main.label, compare, panel } }); }
+    catch (e) { this._replayBack = null; this._raceBuildFailed(e, opts, back || {}); return; }      // (commandes illisibles : retour à la fiche, message clair, TECH-016)
     $('replay-bar').classList.remove('hidden');
     this._resize();
   },

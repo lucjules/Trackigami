@@ -2,7 +2,7 @@
 
 ## 3.1 La boucle de l'application (`js/main.js:393 start`)
 
-Une seule boucle `requestAnimationFrame` pour tout le jeu (`main.js:476 loop`), protégée : une exception est passée à `_loopError` (`:220`) et l'image suivante est **toujours** demandée.
+Une seule boucle `requestAnimationFrame` pour tout le jeu (`main.js:476 loop`), protégée : une exception est passée à `_loopError` (`:220`) et l'image suivante est **toujours** demandée. [V] (0.16.2) `_loopError` ramène la voiture au checkpoint par `respawn(true)` : le drapeau de retour entre dans l'enregistrement, les commandes rejouent la même course. Si l'exception a interrompu un `_stepOnce` (`_stepping` resté vrai), la course est marquée `unverifiable` : à l'arrivée, `_finishUnverified` n'en tire ni record (local ou envoyé), ni fantôme, ni récompense, ni replay.
 
 Chaque image (`frame`, `:435`) :
 1. `dt = min(0,1 s, écoulé)` ;
@@ -89,7 +89,7 @@ Ordre vérifié, avec des **sorties anticipées** qui excluent des pans entiers 
 5. Médaille (`medalFor`), série du défi du jour (`rewards.js : noteRace`), télémétrie, pièces (`profile.js : rewardCoins`), objectif bonus (`career.js : goalMet`, `completeGoal`), expérience et niveaux (`progression.js : awardRace`), récompenses (`app.checkRewards`).
 6. Vérification depuis l'éditeur → `app.onEditorTestFinished` (`app/editorFlow.js:110` : `track.setVerified`, preuve `authorProof.saveProof`).
 7. `ui.showFinish(...)`, coach (`app._finishCoach`).
-8. **`app.onRaceFinished`** (`main.js:288`) : si clé `b-|daily-|u-`, record, envoi permis, pas d'éditeur ni de replay → `online.submitScore` (le serveur rejoue la course) ; au retour, `_ensureLocalRecord` et message. Le test `this.session !== session` après chaque `await` protège contre un changement d'écran pendant l'envoi.
+8. **`app.onRaceFinished`** (`main.js:288`) : si clé `b-|daily-|u-`, record, envoi permis, pas d'éditeur ni de replay → `online.submitScore` (le serveur rejoue la course) ; au retour, `_ensureLocalRecord` et message. [V] (0.16.2) Le jeton `session._finishGen` (incrémenté par `_finish` **et** `restart()`) est comparé après chaque `await`, en plus de `this.session !== session` : une réponse arrivée après un redémarrage de la même session n'est jamais rendue ; `lastRun` et les temps intermédiaires sont lus avant l'attente ; `refreshProgress` ne s'exécute que si le record local a dû être écrit, et sans fermer de panneau ni perdre défilement et focus.
 
 ## 3.5 Quitter une course (`main.js:267 quitRace`)
 

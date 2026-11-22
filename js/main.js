@@ -21,6 +21,7 @@ import { runWelcome } from './welcome.js';
 import { initI18n } from './i18n/boot.js';
 import { describeBuiltin, describeUser } from './trackDescriptor.js';
 import { loadSettings, saveSettings, getRecord, saveRecord, saveMyTrack, newId, formatTime, purgeOldRecords, getJSON, setJSON } from './storage.js';
+import { dayKey } from './daily.js';
 import { Telemetry } from './telemetry.js';
 import { ErrorReport } from './errorReport.js';
 import { ghostFromHash } from './replay.js';
@@ -87,6 +88,7 @@ class App {
     this.audio.setVolume(this.settings.volume);
     this.audio.setMusicVolume(this.settings.musicVolume);
     this.ui = new UI(this);
+    this.input.sync = () => this._syncInput();      // (arbitre d'entrées : le contexte suit les captures qui s'arment ou se terminent, voir js/input.js)
     this.session = null;
     this.mode = null;
 
@@ -180,7 +182,26 @@ class App {
   }
 
   // ------------------------------------------------------------ Navigation
+  // Contexte d'entrée actif (voir l'en-tête de js/input.js) : un seul à la fois, du plus prioritaire au moins prioritaire.
+  inputContext() {
+    if (this.input.capture) return 'capture';
+    if (this.ui && this.ui.modalOpen) return 'modal';
+    if (this.mode === 'race') return !$('finish').classList.contains('hidden') || !$('pause').classList.contains('hidden') ? 'overlay' : 'race';
+    return this.mode === 'editor' ? 'editor' : this.mode === 'garage' ? 'garage' : 'menu';
+  }
+
+  // Recalcule le contexte ; à chaque transition l'arbitre vide les appuis en attente et réinitialise les fronts de manette (Input.setContext).
+  // Appelé à chaque image, et tout de suite à l'ouverture / la fermeture d'une fenêtre ou d'une superposition (ui.js) : une touche arrivée entre deux
+  // images ne doit pas être lue dans le contexte précédent.
+  _syncInput() {
+    if (!this.input || !this.ui) return 'menu';
+    const ctx = this.inputContext();
+    this.input.setContext(ctx);
+    return ctx;
+  }
+
   _dispose() {
+    this.input.cancelCapture();         // une capture de liaison en attente ne survit pas à un changement d'écran, de course ou de mode (TECH-006)
     $('garage').classList.add('hidden');
     $('replay-bar').classList.add('hidden');
     if (this.session) this.session.dispose();
@@ -207,7 +228,7 @@ class App {
     this.ui.showScreen(null);
     this.ui.setMode('race');
     $('replay-bar').classList.add('hidden');
-    this.session = new RaceSession(this, track, opts);
+    try { this.session = new RaceSession(this, track, opts); } catch (e) { this._raceBuildFailed(e, opts); return; }
     // Musique du circuit : celle de l'auteur (ambiance.js) ou le chill de course ; en multijoueur ou en leçon, toujours le chill.
     const mus = !(opts && (opts.multi || opts.academy)) && track.ambiance ? track.ambiance.music : '';
     if (mus === 'none') this.audio.music.stop(); else this.audio.music.play(mus === 'menu' ? 'menu' : 'game');
@@ -233,7 +254,11 @@ class App {
     if (this._errTimes.length === 1 || this._errTimes.length === 2) console.error(GAME_NAME + ' : erreur dans la boucle de jeu', e);
     try {
       const S = this.session;
-      if (this._errTimes.length === 1 && S.state === 'racing' && !S.replay && typeof S.respawn === 'function') { S.respawn(); this.ui.flash('Incident : retour au dernier checkpoint.', 2.5); }
+      // Une exception au milieu d'un pas : l'état de la voiture et l'enregistrement ne sont plus garantis d'accord. La course continue, mais elle est marquée
+      // non vérifiable : ni record, ni envoi au classement, ni replay (race/finish.js : _finishUnverified). Une erreur hors d'un pas (rendu, interface) laisse la
+      // simulation intacte : le retour au checkpoint, lui, est ENREGISTRÉ (respawn(true)), si bien que les commandes rejouent la même course (TECH-015).
+      if (S._stepping && !S.demo && !S.replay) { S.unverifiable = true; S._stepping = false; }
+      if (this._errTimes.length === 1 && S.state === 'racing' && !S.replay && typeof S.respawn === 'function') { S.respawn(true); this.ui.flash('Incident : retour au dernier checkpoint.', 2.5); }
       else if (this._errTimes.length === 2) { this.quitRace(); this.ui.flash('Une erreur est survenue : la course a été interrompue.', 4); }
     } catch (e2) { console.error(GAME_NAME + ' : la reprise après erreur a échoué', e2); }
   }
@@ -264,8 +289,30 @@ class App {
     this.playTrack(back.track, back.opts);
   }
 
+  // La construction d'une course a levé (TECH-016) : RaceSession a libéré ce qu'elle avait créé ; on remet l'application en état cohérent (aucune session
+  // fantôme, pas de mode « course » sans session), on revient où le joueur était (menu, liste, fiche du circuit, salon) et on le lui dit. back : le « retour »
+  // d'un Replay Theater ({ hub, from } ou { track, opts }).
+  _raceBuildFailed(e, opts = {}, back = null) {
+    console.error(GAME_NAME + ' : la course n’a pas pu être construite', e);
+    try { if (this.errors) this.errors.capture('build', e); } catch { /* sans importance */ }
+    this.session = null;
+    try {
+      if (back && back.hub) this._backToHub(back.hub, back.from);
+      else this._leaveTo(back ? {} : opts);
+    } catch (e2) {
+      console.error(GAME_NAME + ' : le retour après une course avortée a échoué', e2);
+      this.session = null;
+      try { this.showMenu('menu'); } catch { /* dernier recours : le menu lui-même est en cause */ }
+    }
+    this.ui.flash('Cette course n’a pas pu démarrer (données illisibles). Retour en arrière.', 4.5);
+  }
+
   quitRace() {
-    const opts = this.session ? this.session.opts : {};
+    this._leaveTo(this.session ? this.session.opts : {});
+  }
+
+  // Où l'on retourne en quittant une course lancée avec `opts` (ou une course qui n'a pas pu démarrer).
+  _leaveTo(opts) {
     if (opts.multi) { this._leaveRaceToLobby(opts.multi.room); return; }
     if (opts.academy) { this.showMenu('menu'); this.academyMenu(); return; }
     if (opts.mode) { this.showMenu('menu'); this.modesMenu(); return; }
@@ -285,53 +332,70 @@ class App {
 
   // ---- Classements en ligne --------------------------------------------------------
   // Fin de course : si c'est un record local, on l'envoie (le serveur rejoue la course).
+  // Tout ce qui suit un `await` doit se demander si CETTE arrivée est toujours celle de l'écran : le joueur a pu recommencer (la même session, donc la garde
+  // par identité d'objet ne le voit pas), quitter la course ou changer d'écran pendant l'attente. `gen` (jeton de génération de la session, incrémenté par chaque
+  // arrivée et chaque redémarrage) le dit ; un résultat périmé n'est jamais rendu (TECH-018). Les commandes et les temps intermédiaires de l'arrivée sont lus
+  // AVANT l'attente : session.lastRun et logic.splits appartiennent à la course suivante dès qu'on recommence.
   async onRaceFinished(session, time, isRecord) {
     const key = session.trackKey;
     if (!key || !/^(b-|daily-|u-)/.test(key) || session.opts.fromEditor || session.opts.spawn || session.replay) return;
     if (this.settings.onlineScores === false || !isRecord || !session.lastRun) return;
+    const gen = session._finishGen, run = session.lastRun, splits = session.logic ? session.logic.splits.slice() : [];
+    const current = () => this.session === session && session._finishGen === gen;
     const el = $('fin-online');
-    el.classList.remove('hidden');
-    el.className = 'fin-online';
-    el.textContent = '🌍 Envoi au classement…';
+    // (classList et non className : showFinish pose `hidden` sur ce bloc quand une arrivée n'est pas classable ; l'écraser le rendrait visible, TECH-018)
+    const say = (cls, text) => { el.classList.remove('hidden', 'ok', 'ko'); el.classList.add('fin-online'); if (cls) el.classList.add(cls); el.textContent = text; };
+    say('', '🌍 Envoi au classement…');
     try {
       const r = await online.submitScore({
         trackKey: key, code: key.startsWith('u-') ? (session.opts.officialTrack || session.track).encode() : '',      // variante : le code du circuit d'origine
-        inputs: session.lastRun.inputs, time, physVer: PHYS_VER,
+        inputs: run.inputs, time, physVer: PHYS_VER,
       }, this.settings.playerName);
       // Le serveur a accepté la course : on s'assure que la progression locale la contient (mise à jour sûre si l'écriture de
-      // fin de course avait échoué : stockage plein, autre onglet…). Les médailles et le menu se lisent depuis ces records.
-      this._ensureLocalRecord(key, time, session);
-      if (this.session !== session) return;
-      el.className = 'fin-online ok';
-      el.textContent = r.improved
+      // fin de course avait échoué : stockage plein, autre onglet…), avec les commandes de CETTE arrivée, même si le joueur est parti ;
+      // l'écran n'est rafraîchi que si cette écriture a changé quelque chose (TECH-066). Les médailles et le menu se lisent depuis ces records.
+      if (this._ensureLocalRecord(key, time, { inputs: run.inputs, splits })) this.refreshProgress();
+      if (!current()) return;
+      say('ok', r.improved
         ? `🌍 Classement mondial : ${r.rank}${r.rank === 1 ? 'er' : 'e'} sur ${r.total}${r.rank === 1 ? ' — meilleur temps du monde !' : ''}`
-        : `🌍 Meilleur temps en ligne : ${formatTime(r.best)} (${r.rank}${r.rank === 1 ? 'er' : 'e'} sur ${r.total})`;
+        : `🌍 Meilleur temps en ligne : ${formatTime(r.best)} (${r.rank}${r.rank === 1 ? 'er' : 'e'} sur ${r.total})`);
     } catch (e) {
-      if (this.session !== session) return;
-      el.className = 'fin-online ko';
+      if (!current()) return;
       // Version de physique différente : le plus souvent, la fonction serveur « submit-score » n'a pas été redéployée après
       // une mise à jour du jeu (ou la page est une ancienne version en cache). Le record reste enregistré sur l'appareil.
-      el.textContent = /Version du jeu différente/.test(e.message)
+      say('ko', /Version du jeu différente/.test(e.message)
         ? `🌍 Classement indisponible : serveur d'une autre version (v${PHYS_VER}). Record gardé ici. Recharge la page.`
-        : '🌍 Classement : ' + e.message;
+        : '🌍 Classement : ' + e.message);
     }
   }
 
-  // Garantit que le record local de `key` est au moins aussi bon que `time`, puis rafraîchit l'écran de sélection s'il est affiché.
-  _ensureLocalRecord(key, time, session = null) {
+  // Garantit que le record local de `key` est au moins aussi bon que `time` (commandes et temps intermédiaires de l'arrivée dans `extra`). Renvoie vrai si
+  // elle a dû l'écrire : seulement alors les listes affichées sont périmées.
+  _ensureLocalRecord(key, time, { inputs = null, splits = [] } = {}) {
     const cur = getRecord(key);
-    if (!cur || time < cur.time - 1e-9) {
-      saveRecord(key, {
-        time, splits: session && session.logic ? session.logic.splits.slice() : [], ghost: null,
-        inputs: session && session.lastRun ? session.lastRun.inputs : null, pv: PHYS_VER, date: Date.now(), name: this.settings.playerName,
-      });
-    }
-    this.refreshProgress();
+    if (cur && time >= cur.time - 1e-9) return false;
+    saveRecord(key, { time, splits, ghost: null, inputs, pv: PHYS_VER, date: Date.now(), name: this.settings.playerName });
+    return true;
   }
 
-  // Les listes (niveaux, défi du jour, mes circuits) sont reconstruites à chaque affichage : on ne fait que relancer l'écran courant.
+  // Les données de l'écran de menu affiché ont changé (record écrit après coup) : on les met à jour SANS fermer le panneau ouvert, ni voler le focus, ni
+  // perdre le défilement (TECH-066). Accueil : le seul chiffre qui en dépend ; listes (niveaux, mes circuits) : reconstruites, défilement et focus rendus.
   refreshProgress() {
-    if (this.mode === 'menu' && ['menu', 'tracks', 'mytracks'].includes(this._screen)) this.showScreen(this._screen);
+    if (this.mode !== 'menu') return;
+    const scr = this._screen;
+    if (scr === 'menu') {
+      const r = getRecord('daily-' + dayKey());
+      $('daily-best').textContent = r ? formatTime(r.time) : 'nouveau';
+      return;
+    }
+    if (scr !== 'tracks' && scr !== 'mytracks') return;
+    const root = $(scr), top = [...root.querySelectorAll('*'), root].filter((e) => e.scrollTop > 0).map((e) => [e, e.scrollTop]);
+    const focusables = () => [...root.querySelectorAll('button, [tabindex], a[href], select, input')];
+    const fi = focusables().indexOf(document.activeElement), n = focusables().length;
+    if (scr === 'tracks') this._renderTracks(); else this._renderMyTracks();
+    for (const [e, t] of top) if (e.isConnected) e.scrollTop = t;
+    const again = focusables();
+    if (fi >= 0 && again.length === n) again[fi].focus({ preventScroll: true });
   }
 
   // ------------------------------------------------------------ Garage / profil
@@ -387,11 +451,12 @@ class App {
   }
 
   // Écran Profil : quatre onglets (Compte, Sauvegardes, Options, Commandes).
-  setProfileTab(tab) { this.profileTab = tab; this._renderProfile(); }
+  setProfileTab(tab) { this.input.cancelCapture(); this.profileTab = tab; this._renderProfile(); }
 
   // ------------------------------------------------------------ Boucle
   start() {
     const hash = location.hash;
+    this.refreshKeyHints();
     this.showMenu('menu');
     this._startBench();
     this.telemetry.scheduleFlush(15000);
@@ -436,18 +501,21 @@ class App {
       const dt = Math.min(0.1, (now - last) / 1000);
       rawLast = last;
       last = now;
-      const gmode = this.mode === 'race' ? 'race' : this.mode === 'editor' ? 'editor' : 'menu';
-      this.input.pollGamepad(this.ui.modalOpen ? "menu" : gmode);
-      const inMenuUi = this.ui.modalOpen || this.mode === 'menu' || this.mode === 'garage'
-        || (this.mode === 'race' && (!$('finish').classList.contains('hidden') || !$('pause').classList.contains('hidden')));
-      if (inMenuUi) {
-        if (this.mode === 'race') this.input.pollGamepad('menu');
+      // Arbitre d'entrées : le contexte de l'image décide quels fronts de manette sont suivis. Les fronts « menu » le sont à CHAQUE image (A tenu en course :
+      // son état précédent est exact quand une superposition s'ouvre, TECH-005) ; ceux de la course / de l'éditeur seulement dans leur contexte.
+      const ctx = this._syncInput();
+      this.input.pollGamepad('menu');
+      if (ctx === 'race' || ctx === 'overlay') this.input.pollGamepad('race');
+      else if (ctx === 'editor') this.input.pollGamepad('editor');
+      if (ctx === 'modal' || ctx === 'overlay' || ctx === 'menu' || ctx === 'garage') {
         const m = this.input.padMenu();
-        if (m && (m.dx || m.dy || m.confirm || m.back) && !this.input.capture) this._padNav(m);
+        if (m && (m.dx || m.dy || m.confirm || m.back)) this._padNav(m);
       }
       if (this._disco && this.scenery) this.scenery.sky.material.uniforms.horizon.value.setHSL((now / 4000) % 1, 0.8, 0.55);
       if (this.ui.modalOpen && this.input.hit('Escape')) this.ui.closeModal();
-      if (this.mode === 'menu' && !this.ui.modalOpen && this.input.hit('Escape')) { if (this._screen === 'race-hub') this.closeRaceHub(); else this.showScreen('menu'); }
+      // Échap dans un écran, un panneau de l'accueil ou le garage : le même chemin que le bouton « ← Retour » visible (TECH-065). Sans bouton retour (écran
+      // sans panneau d'origine), on retombe sur l'accueil.
+      if ((ctx === 'menu' || ctx === 'garage') && this.input.hit('Escape') && !this.goBack() && this.mode === 'menu') { if (this._screen === 'race-hub') this.closeRaceHub(); else if (this._screen !== 'menu') this.showScreen('menu'); }
       if (this.session) this.session.update(dt);
       // Profil Ultra Potato : on ne dessine qu'une image sur deux (la physique et les commandes continuent à pleine vitesse). Dans les menus (rien à
       // piloter, une simple animation de fond) on dessine à 30 images/s au plus : la machine chauffe moins et la batterie dure. Le banc d'essai de la

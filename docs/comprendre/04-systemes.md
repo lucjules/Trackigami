@@ -44,10 +44,12 @@ Champs de `opts` selon la source [V] :
 **Rôle.** Clavier (codes physiques `e.code`, donc QWERTY et AZERTY), manette, tactile, vers deux API : `hit(code)` / `act(action)` (appuyé **cette image**), `held`, et `drive()` (commandes de conduite).
 
 - [V] `pressed` ne garde que les vrais appuis (pas la répétition) ; la saisie dans un `INPUT`, `TEXTAREA`, `SELECT` est ignorée (y compris curseurs et cases : un curseur de la pause qui a le focus fait ignorer Échap et P [D]).
-- [V] `clearHits()` est appelé à **chaque image** dans le `finally` de la boucle (`main.js:478`) : une action non lue dans l'image est perdue.
-- [V] Manette : `pollGamepad(mode)` (fronts par table `EDGE`), navigation spatiale des menus `_padNav` (`wiring.js:345-386`).
-- [V] Tactile : les boutons retour / pause / recommencer **injectent** `KeyR`, `Escape`, `Enter` dans `pressed` (`wiring.js:289-291`) ; si le joueur réassigne ces actions à d'autres touches, `act()` ne les reconnaît plus [D].
-- [V] Réassignation : `captureKey(cb)` ; une capture en attente survit à un changement d'écran.
+- [V] **Arbitre (0.16.1, TRANS-03)** : un seul contexte actif (`capture`, `modal`, `overlay`, `race`, `editor`, `garage`, `menu`), calculé par `App.inputContext()` à chaque image et à l'ouverture / fermeture d'une fenêtre ou d'une superposition (`ui.js`). `Input.setContext()` vide `pressed` et `padEdges`, remet les fronts de manette sur l'état courant et verrouille « valider » (A) jusqu'à un relâchement. Le contrat complet (qui consomme quoi) est en tête de `js/input.js` et dans [ARCHITECTURE.md](../ARCHITECTURE.md).
+- [V] Entrée / Espace dont la cible est un contrôle activable (bouton, lien, carte…) ne vont jamais dans `pressed` : ils activent le contrôle une fois (sinon Entrée sur « Reprendre » = « recommencer »). Sous une fenêtre, seul Échap est mis en file ; `act()` renvoie faux.
+- [V] `clearHits()` est appelé à **chaque image** dans le `finally` de la boucle : une action non lue dans l'image est perdue.
+- [V] Manette : `pollGamepad(mode)` (fronts par table `EDGE`) ; les fronts « menu » sont suivis à chaque image, ceux de la course / de l'éditeur dans leur contexte ; navigation spatiale des menus `_padNav` ; « retour » (B) et Échap passent par `goBack()` (clic sur le bouton « ← Retour » visible).
+- [V] Tactile : les boutons retour au checkpoint / pause / recommencer appellent `input.post(action)` (file d'actions, même durée de vie que les fronts de manette) : l'action est déclenchée quelle que soit la touche qui lui est liée. Les aides qui citent des touches sont produites avec `keyLabel` (`refreshKeyHints`, `hintKey`).
+- [V] Réassignation : `captureKey(cb)` (rappel `(code, raison)`) ; `cancelCapture()` est appelé à tout changement d'écran, d'onglet, de course (`_dispose`) et à l'ouverture d'une fenêtre ; la scrutation de manette de `_capturePad` s'arrête avec elle.
 
 **Chaîne des commandes en course** [V] (`race.js:274 _input`) : `input.drive()` → `steerCurve` (réponse du volant, `aids.js:35`) → `aids.apply` (aides : gaz auto, anti-tête-à-queue… ; seulement en `racing`) → `quantSteer` → **enregistrement**. Les commandes **effectives** sont enregistrées : le rejeu ne relance pas les aides. Une course aidée va dans la catégorie `~v1.as-1`, sans médailles ; les aides sont coupées en saison, duel, tournoi (`aidedKey` renvoie `null`).
 

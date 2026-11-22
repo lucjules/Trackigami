@@ -1333,6 +1333,451 @@ try {
     await waitApp(() => window.copytrack.mode === 'menu');
   });
 
+  // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+  // Arbitre d'entrées (TRANS-03 : TECH-004, 005, 006, 017, 020, 033, 065). Un seul contexte actif décide qui consomme quoi (voir l'en-tête de js/input.js).
+  // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+  // Laisse tourner N images de la boucle du jeu (les rAF de la page passent APRÈS celui du jeu) : en rendu logiciel les images sont très espacées, et une
+  // pause fixe pourrait lire l'état AVANT que la boucle n'ait traité la touche (faux « réussi »).
+  const frames = (n = 5) => page.evaluate((k) => new Promise((res) => { let i = 0; const f = () => { if (++i >= k) res(); else requestAnimationFrame(f); }; requestAnimationFrame(f); }), n);
+  const settle = async () => { await page.waitForTimeout(100); await frames(6); };
+  const startRaceNow = async () => {
+    await app(() => window.copytrack.playBuiltin(0));
+    await waitApp(() => window.copytrack.session && window.copytrack.session.state === 'racing', null, 40000);
+    await waitApp(() => window.copytrack.session.logic.steps > 40, null, 20000);
+  };
+  const leaveToMenu = async () => { await app(() => window.copytrack.showMenu('menu')); await waitApp(() => window.copytrack.mode === 'menu'); };
+  // Manette simulée : les boutons sont lus comme ceux d'une vraie manette (navigator.getGamepads).
+  const installPad = () => app(() => {
+    const p = { connected: true, id: 'manette-test', index: 0, axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })) };
+    window.__pad = p; navigator.getGamepads = () => [p];
+  });
+  const padSet = (i, on) => app(([k, v]) => { const b = window.__pad.buttons[k]; b.pressed = v; b.value = v ? 1 : 0; }, [i, on]);
+  const removePad = () => app(() => { delete navigator.getGamepads; window.__pad = null; });
+
+  await test('entrées (TECH-004) : Entrée sur « Reprendre », sur « Retour au checkpoint » et sur « 🎬 Vidéo » du Theater active le bouton UNE fois, sans relancer la course', async () => {
+    await startRaceNow();
+    // 1. Pause, puis Entrée sur « Reprendre » (le bouton principal a le focus) : la course reprend, le chrono n'est pas remis à zéro.
+    await page.keyboard.press('Escape');
+    await waitApp(() => window.copytrack.session.state === 'paused');
+    assert.equal(await app(() => document.activeElement && document.activeElement.dataset.action), 'resume', 'le focus est sur « Reprendre »');
+    const s0 = await app(() => window.copytrack.session.logic.steps);
+    await page.keyboard.press('Enter');
+    await waitApp(() => window.copytrack.session.state === 'racing');
+    await settle();
+    const r1 = await app(() => ({ state: window.copytrack.session.state, steps: window.copytrack.session.logic.steps }));
+    assert.equal(r1.state, 'racing', 'la course continue (pas de décompte)');
+    assert.ok(r1.steps >= s0, `le chrono n'est pas remis à zéro (${s0} pas avant, ${r1.steps} après)`);
+    // 2. Pause, focus sur « Retour au checkpoint », Entrée : retour au checkpoint (une fois), jamais « recommencer ».
+    await page.keyboard.press('Escape');
+    await waitApp(() => window.copytrack.session.state === 'paused');
+    await app(() => document.querySelector('#pause [data-action="pause-respawn"]').focus());
+    await page.keyboard.press('Enter');
+    await waitApp(() => window.copytrack.session.state !== 'paused');
+    await settle();
+    const r2 = await app(() => ({ state: window.copytrack.session.state, respawns: window.copytrack.session.stats.respawns }));
+    assert.equal(r2.state, 'racing', 'après « Retour au checkpoint » + Entrée : la course continue, pas de décompte');
+    assert.equal(r2.respawns, 1, 'un seul retour au checkpoint');
+    // 3. Theater : Entrée sur « 🎬 Vidéo » n'annule pas l'export et ne relance pas le replay.
+    const run = await makeRun();
+    await app((r) => { window.copytrack.session.lastRun = { inputs: r.inputs, time: r.time }; }, run);
+    await app(() => window.copytrack.watchReplay());
+    await waitApp(() => window.copytrack.session && window.copytrack.session.replay, null, 20000);
+    await app(() => { window.copytrack.session.replaySpeed = 4; });
+    await waitApp(() => window.copytrack.session.logic.steps > 240, null, 30000);
+    await app(() => document.getElementById('replay-export').focus());
+    const st0 = await app(() => window.copytrack.session.logic.steps);
+    await page.keyboard.press('Enter');
+    await settle();
+    const th = await app(() => ({ steps: window.copytrack.session.logic.steps, finished: window.copytrack.session.state === 'finished', rec: !!window.copytrack.session._rec }));
+    assert.ok(th.steps >= st0 || th.finished || th.rec, `Entrée sur « 🎬 Vidéo » ne relance pas le replay (${st0} → ${th.steps} pas)`);
+    if (th.rec) assert.ok(th.steps > 5, 'l\'export démarre une fois ; il n\'est pas annulé par une relance');
+    await app(() => window.copytrack.endReplay());
+    await leaveToMenu();
+  });
+
+  await test('entrées (TECH-005) : manette avec A tenu : la pause reste ouverte, l\'arrivée s\'affiche sans relance ; la navigation à la manette marche toujours', async () => {
+    await installPad();
+    try {
+      await startRaceNow();
+      await padSet(0, true);                              // A : accélérer ET valider
+      await settle();
+      await page.keyboard.press('Escape');
+      await settle();
+      assert.equal(await app(() => window.copytrack.session.state), 'paused', 'A tenu à l\'ouverture de la pause : elle s\'ouvre et reste ouverte (pas de « valider » sur « Reprendre »)');
+      // Navigation intacte : A relâché puis pressé = « valider » sur le bouton ayant le focus (« Reprendre »).
+      await padSet(0, false); await settle();
+      await padSet(0, true);
+      await waitApp(() => window.copytrack.session.state === 'racing');
+      // Arrivée avec A tenu : l'écran de fin s'affiche et reste (pas de relance).
+      await app(() => window.copytrack.session._finish(window.copytrack.session.logic.steps / 120));
+      await waitApp(() => !document.getElementById('finish').classList.contains('hidden'));
+      await settle();
+      const fin = await app(() => ({ state: window.copytrack.session.state, shown: !document.getElementById('finish').classList.contains('hidden'), steps: window.copytrack.session.logic.steps }));
+      assert.equal(fin.state, 'finished', 'l\'arrivée n\'est pas relancée par A tenu');
+      assert.ok(fin.shown, 'l\'écran d\'arrivée reste affiché');
+      await padSet(0, false);
+    } finally { await padSet(0, false).catch(() => {}); await removePad(); }
+    await leaveToMenu();
+  });
+
+  await test('entrées (TECH-006) : une capture de touche ou de bouton en attente est annulée en quittant l\'écran : aucune liaison modifiée', async () => {
+    await installPad();
+    try {
+      const snap = () => app(() => JSON.stringify({ k: window.copytrack.input.bindings, p: window.copytrack.input.pad, sk: window.copytrack.settings.keys, sp: window.copytrack.settings.pad }));
+      await app(() => window.copytrack.showScreen('controls'));
+      await waitApp(() => document.querySelectorAll('#bind-list .bind-key').length > 4);
+      const before = await snap();
+      // Capture de touche : on clique « Retour au checkpoint » (clavier), on quitte, on lance une course et on tient W.
+      await app(() => { const rows = [...document.querySelectorAll('#bind-list .lbl')]; const i = rows.findIndex((l) => /checkpoint/i.test(l.textContent)); const keys = document.querySelectorAll('#bind-list .bind-key'); keys[i * 2].click(); });
+      assert.ok(await app(() => !!window.copytrack.input.capture), 'la capture est armée');
+      await app(() => window.copytrack.showMenu('menu'));
+      await startRaceNow();
+      await page.keyboard.down('KeyW');
+      await page.waitForTimeout(1200); await frames(6);
+      const sp = await app(() => window.copytrack.session.phys.speed);
+      await page.keyboard.up('KeyW');
+      assert.equal(await snap(), before, 'aucune liaison de touche modifiée');
+      assert.ok(sp > 3, `W accélère (${sp.toFixed(1)} m/s)`);
+      await leaveToMenu();
+      // Capture de manette (scrutation de 8 s) : on clique une case, on quitte l'écran, on presse un bouton.
+      await app(() => window.copytrack.showScreen('controls'));
+      await app(() => window.copytrack._renderControls('pad'));
+      await app(() => document.querySelectorAll('#bind-list .bind-key')[0].click());
+      await app(() => window.copytrack.showMenu('menu'));
+      await padSet(5, true); await settle(); await padSet(5, false);
+      assert.equal(await snap(), before, 'aucune liaison de manette modifiée');
+      assert.equal(await app(() => window.copytrack.input.capture), null, 'plus de capture en attente');
+      // Rien n'est perdu : sans changement d'écran, la capture lie bien la touche pressée (clavier) et le bouton pressé (manette).
+      await app(() => window.copytrack.showScreen('controls'));
+      await waitApp(() => document.querySelectorAll('#bind-list .bind-key').length > 4);
+      await app(() => window.copytrack._renderControls('race'));
+      await app(() => { const keys = document.querySelectorAll('#bind-list .bind-key'); keys[0].click(); });
+      await page.keyboard.press('KeyJ');
+      assert.equal(await app(() => window.copytrack.input.bindings.accelerate[0]), 'KeyJ', 'la capture de touche marche toujours');
+      await app(() => window.copytrack._renderControls('pad'));
+      await app(() => document.querySelectorAll('#bind-list .bind-key')[0].click());
+      await frames(3);
+      await padSet(12, true); await frames(4); await padSet(12, false);
+      assert.equal(await app(() => window.copytrack.input.pad.accelerate[0]), 12, 'la capture de bouton de manette marche toujours');
+      await app(async () => { const A = window.copytrack, I = await import('/js/input.js'); A.input.setBindings(I.defaultKeys(), I.defaultPad()); A.settings.keys = I.defaultKeys(); A.settings.pad = I.defaultPad(); A.saveSettings(); });
+    } finally { await removePad(); }
+    await app(() => window.copytrack.showMenu('menu'));
+  });
+
+  await test('entrées (TECH-017) : fenêtre ouverte : P, T, C, H, R sans effet sous elle ; en course elle met en pause (jamais en multijoueur)', async () => {
+    await startRaceNow();
+    // Fenêtre ouverte pendant la course : pause automatique.
+    await app(() => window.copytrack.ui.modal({ title: 'Test', body: '<p>x</p>', actions: [{ label: 'Fermer' }] }));
+    await settle();
+    assert.equal(await app(() => window.copytrack.session.state), 'paused', 'ouvrir une fenêtre en course met la course en pause');
+    // Sous la fenêtre : aucune touche de course n'agit (P relancerait la course ; T la recommencerait).
+    const probe = () => app(() => { const s = window.copytrack.session; return { state: s.state, steps: s.logic.steps, cam: s.camMode, resp: s.stats.respawns }; });
+    const p0 = await probe();
+    await app(() => { window.__horn = 0; const a = window.copytrack.audio, h = a.horn; a.horn = (...x) => { window.__horn++; return h.apply(a, x); }; });
+    for (const k of ['p', 't', 'c', 'h', 'r']) { await page.keyboard.press(k); await settle(); }
+    await settle();
+    const p1 = await probe();
+    assert.deepEqual(p1, p0, 'rien ne se passe sous la fenêtre');
+    assert.equal(await app(() => window.__horn), 0, 'pas de klaxon sous la fenêtre');
+    // À la fermeture : retour sur le menu pause (la course n'a pas repris toute seule).
+    await app(() => window.copytrack.ui.closeModal());
+    await settle();
+    assert.equal((await probe()).state, 'paused', 'la pause est restée ouverte derrière la fenêtre');
+    // Arrivée › Classement puis T : la course ne se relance pas derrière.
+    await app(() => window.copytrack.session.resume());
+    await waitApp(() => window.copytrack.session.state === 'racing');
+    await app(() => window.copytrack.session._finish(window.copytrack.session.logic.steps / 120));
+    await waitApp(() => window.copytrack.session.state === 'finished');
+    await app(() => window.copytrack.ui.modal({ title: 'Classement', body: '<p>x</p>', actions: [{ label: 'Fermer' }] }));
+    await page.keyboard.press('t'); await page.keyboard.press('Enter');
+    await settle();
+    assert.equal((await probe()).state, 'finished', 'T / Entrée sous « Classement » ne relancent pas la course');
+    await app(() => window.copytrack.ui.closeModal());
+    await leaveToMenu();
+  });
+
+  await test('entrées (TECH-033) : éditeur : Ctrl+Z / Y / A / X / D / V sans effet sous la fenêtre « Circuit »', async () => {
+    await click('[data-action="editor"]');
+    await waitApp(() => window.copytrack.mode === 'editor' && window.copytrack.session && window.copytrack.session.track);
+    await settle();
+    // Trois pièces posées, pour que l'annulation ait de quoi défaire.
+    await app(() => { const s = window.copytrack.session; s.setTool('straight'); });
+    await page.mouse.move(640, 360); await page.waitForTimeout(150);
+    for (const [x, y] of [[700, 330], [760, 300], [820, 270]]) { await page.mouse.click(x, y); await page.waitForTimeout(200); }
+    const snap = () => app(() => { const s = window.copytrack.session; return JSON.stringify({ n: s.track.tiles.length, sel: s.sel ? JSON.stringify(s.sel) : null, pasting: !!s.pasting, h: s.hIndex, hn: s.history.length }); });
+    const n0 = await app(() => window.copytrack.session.track.tiles.length);
+    await app(() => window.copytrack.session.openParams());
+    await waitApp(() => window.copytrack.ui.modalOpen);
+    const before = await snap();
+    for (const k of ['z', 'z', 'y', 'a', 'x', 'd', 'v']) { await page.keyboard.press('Control+' + k); await page.waitForTimeout(80); }
+    await settle();
+    assert.equal(await snap(), before, `rien ne change derrière la fenêtre (circuit de ${n0} pièces)`);
+    await app(() => window.copytrack.ui.closeModal());
+    await app(() => window.copytrack.leaveEditor());
+    await waitApp(() => window.copytrack.mode === 'menu');
+  });
+
+  await test('entrées (TECH-020) : les boutons tactiles déclenchent l\'action même réassignée ; les textes d\'aide suivent les liaisons', async () => {
+    const ctxT = await browser.newContext({ locale: 'fr-FR', viewport: { width: 844, height: 390 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true, serviceWorkers: 'block' });
+    const pt = await ctxT.newPage();
+    pt.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+    pt.on('console', (m) => { if (m.type() === 'error' && !OFFLINE.test(m.text() + (m.location().url || ''))) errors.push('console: ' + m.text()); });
+    await pt.route(/fonts\.(googleapis|gstatic)\.com|supabase\.co/, (r) => r.abort());
+    const wait = (fn, arg, timeout = 30000) => pt.waitForFunction(fn, arg, { timeout });
+    const q0 = await app(() => window.copytrack.scenery.quality);
+    await app(() => window.copytrack.quality.apply('ultrapotato'));
+    try {
+      await pt.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'load' });
+      await pt.locator('#wl-name').fill('Pouce2');
+      await pt.locator('#wl-submit').tap();
+      await wait(() => window.copytrack && window.copytrack.mode === 'menu');
+      await pt.evaluate(() => { const A = window.copytrack; A.settings.telemetry = false; A.settings.tutorialDone = true; A.saveSettings(); A.quality.apply('ultrapotato'); });
+      for (let k = 0; k < 6; k++) { await pt.waitForTimeout(400); await pt.evaluate(() => window.copytrack.ui.closeModal()); }
+      // Retour au checkpoint réassigné à Q, caméra à R, pause à P seule, recommencer à Y.
+      await pt.evaluate(() => { const A = window.copytrack; A.input.setBindings({ ...A.input.bindings, respawn: ['KeyQ', ''], camera: ['KeyR', ''], pause: ['KeyP', ''], restart: ['KeyY', ''] }, A.input.pad); A.playBuiltin(0); });
+      await wait(() => window.copytrack.session && window.copytrack.session.state === 'racing', null, 40000);
+      await wait(() => window.copytrack.session.logic.steps > 40, null, 20000);
+      await pt.evaluate(() => { const s = window.copytrack.session; window.__n = { respawn: 0, camera: 0 }; const r = s.respawn.bind(s), c = s.cycleCamera.bind(s); s.respawn = (...a) => { window.__n.respawn++; return r(...a); }; s.cycleCamera = (...a) => { window.__n.camera++; return c(...a); }; });
+      const tapT = async (k) => { await pt.locator(`#touch [data-t="${k}"]`).dispatchEvent('pointerdown'); await pt.locator(`#touch [data-t="${k}"]`).dispatchEvent('pointerup'); await pt.evaluate(() => new Promise((res) => { let i = 0; const f = () => { if (++i >= 6) res(); else requestAnimationFrame(f); }; requestAnimationFrame(f); })); };
+      await tapT('respawn');
+      assert.deepEqual(await pt.evaluate(() => window.__n), { respawn: 1, camera: 0 }, '« ⟲ » fait un retour au checkpoint (et ne change pas de caméra)');
+      await tapT('pause');
+      assert.equal(await pt.evaluate(() => window.copytrack.session.state), 'paused', 'le bouton de pause met en pause même si « Échap » n\'est plus lié');
+      await pt.evaluate(() => window.copytrack.session.resume());
+      await wait(() => window.copytrack.session.state === 'racing');
+      await tapT('restart');
+      assert.equal(await pt.evaluate(() => window.copytrack.session.state), 'countdown', 'le bouton ↺ recommence même si « Entrée » n\'est plus liée à rien');
+      // Textes d'aide : ils suivent les liaisons.
+      const hints = await pt.evaluate(() => ({
+        resp: document.querySelector('#pause [data-action="pause-respawn"] kbd').textContent,
+        fin: document.querySelector('#finish [data-action="restart"] kbd').textContent,
+        replay: document.querySelector('#replay-bar .rh').textContent,
+      }));
+      assert.equal(hints.resp, 'Q', 'pause : « Retour au checkpoint » affiche la touche liée');
+      assert.equal(hints.fin, 'Y', 'arrivée : « Rejouer » affiche la touche liée');
+      assert.match(hints.replay, /Y : recommencer/, 'barre du replay : touche de « recommencer »');
+    } finally { await ctxT.close(); await app((q) => window.copytrack.quality.apply(q), q0); }
+  });
+
+  await test('entrées (TECH-065) : Échap passe par « ← Retour » (panneau de l\'accueil restauré) ; dans le garage, Échap revient au menu', async () => {
+    await leaveToMenu();
+    await click('[data-action="sub-play"]');
+    await waitApp(() => window.copytrack._menuSubOpen === 'play');
+    await click('[data-action="play"]');
+    await waitApp(() => window.copytrack._screen === 'tracks');
+    await page.keyboard.press('Escape');
+    await waitApp(() => window.copytrack._screen === 'menu');
+    assert.equal(await app(() => window.copytrack._menuSubOpen), 'play', 'Échap rouvre le panneau d\'où l\'on venait, comme « ← Retour »');
+    // Échap dans le panneau lui-même : retour aux six catégories (comme « ← Retour »), sans fenêtre ni autre écran.
+    await page.keyboard.press('Escape');
+    await waitApp(() => window.copytrack._menuSubOpen === null);
+    assert.equal(await app(() => window.copytrack._screen), 'menu');
+    // Fiche d'un circuit : Échap revient à la liste d'où l'on venait.
+    await app(() => { window.copytrack.showScreen('tracks'); window.copytrack.openBuiltinHub(0, 'tracks'); });
+    await waitApp(() => window.copytrack._screen === 'race-hub');
+    await page.keyboard.press('Escape');
+    await waitApp(() => window.copytrack._screen === 'tracks');
+    await app(() => window.copytrack.showScreen('menu'));
+    await app(() => window.copytrack.openGarage());
+    await waitApp(() => window.copytrack.mode === 'garage');
+    await settle();
+    await page.keyboard.press('Escape');
+    await waitApp(() => window.copytrack.mode === 'menu');
+  });
+
+  // Garde-fou « aucune commande enregistrée ne change » (arbitre d'entrées) : une course pilotée au vrai clavier, AVEC pause, « Reprendre » à Entrée et retour au checkpoint (R),
+  // doit se rejouer exactement depuis ses commandes enregistrées (même moteur que la vérification serveur : GhostRunner) : même position au pas près.
+  await test('entrées : live ↔ rejeu : une course au clavier (pause, Entrée sur « Reprendre », retour au checkpoint) se rejoue exactement depuis ses commandes enregistrées', async () => {
+    await startRaceNow();
+    await page.keyboard.down('ArrowUp');
+    await page.keyboard.down('ArrowLeft'); await page.waitForTimeout(500); await page.keyboard.up('ArrowLeft');
+    await page.keyboard.down('ArrowRight'); await page.waitForTimeout(400); await page.keyboard.up('ArrowRight');
+    await page.keyboard.press('Escape'); await settle();
+    assert.equal(await app(() => window.copytrack.session.state), 'paused');
+    await page.keyboard.press('Enter');
+    await waitApp(() => window.copytrack.session.state === 'racing');
+    await settle();
+    await page.keyboard.press('r'); await settle();
+    await page.waitForTimeout(800); await frames(6);
+    await page.keyboard.up('ArrowUp');
+    await page.keyboard.press('Escape'); await settle();              // fige la course (aucun pas de plus)
+    assert.equal(await app(() => window.copytrack.session.state), 'paused');
+    const r = await app(async () => {
+      const { GhostRunner, decodeInputs } = await import('/js/replay.js'), s = window.copytrack.session;
+      const enc = s.recorder.encode(), n = s.recorder.length, rep = decodeInputs(enc), g = new GhostRunner(s.track, { inputs: enc });
+      for (let i = 0; i < n; i++) g.step();
+      const at = (p) => [p.pos.x, p.pos.y, p.pos.z, p.vel.x, p.vel.y, p.vel.z];
+      return { n, respawns: rep.flags.filter((f) => f & 4).length, live: at(s.phys), replay: at(g.phys), steps: [s.logic.steps, g.logic.steps] };
+    });
+    assert.ok(r.n > 300, `une vraie course enregistrée (${r.n} pas)`);
+    assert.equal(r.respawns, 1, 'le retour au checkpoint est dans l\'enregistrement, une seule fois');
+    assert.deepEqual(r.replay, r.live, 'le rejeu des commandes enregistrées redonne exactement la voiture du direct');
+    assert.deepEqual(r.steps[1], r.steps[0], 'et le même chrono');
+    await leaveToMenu();
+  });
+
+  // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+  // Cycle de vie d'une session de course (TRANS-08, TRANS-04 côté client : TECH-015, 016, 018, 066).
+  // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+  const lcStart = async () => {
+    await app(() => window.copytrack.playBuiltin(0));
+    await waitApp(() => window.copytrack.session && window.copytrack.session.state === 'racing', null, 40000);
+  };
+  const lcMenu = async () => { await app(() => window.copytrack.showMenu('menu')); await waitApp(() => window.copytrack.mode === 'menu'); };
+  // Faux serveur de classement : `delay` ms de latence, puis un résultat « 1er ». Les envois sont comptés et gardés (window.__sent).
+  const fakeSubmit = (delay) => app(async (ms) => {
+    const { online } = await import('/js/online.js');
+    window.__sent = [];
+    online.submitScore = (p) => new Promise((res) => { window.__sent.push(p); setTimeout(() => res({ improved: true, rank: 1, total: 3, best: p.time }), ms); });
+  }, delay);
+  const lcClean = () => app(async () => { (await import('/js/storage.js')).clearRecords(); });
+  const dropProvoked = () => { for (let i = errors.length - 1; i >= 0; i--) if (/exception de test|la course n’a pas pu être construite/.test(errors[i])) errors.splice(i, 1); };
+
+  await test('cycle de vie (TECH-015) : erreur dans la boucle en pleine course : retour au checkpoint ENREGISTRÉ (le record se rejoue au même temps) ; erreur au milieu d\'un pas : course non vérifiable, ni record, ni envoi, ni replay', async () => {
+    await lcClean();
+    await fakeSubmit(10);
+    // Une course complète, pilotée par l'autopilote à travers input.drive, AVEC une erreur injectée à ~700 pas. `kind` : 'rendu' (erreur hors d'un pas) ou 'pas' (au milieu d'un pas).
+    const play = async (kind) => {
+      await lcStart();
+      const out = await app(async (kind) => {
+        const A = window.copytrack, S = A.session, { Autopilot } = await import('/js/autopilot.js'), { GhostRunner } = await import('/js/replay.js'), st = await import('/js/storage.js');
+        const bot = new Autopilot(S.track.path, { latLimit: 56 * 0.8 }); bot.reset(S.phys);
+        A.input.drive = () => bot.control(S.phys);
+        let injected = false;
+        if (kind === 'rendu') { const o = S.render.bind(S); S.render = (...a) => { if (!injected && S.logic.steps > 700) { injected = true; throw new Error('exception de test (rendu)'); } return o(...a); }; }
+        else { const o = S.sim.drive.bind(S.sim); S.sim.drive = (...a) => { if (!injected && S.logic.steps > 700) { injected = true; throw new Error('exception de test (pas)'); } return o(...a); }; }
+        window.__ctErrors = [];
+        for (let n = 0; S.state !== 'finished' && n < 90000; n++) { try { S.update(0.02); } catch (e) { A._loopError(e); } }
+        delete A.input.drive;
+        await new Promise((r) => setTimeout(r, 300));
+        const replay = (inputs) => { const g = new GhostRunner(S.track, { inputs }); let k = 0; while (!g.done && k++ < 90000) g.step(); return g.done ? g.logic.time : null; };
+        const rec = st.getRecord(S.trackKey);
+        return {
+          injected, state: S.state, errs: window.__ctErrors.length, unverifiable: !!S.unverifiable, respawns: S.stats.respawns,
+          lastRun: S.lastRun ? { time: S.lastRun.time, replay: replay(S.lastRun.inputs) } : null,
+          record: rec ? { time: rec.time, replay: rec.inputs ? replay(rec.inputs) : null } : null,
+          sent: window.__sent.map((p) => ({ time: p.time, replay: replay(p.inputs) })),
+          replayButton: !document.getElementById('fin-replay').classList.contains('hidden'),
+        };
+      }, kind);
+      dropProvoked();
+      return out;
+    };
+    // 1. Erreur hors d'un pas : le retour est dans l'enregistrement, tout se rejoue au même temps.
+    const a = await play('rendu');
+    assert.ok(a.injected && a.errs === 1 && a.state === 'finished', 'une erreur, la course est finie : ' + JSON.stringify(a));
+    assert.ok(a.respawns >= 1, 'retour au checkpoint fait');
+    assert.ok(a.lastRun && a.lastRun.replay != null && Math.abs(a.lastRun.replay - a.lastRun.time) < 1e-6, `le rejeu des commandes redonne le temps de la course (${a.lastRun && a.lastRun.time} vs ${a.lastRun && a.lastRun.replay})`);
+    assert.ok(a.record && Math.abs(a.record.replay - a.record.time) < 1e-6, 'le record enregistré se rejoue au même temps');
+    assert.equal(a.sent.length, 1, 'le record est envoyé au classement');
+    assert.ok(Math.abs(a.sent[0].replay - a.sent[0].time) < 1e-6, 'et le serveur, en rejouant, retrouverait ce temps');
+    assert.equal(a.unverifiable, false);
+    await lcMenu(); await lcClean(); await fakeSubmit(10);
+    // 2. Erreur au milieu d'un pas : l'état de la voiture est incertain ; rien n'est présenté comme rejouable.
+    const b = await play('pas');
+    assert.ok(b.injected && b.state === 'finished', 'la course se termine malgré l\'incident : ' + JSON.stringify(b));
+    assert.equal(b.unverifiable, true, 'course marquée non vérifiable');
+    assert.equal(b.lastRun, null, 'aucun replay trompeur');
+    assert.equal(b.record, null, 'aucun record enregistré');
+    assert.equal(b.sent.length, 0, 'aucun envoi au classement');
+    assert.equal(b.replayButton, false, '« Revoir la course » n\'est pas proposé');
+    await lcMenu(); await lcClean();
+  });
+
+  await test('cycle de vie (TECH-016) : record aux commandes illisibles : « Regarder » refusé proprement ; une exception à la construction ramène au menu ou à la fiche, sans session fantôme ni objet de scène laissé', async () => {
+    const snap = () => app(() => { const A = window.copytrack; return { scene: A.scene.children.length, track: A.scenery.trackGroup.children.length }; });
+    await lcClean();
+    await app(async () => { const A = window.copytrack, s = await import('/js/storage.js'), v = await import('/js/version.js'); s.saveRecord(A.builtins[0].key, { time: 33.3, inputs: '%%%not-base64%%%', pv: v.PHYS_VER, date: Date.now(), splits: [] }); A.showMenu('tracks'); A.openBuiltinHub(0, 'tracks'); });
+    await waitApp(() => !document.getElementById('race-hub').classList.contains('hidden') && document.getElementById('hub-watch'));
+    await page.waitForTimeout(400);
+    assert.equal(await app(() => document.getElementById('hub-watch').disabled), true, '« Regarder mon record » n\'est pas proposé quand les commandes sont illisibles');
+    const before = await snap();
+    // Appel direct (import de sauvegarde, donnée du cloud) : message clair, retour à la fiche, aucune session fantôme.
+    const r = await app(async () => {
+      const A = window.copytrack, s = await import('/js/storage.js'), d = A._hub.desc;
+      try { await A.watchRecord(d, s.getRecord(d.key)); return { thrown: null }; } catch (e) { return { thrown: String(e.message) }; }
+    });
+    await page.waitForTimeout(300);
+    const st = await app(() => { const A = window.copytrack; return { mode: A.mode, demo: !!(A.session && A.session.demo), hub: !document.getElementById('race-hub').classList.contains('hidden'), toast: document.getElementById('toast').textContent }; });
+    assert.deepEqual(r, { thrown: null }, 'aucune exception ne s\'échappe');
+    assert.equal(st.mode, 'menu', 'pas de mode « course » sans session');
+    assert.ok(st.demo, 'la scène du menu (session de démonstration) est de retour, pas de session fantôme');
+    assert.ok(st.hub, 'retour à la fiche du circuit');
+    assert.match(st.toast, /n’a pas pu démarrer/, 'message clair');
+    assert.deepEqual(await snap(), before, 'la scène n\'a gardé aucun objet de la course avortée');
+    // Construction qui échoue ailleurs (replay sans commandes valides, ouvert directement) : retour au menu.
+    await lcMenu();
+    const before2 = await snap();
+    await app(() => { const A = window.copytrack; A.playTrack(A.builtins[0].track, { replay: { inputs: '%%%not-base64%%%', time: 1 }, trackKey: null }); });
+    await page.waitForTimeout(300);
+    const st2 = await app(() => { const A = window.copytrack; return { mode: A.mode, demo: !!(A.session && A.session.demo) }; });
+    assert.deepEqual(st2, { mode: 'menu', demo: true });
+    assert.deepEqual(await snap(), before2, 'scène propre');
+    dropProvoked();            // (les erreurs journalisées ci-dessus sont CELLES QU'ON A PROVOQUÉES : console.error de la construction avortée)
+    await lcClean();
+    await app(() => window.copytrack.showMenu('menu'));
+  });
+
+  await test('cycle de vie (TECH-018) : un résultat d\'envoi arrivé après un redémarrage n\'est jamais affiché sur l\'arrivée suivante', async () => {
+    await lcClean();
+    await fakeSubmit(1500);
+    await lcStart();
+    await app(() => window.copytrack.session._finish(30));             // 1re arrivée : record, envoi lancé (réponse dans 1,5 s)
+    await waitApp(() => !document.getElementById('finish').classList.contains('hidden'));
+    assert.match(await app(() => document.getElementById('fin-online').textContent), /Envoi au classement/);
+    await app(() => window.copytrack._action('restart'));               // on recommence ; la réponse du 1er envoi arrivera pendant la 2e arrivée
+    await app(() => window.copytrack.session._finish(60));              // 2e arrivée : plus lente, pas un record
+    await page.waitForTimeout(2300);
+    const fin = await app(() => { const el = document.getElementById('fin-online'); return { hidden: el.classList.contains('hidden'), text: el.textContent }; });
+    assert.ok(fin.hidden && !/Classement mondial|meilleur temps/i.test(fin.text), `l'écran d'arrivée n'affiche pas le résultat du 1er envoi : ${JSON.stringify(fin)}`);
+    // Contrôle : sans redémarrage, le résultat s'affiche bien.
+    await app(() => window.copytrack._action('restart'));
+    await app(() => window.copytrack.session._finish(25));             // un record : envoyé
+    await waitApp(() => /Classement mondial/.test(document.getElementById('fin-online').textContent), null, 6000);
+    assert.ok(await app(() => !document.getElementById('fin-online').classList.contains('hidden')), 'le résultat attendu reste visible');
+    await lcMenu(); await lcClean();
+  });
+
+  await test('cycle de vie (TECH-066) : réponse tardive du serveur après avoir quitté la course : le panneau ouvert reste ouvert, la liste n\'est pas reconstruite', async () => {
+    await lcClean();
+    await fakeSubmit(1500);
+    // 1. un panneau de l'accueil ouvert pendant l'attente
+    await lcStart();
+    await app(() => window.copytrack.session._finish(30));
+    await app(() => { const A = window.copytrack; A.showMenu('menu'); A._menuSub('play'); });
+    await page.waitForTimeout(2300);
+    assert.equal(await app(() => window.copytrack._menuSubOpen), 'play', 'le panneau ouvert n\'est pas refermé par la réponse tardive');
+    // 2. une liste affichée : mêmes éléments (défilement et focus conservés)
+    await lcClean(); await fakeSubmit(1500);
+    await lcStart();
+    await app(() => window.copytrack.session._finish(30));
+    await app(() => { const A = window.copytrack; A.showMenu('tracks'); });
+    await waitApp(() => document.querySelectorAll('#track-list .card').length > 5);
+    await app(() => { window.__card = document.querySelector('#track-list .card:not(.daily-card):not(.season-card)'); window.__card.focus(); });
+    await page.waitForTimeout(2300);
+    assert.ok(await app(() => document.querySelector('#track-list .card:not(.daily-card):not(.season-card)') === window.__card), 'la liste n\'est pas reconstruite si rien n\'a changé');
+    // 3. Quand l'écriture de secours a VRAIMENT changé les données (record local absent) : la liste est reconstruite, défilement et focus rendus ; sur l'accueil, le panneau reste ouvert.
+    await lcClean();
+    const kept = await app(async () => {
+      const A = window.copytrack, key = A.builtins[0].key;
+      A.showMenu('tracks');
+      await new Promise((r) => setTimeout(r, 400));
+      const sc = ['tracks', 'track-list'].map((id) => document.getElementById(id)).find((e) => e && e.scrollHeight > e.clientHeight + 100);
+      if (!sc) return { noScroll: true };
+      sc.scrollTop = 300;
+      const cards = [...document.querySelectorAll('#track-list .card')]; cards[6].focus();
+      const old = cards[6], top0 = sc.scrollTop;      // (focus() a pu faire défiler jusqu'à la carte : c'est cette position qui doit survivre)
+      if (A._ensureLocalRecord(key, 41.5, { inputs: null, splits: [] })) A.refreshProgress();      // record absent : écrit, la liste est reconstruite
+      const now = [...document.querySelectorAll('#track-list .card')];
+      return { rebuilt: now[6] !== old, top0, top: sc.scrollTop, focusIdx: now.indexOf(document.activeElement) };
+    });
+    assert.ok(!kept.noScroll, 'la liste des circuits défile (le test ne serait pas probant sinon)');
+    assert.equal(kept.rebuilt, true, 'liste reconstruite quand le record écrit change ce qu\'elle affiche');
+    assert.ok(kept.top0 > 50 && Math.abs(kept.top - kept.top0) < 3, `défilement conservé (${kept.top0} → ${kept.top})`);
+    assert.equal(kept.focusIdx, 6, 'focus conservé');
+    await lcMenu(); await lcClean();
+  });
+
   await test('fantôme rival (haut d\'un classement) : affiché sur la piste, suit son enregistrement, étiquette au nom du rival', async () => {
     await app(() => window.copytrack.playBuiltin(0));
     await waitApp(() => window.copytrack.session && window.copytrack.session.state, null, 40000);

@@ -56,6 +56,7 @@ export const settingsMethods = {
 
   // ------------------------------------------------------------ Commandes
   _renderControls(tab = this._bindTab || 'race') {
+    this.input.cancelCapture('render');      // (la liste est reconstruite : une case en attente d'une touche ou d'un bouton n'existe plus, TECH-006)
     this._bindTab = tab;
     document.querySelectorAll('#bind-tabs .tab').forEach((t) => t.classList.toggle('on', t.dataset.tab === tab));
     $('bind-hint').textContent = tab === 'pad'
@@ -118,9 +119,13 @@ export const settingsMethods = {
             this._renderControls();
             return;
           }
+          const label = b.innerHTML;
           b.classList.add('wait');
           b.innerHTML = '<span>Appuie sur une touche…</span>';
-          this.input.captureKey((code) => {
+          // (code, why) : why = 'replace' (une autre case s'arme), 'render' (la liste est reconstruite) ou 'cancel' (changement d'écran, de course, fenêtre ouverte).
+          this.input.captureKey((code, why) => {
+            if (why === 'replace') { b.classList.remove('wait'); b.innerHTML = label; return; }
+            if (why === 'render') return;
             if (code) {
               const moved = this._setKey(id, slot, code, tab);
               if (moved) this.ui.flash(`« ${keyLabel(code)} » retirée de : ${moved}`);
@@ -148,21 +153,30 @@ export const settingsMethods = {
     keys[id][slot] = code;
     this.settings.keys = { ...keys };
     this.saveSettings();
+    this.refreshKeyHints();
     return moved;
   },
 
   _capturePad(id, slot, btn) {
+    const label = btn.innerHTML;
     btn.classList.add('wait');
     btn.innerHTML = '<span>Appuie sur un bouton…</span>';
     this.input.padButtonPressed();
     const started = performance.now();
-    let cancelled = false;
-    this.input.captureKey(() => { cancelled = true; });
+    let over = false;           // la capture est terminée : bouton lu, Échap, changement d'écran, autre case, délai dépassé
+    // La même capture sert à Échap et à l'annulation (input.cancelCapture : changement d'écran, de course, fenêtre) : elle arrête la scrutation ci-dessous.
+    this.input.captureKey((code, why) => {
+      if (over) return;
+      over = true;
+      if (why === 'replace') { btn.classList.remove('wait'); btn.innerHTML = label; } else if (why !== 'render') this._renderControls();
+    });
     const poll = () => {
-      if (cancelled || performance.now() - started > 8000) { this.input.capture = null; this._renderControls(); return; }
+      if (over) return;
+      if (performance.now() - started > 8000) { this.input.cancelCapture(); return; }
       const i = this.input.padButtonPressed();
       if (i >= 0) {
-        this.input.capture = null;
+        over = true;
+        this.input.endCapture();
         for (const arr of Object.values(this.input.pad)) for (let k = 0; k < arr.length; k++) if (arr[k] === i) arr[k] = -1;
         this.input.pad[id][slot] = i;
         this.settings.pad = JSON.parse(JSON.stringify(this.input.pad));

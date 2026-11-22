@@ -42,6 +42,7 @@ class Hud {
     e.msg.classList.remove('on');
     this.time(0);
     const inp = session.app.input;
+    session.app.refreshKeyHints();      // (pause, arrivée, barre du replay : les touches citées suivent les liaisons actuelles, TECH-020)
     const k = (id) => (inp.bindings[id] || []).filter(Boolean).map(keyLabel).join(' / ') || '—';
     e.hint.textContent = `${k('accelerate')} ${k('brake')} ${k('left')} ${k('right')} · frein en virage : dérapage · ${k('respawn')} : dernier checkpoint · ${k('restart')} : recommencer · ${k('camera')} : caméra · ${k('horn')} : klaxon · ${k('pause')} : pause`;
     e.hint.style.opacity = '1';
@@ -140,18 +141,25 @@ export class UI {
     $('touch').classList.toggle('hidden', !(mode === 'race' && document.body.classList.contains('touch')));
     this.hideOverlay('pause');
     this.hideOverlay('finish');
+    this._syncInput();
   }
+
+  // Arbitre d'entrées : l'ouverture ou la fermeture d'une superposition / d'une fenêtre change le contexte tout de suite (js/input.js), ce qui vide les
+  // appuis en attente : l'Entrée qui active « Reprendre » ne doit pas être relue ensuite comme « recommencer ».
+  _syncInput() { if (this.app && this.app._syncInput) this.app._syncInput(); }
 
   showOverlay(id) {
     $(id).classList.remove('hidden');
     document.body.classList.add('ov-open');
     const b = $(id).querySelector('.btn.primary');
     if (b && matchMedia('(pointer: fine)').matches) b.focus({ preventScroll: true });
+    this._syncInput();
   }
 
   hideOverlay(id) {
     $(id).classList.add('hidden');
     if (['pause', 'finish'].every((o) => $(o).classList.contains('hidden'))) document.body.classList.remove('ov-open');
+    this._syncInput();
   }
 
   flash(text, dur = 2.4) {
@@ -165,6 +173,7 @@ export class UI {
   // actions : [{ label, primary, danger, onClick }] ; onClick renvoie false pour garder la fenêtre ouverte.
   // onClose : appelé une fois quand la fenêtre se ferme (bouton, Échap, ou remplacée par une autre) : arrêter une écoute, un minuteur...
   modal({ title, body, actions = [], wide = false, onClose = null, panelClass = '' }) {
+    if (this.app.input) this.app.input.cancelCapture();      // une fenêtre qui s'ouvre prend la main : la capture de liaison en attente est annulée (TECH-006)
     this._fireModalClose();
     this._onModalClose = onClose;
     $('modal-title').textContent = title;
@@ -190,17 +199,28 @@ export class UI {
       });
       a.appendChild(btn);
     }
+    // Le focus clavier appartient à la fenêtre : sans cela, Entrée activerait encore le bouton focalisé DERRIÈRE elle (« Rejouer » de l'arrivée, par exemple).
+    // On ne met le focus sur aucun bouton (rien à activer par un Entrée tenu) : sur la fenêtre elle-même ; Tab et les flèches y entrent. Rendu à la fermeture.
+    if (!this.modalOpen) this._returnFocus = document.activeElement;
     $('modal').classList.remove('hidden');
     this.modalOpen = true;
+    if (!panel.contains(document.activeElement)) { panel.tabIndex = -1; panel.focus({ preventScroll: true }); }
     // Un Échap appuyé AVANT l'ouverture (pas encore lu par la boucle) ne doit pas refermer cette fenêtre au tour suivant.
     if (this.app.input && this.app.input.pressed) this.app.input.pressed.delete('Escape');
+    this._syncInput();
   }
 
   _fireModalClose() { const f = this._onModalClose; this._onModalClose = null; if (f) f(); }
 
   closeModal() {
+    const wasOpen = this.modalOpen;
     $('modal').classList.add('hidden');
     this.modalOpen = false;
+    this._syncInput();
+    // Le focus revient où il était avant la fenêtre (s'il y est encore et visible) : le clavier ne perd pas sa place.
+    const back = this._returnFocus;
+    this._returnFocus = null;
+    if (wasOpen && back && back.isConnected && back !== document.body && back.offsetParent !== null) back.focus({ preventScroll: true });
     this._fireModalClose();
   }
 
@@ -236,7 +256,9 @@ export class UI {
       else lines.push('Toutes les médailles sont à toi ✦');
     }
     const rw = $('fin-reward');
-    if (info.reward) {
+    if (info.incident) {
+      rw.innerHTML = '<small>Incident pendant la course : arrivée non enregistrée (ni record, ni récompense, ni replay).</small>';
+    } else if (info.reward) {
       rw.innerHTML = `+${info.reward.coins} ◆ pièces${info.reward.first ? '<small>Bonus 1re fois ×2</small>' : ''}`;
     } else if (info.verified) {
       rw.innerHTML = 'Circuit vérifié ✔<small>Ton temps = médaille cristal.</small>';

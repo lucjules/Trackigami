@@ -367,6 +367,7 @@ export default {
   'Nouveau record !': 'New record!',
   'Rejouer': 'Play again',
   'Rejouer <kbd>Entrée</kbd>': 'Play again <kbd>Enter</kbd>',
+  'Rejouer <kbd>{k:t}</kbd>': 'Play again <kbd>{k}</kbd>',      // (0.16.1) la touche citée suit les liaisons du joueur
   'Entrée': 'Enter',
   'Circuit suivant': 'Next track',
   'Retour à l’éditeur': 'Back to the editor',
@@ -416,6 +417,7 @@ export default {
   'Recharger': 'Reload',
   // 0.15.0 : pause, carrière, modes, première course guidée, garage, mini-carte
   'Retour au checkpoint <kbd>R</kbd>': 'Back to checkpoint <kbd>R</kbd>',
+  'Retour au checkpoint <kbd>{k:t}</kbd>': 'Back to checkpoint <kbd>{k}</kbd>',      // (0.16.1) idem
   'Mes créations': 'My creations',
   'Familles': 'Groups',
   'Tremblements': 'Shake',
