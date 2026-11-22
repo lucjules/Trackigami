@@ -43,7 +43,10 @@ export const precondition = (cond, message) => { if (!cond) throw new Error('pr�
 const isAssertion = (e) => !!e && (e.name === 'AssertionError' || e.code === 'ERR_ASSERTION');
 const fixedError = (id) => new Error(`le défaut ${id} est corrigé : retire bugConnu et garde ce test comme test de régression`);
 function present(id, e) {
-  if (isAssertion(e)) return;                       // le défaut est toujours là : c'est ce qu'on attend
+  if (isAssertion(e)) {                             // le défaut est toujours là : c'est ce qu'on attend
+    if (process.env.BUG_VERBOSE) console.log(`       (défaut ${id} présent : ${String(e.message).split('\n')[0].slice(0, 400)})`);      // BUG_VERBOSE=1 : montre COMMENT le défaut se manifeste
+    return;
+  }
   const err = new Error(`erreur inattendue dans le test du défaut ${id} (ce n'est pas une assertion : le test lui-même est cassé) : ${String((e && e.message) || e)}`);
   err.cause = e;
   throw err;
