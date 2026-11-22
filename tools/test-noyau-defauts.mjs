@@ -6,9 +6,9 @@
 //   TECH-001  retour au checkpoint sur / après une plaque de transformation : le véhicule redevient une voiture (boucle de réapparitions sans fin) — CORRIGÉ (PHYS_VER 39) :
 //             ses reproductions sont devenues des tests de régression ordinaires (avec le retour aérien qui repartait à l'arrêt au bord du vide, même cause)
 //   TECH-013  vitesse de départ (v0) perdue au retour au point de départ — CORRIGÉ (PHYS_VER 39) : test de régression ordinaire
-//   TECH-014  multijoueur : règle de logique « à T s » jamais rejouée après un retour avec chrono conservé (keepClock)
+//   TECH-014  multijoueur : règle de logique « à T s » jamais rejouée après un retour avec chrono conservé (keepClock) — CORRIGÉ (PHYS_VER 39) : test ordinaire
 //   GAME-004  téléportation (> 3 m en un pas) à la réception sur un ruban (double looping d'« Épave Engloutie »)
-// Corriger l'un d'eux change PHYS_VER (fermeture de js/verify.js) : voir docs/ARCHITECTURE.md, « Changer la physique ».
+// TECH-001, TECH-013 et TECH-014 sont corrigés (PHYS_VER 39) ; GAME-004 reste un défaut connu. Corriger l'un d'eux change PHYS_VER (fermeture de js/verify.js) : voir docs/ARCHITECTURE.md, « Changer la physique ».
 import assert from 'node:assert/strict';
 import { test, finish, bugConnu, precondition } from './harness.mjs';
 import { Simulation } from '../js/simulation.js';
@@ -347,17 +347,19 @@ test('TECH-014 contrôle : le groupe est caché au départ, montré à 6 s ; en 
   idle(sim, 800);
   assert.ok(!hidden(sim), 'la règle « à 6 s » se redéclenche (solo)');
 });
-bugConnu('TECH-014', () => {
+test('TECH-014 (corrigé) : groupe caché au départ, règle « à 6 s : montrer », retour avec keepClock à 8 s : le groupe est montré', () => {
   const sim = new Simulation(bridge());
   sim.start();
   idle(sim, 960);                                    // 8 s : la règle a eu lieu à 6 s
   precondition(!hidden(sim), 'le groupe est montré à 8 s');
   sim.rewind({ keepClock: true });                   // multijoueur : le chrono ne recule pas, l'état de la logique revient à celui du départ
   assert.equal(sim.logic.steps, 960, 'chrono conservé');
-  idle(sim, 600);                                    // 5 s plus tard : chrono 13 s
+  idle(sim, 1);
+  assert.ok(!hidden(sim), 'dès le pas qui suit le retour, la règle « à 6 s » (passée) est rejouée');
+  idle(sim, 599);                                    // 5 s plus tard : chrono 13 s
   assert.equal(sim.logic.steps, 1560);
-  assert.ok(!hidden(sim), 'à 13 s le groupe devrait être montré (la règle « à 6 s » est passée) ; il reste caché : le pont ne revient jamais');
-}, 'groupe caché au départ, règle « à 6 s : montrer », retour avec keepClock à 8 s : le groupe est montré');
+  assert.ok(!hidden(sim), 'à 13 s le groupe est toujours montré');
+});
 
 // ---------------------------------------------------------------------------------------------------------------------------------- GAME-004
 console.log('GAME-004 : réception sur un ruban (« Épave Engloutie », double looping) : saut de position en un pas');
@@ -444,4 +446,4 @@ bugConnu('GAME-004', () => {
   assert.equal(found, null, `fuzz de ${FUZZ_COUNT} courses perturbées (graines ${FUZZ_FROM} à ${FUZZ_FROM + FUZZ_COUNT - 1}) : ${found ? `saut de ${found.metres} m en un pas (graine ${found.seed}, pas ${found.step}, évènements ${found.events}, de ${found.from} à ${found.to})` : ''}`);
 }, `fuzz de ${FUZZ_COUNT} courses perturbées (graines ${FUZZ_FROM} à ${FUZZ_FROM + FUZZ_COUNT - 1}) : aucun saut de position > 3 m en un pas`);
 
-await finish('Les défauts connus du noyau sont tous reproduits (ou corrigés : voir les échecs ci-dessus).');
+await finish('Défauts du noyau : TECH-001, 013 et 014 corrigés (tests de régression) ; GAME-004 reproduit (défaut connu).');

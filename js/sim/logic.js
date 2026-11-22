@@ -10,6 +10,12 @@
 //   if  : [['cps', op, n] | ['lap', op, n] | ['var', i, op, n] | ['veh', v] | ['shown', g] | ['hidden', g]]   (toutes vraies ; op : == != >= <= > <)
 //   do  : [['show', g] | ['hide', g] | ['toggle', g] | ['grav', pct] | ['var', i, '=' | '+' | '-', n] | ['fx', action, valeur]]
 //   once: la règle ne se déclenche qu'une fois par essai (un retour au checkpoint revient à l'état de ce checkpoint, déclenchements compris).
+// Retour au checkpoint et règles « temps » (TECH-014) : l'état de la logique revient à celui de l'instantané du checkpoint. En solo le chrono revient
+// avec lui, et chaque échéance repasse d'elle-même. En multijoueur (keepClock) le chrono, lui, continue : les échéances tombées depuis l'instantané ne
+// repasseraient jamais (un pont montré « à 6 s » restait caché pour toujours). Elles sont donc rejouées au pas qui suit le retour, à la place de l'échéance
+// de ce pas : toutes celles de ]instantané, maintenant], chacune UNE fois, dans l'ordre de leurs échéances puis de la liste (comme dans un pas), sur l'état
+// rendu et avec ses conditions à ce moment-là. L'instantané sait jusqu'où il a traité les échéances (tDone) : rien de ce qu'il contient n'est rejoué (jamais
+// deux fois une bascule ou un compteur), même pour un checkpoint aérien dont l'instantané est pris avant l'anneau.
 // Bornes : 32 règles, 8 conditions et 8 actions par règle, groupes 1 à 63, 4 compteurs (-999 à 999), gravité 15 à 250 %.
 import { sanitizeScript } from '../scripts.js';
 
@@ -91,7 +97,9 @@ export function createLogic(track, phys, race) {
   for (const t of track.tiles) if (t.g) { if (!tilesOf.has(t.g)) tilesOf.set(t.g, []); tilesOf.get(t.g).push(t); }
   for (const d of track.decos) if (d.g) { if (!decosOf.has(d.g)) decosOf.set(d.g, []); decosOf.get(d.g).push(d); }
   const hiddenTiles = new Set(), hiddenDecos = new Set();
-  const st = { hidden: new Set(), vars: new Int16Array(LOGIC_MAX.vars), fired: new Uint8Array(L.rules.length), zone: 0, veh: '', started: false, ver: 0 };
+  // tDone : dernier pas de course dont les règles « temps » ont été traitées (il voyage avec l'instantané : voir catchUp).
+  const st = { hidden: new Set(), vars: new Int16Array(LOGIC_MAX.vars), fired: new Uint8Array(L.rules.length), zone: 0, veh: '', started: false, ver: 0, tDone: 0 };
+  let catchUp = false;                       // retour avec chrono conservé : au prochain pas, rejouer les échéances passées depuis l'instantané
   const fx = [];                             // effets visuels et sonores à jouer (la course en direct les lit ; ailleurs, ils sont ignorés)
   const log = [];                            // règles déclenchées (essai depuis l'éditeur seulement : setDebug) ; sans effet sur la course
   let debug = false;
@@ -135,26 +143,39 @@ export function createLogic(track, phys, race) {
     if (vis) apply();
   };
   const fire = (kind, test) => { L.rules.forEach((r, i) => { if (r.on[0] === kind && test(r.on)) run(r, i); }); };
+  // Règles « temps » d'un pas : l'échéance de ce pas ; après un retour avec chrono conservé, toutes les échéances de ]tDone, maintenant], dans l'ordre.
+  const fireTime = () => {
+    if (!catchUp) { fire('time', (on) => on[1] === race.steps); return; }
+    catchUp = false;
+    const from = st.tDone, due = [];
+    L.rules.forEach((r, i) => { if (r.on[0] === 'time' && r.on[1] > from && r.on[1] <= race.steps) due.push(i); });
+    due.sort((a, b) => L.rules[a].on[1] - L.rules[b].on[1] || a - b);
+    for (const i of due) run(L.rules[i], i);
+  };
 
   return {
     logic: L, state: st, fx, log, hiddenTiles, hiddenDecos,
     setDebug(v) { debug = !!v; },
     reset() {
-      st.hidden = new Set(L.off); st.vars.fill(0); st.fired.fill(0); st.zone = 0; st.veh = ''; st.started = false; fx.length = 0; log.length = 0;
+      st.hidden = new Set(L.off); st.vars.fill(0); st.fired.fill(0); st.zone = 0; st.veh = ''; st.started = false; st.tDone = 0; fx.length = 0; log.length = 0; catchUp = false;
       apply();
     },
-    snapshot() { return { hidden: [...st.hidden], vars: [...st.vars], fired: [...st.fired], zone: st.zone, veh: st.veh, started: st.started }; },
+    snapshot() { return { hidden: [...st.hidden], vars: [...st.vars], fired: [...st.fired], zone: st.zone, veh: st.veh, started: st.started, tDone: st.tDone }; },
     restore(s) {
-      st.hidden = new Set(s.hidden); st.vars.set(s.vars); st.fired.set(s.fired); st.zone = s.zone; st.veh = s.veh; st.started = s.started;
+      st.hidden = new Set(s.hidden); st.vars.set(s.vars); st.fired.set(s.fired); st.zone = s.zone; st.veh = s.veh; st.started = s.started; st.tDone = s.tDone | 0; catchUp = false;
       apply();
     },
+    // Retour au checkpoint avec chrono conservé (Simulation.rewind, keepClock), juste après restore : au prochain pas, les règles « temps » dont l'échéance
+    // est tombée depuis l'instantané sont rejouées (voir l'en-tête). Sans effet en solo (le chrono revient avec l'instantané : rien n'est jamais appelé).
+    catchUp() { catchUp = true; },
     // Après les règles de course d'un pas (Simulation.score) : ev = l'évènement de course de ce pas (checkpoint, tour, arrivée) ou null.
     onStep(ev) {
       if (race.finished && !(ev && ev.type === 'finish')) return;
       if (!st.started) { st.started = true; st.veh = phys.vehicle; fire('start', () => true); }
       if (ev && ev.type === 'checkpoint') fire('cp', (on) => on[1] === 0 || on[1] === ev.index);
       if (ev && ev.type === 'lap') fire('lap', (on) => on[1] === race.lap);
-      fire('time', (on) => on[1] === race.steps);
+      fireTime();
+      st.tDone = race.steps;
       const zt = phys.rib ? phys.rib.tile : phys.surfTile;
       const z = zt && zt.g ? zt.g : 0;
       if (z !== st.zone) { st.zone = z; if (z) fire('zone', (on) => on[1] === z); }

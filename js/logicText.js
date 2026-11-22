@@ -99,6 +99,11 @@ export function describeRule(r, track) {
 }
 
 // Vérifications (sans rouler) : ce qui rend l'arrivée impossible, et ce qui ne ferait rien.
+// Règle « temps » et retour au checkpoint (TECH-014, PHYS_VER 39), ce qu'un auteur peut supposer sans avertissement : une règle « À T s de course » agit une
+// fois par passage du chrono à T, en solo comme en multijoueur. En solo, un retour ramène le chrono et l'état de la logique au checkpoint : T repasse et
+// la règle aussi. En multijoueur le chrono ne recule pas : les règles dont l'heure est passée depuis le checkpoint sont rejouées au pas qui suit le retour,
+// chacune une fois, dans l'ordre de leurs heures (sim/logic.js : catchUp). Une porte ouverte « à 30 s » reste donc ouverte après un retour à 40 s. Il n'y a
+// rien à signaler ici : aucun cas ne rend la course impossible.
 export function checkLogic(track, lg) {
   const Lg = sanitizeLogic(lg), out = [];
   if (!Lg) return out;

@@ -57,6 +57,9 @@ export class Simulation {
   rewind({ keepClock = false } = {}) {
     const r = this.logic.rewind({ keepClock });
     placeAtRespawn(this.phys, r);
+    // Chrono conservé : la logique du circuit est revenue à l'instantané, pas le chrono ; ses règles « temps » passées depuis seront rejouées au pas suivant
+    // (sim/logic.js : catchUp, TECH-014). En solo, rien : le chrono revient avec l'instantané.
+    if (keepClock && this.lgc && r.snap && r.snap.ext) this.lgc.catchUp();
     this.groundT = 0;
     this.sank = false;
     this.lost = '';

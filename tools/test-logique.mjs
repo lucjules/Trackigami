@@ -1,6 +1,6 @@
 // Logique du circuit (E10 : ÉVÉNEMENT → CONDITIONS → ACTIONS dans la simulation) : node tools/test-logique.mjs   (npm test)
 import assert from 'node:assert/strict';
-import { test, finish } from './harness.mjs';
+import { test, finish, precondition } from './harness.mjs';
 import { Track, scriptTrack, b64decode } from '../js/track.js';
 import { Simulation } from '../js/simulation.js';
 import { Autopilot } from '../js/autopilot.js';
@@ -127,6 +127,78 @@ test('les effets visuels ne changent rien à la course ; la file est bornée', (
   const s = new Simulation(many);
   s.start(); s.step({ steer: 0, throttle: true, brake: false });
   assert.ok(s.lgc.fx.length <= 64);
+});
+
+console.log('Retour au checkpoint avec chrono conservé (multijoueur : keepClock) et règles « temps » (TECH-014)');
+// Une ligne droite ; le groupe 9 n'a aucune pièce (son état se lit dans la logique sans toucher à la course). IDLE : la voiture reste au départ.
+const IDLE = { steer: 0, throttle: false, brake: false, drift: false };
+const timeTrack = (lg, code = 'start S3 S3 S3 finish') => { const t = scriptTrack('temps', code); t.setLogic(lg); return t; };
+const run = (sim, n, inp = IDLE) => { for (let i = 0; i < n; i++) sim.step(typeof inp === 'function' ? inp(sim.phys) : inp); };
+test('keepClock : les échéances passées depuis l\'instantané sont rejouées au pas suivant, dans l\'ORDRE des échéances (pas de la liste)', () => {
+  // La liste met « 7 s : montrer » AVANT « 6 s : cacher » : rejouées dans l'ordre des échéances, cacher puis montrer → montré.
+  const sim = new Simulation(timeTrack({ rules: [{ on: ['time', 840], do: [['show', 9]] }, { on: ['time', 720], do: [['hide', 9]] }] }));
+  sim.start(); run(sim, 960);
+  precondition(!sim.lgc.state.hidden.has(9), 'montré à 8 s');
+  sim.rewind({ keepClock: true });
+  assert.ok(!sim.lgc.state.hidden.has(9), 'l\'état du départ (rien de caché)');
+  run(sim, 1);
+  assert.ok(!sim.lgc.state.hidden.has(9), 'cacher (6 s) puis montrer (7 s) : montré');
+  assert.equal(sim.lgc.state.tDone, 961);
+});
+test('keepClock : une bascule et un compteur ne sont appliqués qu\'UNE fois ; « une fois » est respectée ; les conditions sont lues sur l\'état rendu', () => {
+  const lg = { off: [9], vars: 2, rules: [
+    { on: ['time', 720], do: [['toggle', 9], ['var', 0, '+', 1]] },
+    { on: ['time', 780], do: [['var', 1, '+', 5]], once: true },
+    { on: ['time', 800], if: [['var', 0, '==', 1]], do: [['var', 1, '+', 100]] },
+  ] };
+  const sim = new Simulation(timeTrack(lg));
+  sim.start(); run(sim, 960);
+  const st = sim.lgc.state;
+  precondition(!st.hidden.has(9) && st.vars[0] === 1 && st.vars[1] === 105, `à 8 s : ${[...st.hidden]} ${[...st.vars]}`);
+  sim.rewind({ keepClock: true });
+  run(sim, 1);
+  assert.deepEqual([st.hidden.has(9), st.vars[0], st.vars[1]], [false, 1, 105], 'même état qu\'avant le retour : chaque règle rejouée une seule fois');
+  run(sim, 600);
+  assert.deepEqual([st.hidden.has(9), st.vars[0], st.vars[1]], [false, 1, 105], 'et rien de plus ensuite');
+});
+test('keepClock : retour à un checkpoint pris APRÈS l\'échéance : déjà dans l\'instantané, rien n\'est rejoué (la bascule n\'est pas défaite)', () => {
+  const sim = new Simulation(timeTrack({ off: [9], rules: [{ on: ['time', 120], do: [['toggle', 9]] }] }, 'start S3 C S3 S3 finish'));
+  sim.start();
+  const GAS = { steer: 0, throttle: true, brake: false, drift: false };
+  for (let i = 0; i < 120 * 10 && sim.logic.splits.length < 1; i++) sim.step(GAS);
+  precondition(sim.logic.splits.length === 1 && sim.logic.respawn.snap.steps > 120, 'checkpoint pris après 1 s');
+  precondition(!sim.lgc.state.hidden.has(9), 'basculé (montré) à 1 s');
+  run(sim, 200);
+  sim.rewind({ keepClock: true });
+  run(sim, 1);
+  assert.ok(!sim.lgc.state.hidden.has(9), 'toujours montré : la bascule de 1 s n\'est pas rejouée une deuxième fois');
+});
+test('keepClock : checkpoint aérien (instantané pris AVANT l\'anneau, chrono du dernier sol) : une échéance entre le dernier sol et l\'anneau n\'est pas rejouée deux fois', () => {
+  const PILOT = (P) => ({ steer: 0, throttle: P.grounded || P.vehicle !== 'glider', brake: false, drift: false });
+  const probe = new Simulation(scriptTrack('a', 'V4 start S2 S.e GC2 S3 finish')); probe.start();
+  let ringAt = 0;
+  for (let i = 0; i < 2400 && !ringAt; i++) { const ev = probe.step(PILOT(probe.phys)); if (ev && ev.type === 'checkpoint') ringAt = probe.logic.steps; }
+  const gl = probe.logic.respawn.snap.steps;
+  precondition(ringAt - gl > 10, `le dernier sol (${gl}) est avant l'anneau (${ringAt})`);
+  const T = gl + Math.floor((ringAt - gl) / 2);      // échéance ENTRE le dernier sol et l'anneau
+  const sim = new Simulation(timeTrack({ off: [9], rules: [{ on: ['time', T], do: [['toggle', 9]] }] }, 'V4 start S2 S.e GC2 S3 finish'));
+  sim.start();
+  for (let i = 0; i < 2400 && sim.logic.splits.length < 1; i++) sim.step(PILOT(sim.phys));
+  precondition(sim.logic.steps === ringAt && !sim.lgc.state.hidden.has(9), 'anneau franchi, bascule faite');
+  run(sim, 120, PILOT);
+  sim.rewind({ keepClock: true });
+  run(sim, 1, PILOT);
+  assert.ok(!sim.lgc.state.hidden.has(9), `basculé une seule fois (échéance ${T}, dernier sol ${gl}, anneau ${ringAt})`);
+});
+test('solo (le chrono revient) : rien ne change, au bit près, par rapport à un retour sans rattrapage ; l\'échéance repasse d\'elle-même', () => {
+  const lg = { off: [9], rules: [{ on: ['time', 720], do: [['toggle', 9]] }, { on: ['time', 721], do: [['grav', 60]] }] };
+  const sim = new Simulation(timeTrack(lg));
+  sim.start(); run(sim, 960);
+  sim.rewind();
+  assert.equal(sim.logic.steps, 0);
+  assert.ok(sim.lgc.state.hidden.has(9), 'retour au départ : caché');
+  run(sim, 720); assert.ok(!sim.lgc.state.hidden.has(9), 'l\'échéance de 6 s repasse (une fois)');
+  run(sim, 1); assert.equal(sim.phys.gravMul, 0.6);
 });
 
 console.log('Vérification serveur et fantômes');

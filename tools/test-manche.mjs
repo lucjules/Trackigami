@@ -12,6 +12,7 @@ import { Emitter } from '../js/net/signaling.js';
 import { PublicDirectory, cleanListing, describeRoom } from '../js/net/directory.js';
 import { BUILTIN_TRACKS, buildBuiltin } from '../js/tracks.js';
 import { Simulation } from '../js/simulation.js';
+import { scriptTrack } from '../js/track.js';
 import { Autopilot } from '../js/autopilot.js';
 import { PHYS_VER, NET_VER } from '../js/version.js';
 
@@ -139,6 +140,33 @@ test('grille : les voitures ne se superposent pas, le premier est devant, huit t
   assert.ok(Math.abs(gridSpawn(sp, 0, 1).x - sp.x) < 1e-9 && Math.abs(gridSpawn(sp, 0, 1).z - sp.z) < 1e-9, 'seul : exactement au départ');
   const lat = (p) => { const r = [-fwd[1], fwd[0]]; return (p.x - sp.x) * r[0] + (p.z - sp.z) * r[1]; };
   assert.ok(Math.max(...g.slice(0, 4).map(lat)) < 12 && Math.min(...g.slice(0, 4).map(lat)) > -12, 'reste dans les 24 m de la route');
+});
+
+// TECH-014 : en multijoueur le retour au checkpoint garde le chrono (RaceSession.respawn : rewind({ keepClock: true })). Une règle de logique « à 6 s : montrer le pont »
+// déjà passée était perdue (l'état de la logique revient au checkpoint, le chrono non) : le pont restait caché pour toute la manche.
+test('manche (grille de départ, chrono conservé au retour) : une règle « à 6 s : montrer » passée est rejouée, le pont revient ; la grille rend aussi la vitesse de départ', () => {
+  const IDLE = { steer: 0, throttle: false, brake: false, drift: false };
+  for (const [slot, v0] of [[0, 0], [5, 100]]) {
+    const tr = scriptTrack('pont', 'start S3 S3 S3 S3 finish');
+    tr.tiles[3].g = 2; tr.tiles[4].g = 2;
+    tr.setGroupName(2, 'Pont');
+    tr.setLogic({ off: [2], rules: [{ on: ['time', 720], do: [['show', 2]] }] });
+    tr.v0 = v0;
+    const sim = new Simulation(tr);
+    sim.logic.reset();
+    const sp = gridSpawn(sim.logic.spawnPoint(), slot, 6);             // comme RaceSession.restart en championnat
+    sim.start(sp);
+    sim.logic.respawn.snap = sim.logic._snap();
+    for (let i = 0; i < 960; i++) sim.step(IDLE);
+    assert.ok(!sim.lgc.state.hidden.has(2), 'montré à 8 s');
+    sim.rewind({ keepClock: true });
+    assert.equal(sim.logic.steps, 960, 'chrono conservé');
+    assert.equal(Math.hypot(sim.phys.vel.x, sim.phys.vel.z), v0 / 3.6, `place ${slot} : vitesse de départ rendue (${v0} km/h)`);
+    sim.step(IDLE);
+    assert.ok(!sim.lgc.state.hidden.has(2), `place ${slot} : la règle passée est rejouée, le pont est montré`);
+    for (let i = 0; i < 600; i++) sim.step(IDLE);
+    assert.ok(!sim.lgc.state.hidden.has(2), `place ${slot} : toujours montré à 13 s`);
+  }
 });
 
 console.log('Collisions douces');
