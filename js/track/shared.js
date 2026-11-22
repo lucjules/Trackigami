@@ -38,6 +38,16 @@ export function normalizeRoll(v) {
   return milli((k > 4 ? k - 8 : k) * QUARTER);
 }
 
+// Phase 8 (TECH-035) : quart de tour d'un cap de décoration AU PAS DU CODE, en millièmes de radian entiers : un quart = 1,571 rad, le tour = 6,284 rad. Le cap est arrondi au
+// millième à chaque écriture (normalizeDeco) ; tourné de π/2 exactement puis arrondi, quatre quarts de tour le décalaient d'un millième. Ainsi, quatre quarts de tour redonnent
+// exactement le cap d'origine. q : nombre de quarts (signé) ; wrap : 'half' ramène dans ]−3,142 ; 3,142] (presse-papiers, sélection), 'full' dans [0 ; 6,284[ (inspecteur).
+export function quarterTurn(a, q, wrap = 'half') {
+  let m = Math.round((+a || 0) * 1000) + q * 1571;
+  if (wrap === 'full') m = ((m % 6284) + 6284) % 6284;
+  else { while (m <= -3142) m += 6284; while (m > 3142) m -= 6284; }
+  return m / 1000;
+}
+
 export function cleanColors(c) {
   if (!c || typeof c !== 'object') return null;
   const out = {};

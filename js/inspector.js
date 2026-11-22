@@ -277,7 +277,7 @@ export class Inspector {
     const { kind, obj } = this.sel, ed = this.ed;
     this._apply(() => {
       if (kind === 'tile') return ed._applyTilePatch(obj, { r: (obj.r + d + 4) & 3 });
-      obj.ry = ((obj.ry || 0) + d * Math.PI / 12 + TAU) % TAU; ed.track.version++; return true;
+      return ed.track.setDeco(obj, { ry: ((obj.ry || 0) + d * Math.PI / 12 + TAU) % TAU });      // (phase 8, TECH-035 : normalisée comme à l'ajout)
     });
     return true;
   }

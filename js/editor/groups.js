@@ -41,7 +41,7 @@ export const groupMethods = {
     const tiles = this._selTiles(), decos = this._selDecos();
     if (!tiles.length && !decos.length) { this.app.ui.flash('Sélectionne d’abord des pièces (outil Sélection, Q).'); return 0; }
     for (const t of tiles) t.g = Math.max(0, Math.min(MAX_GROUP, g | 0));      // (en place : l'ordre du circuit et la pièce inspectée ne changent pas)
-    for (const d of decos) { if (g) d.g = g; else delete d.g; }
+    for (const d of decos) this.track.setDeco(d, { g });      // (phase 8 : normalisée comme à l'ajout ; groupe 0 : le champ disparaît)
     // La sélection était « le groupe N » (selectGroup) : elle suit ses membres dans leur nouveau groupe ; retirés de tout groupe, il n'y a plus de filtre possible :
     // la zone est abandonnée (sinon le rectangle se mettrait à désigner toutes les pièces qu'il contient).
     if (this.selGroup) { if (g) this.selGroup = g; else { this.selGroup = 0; this.sel = null; } }

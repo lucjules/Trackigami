@@ -8,6 +8,64 @@ import { DECO_ORDER } from '../decoData.js';
 import { sanitizeDecoParts, MAX_CUSTOM_DECOS } from '../customDeco.js';
 import { HEX, cleanColors, normalizeAngle, normalizeRoll } from './shared.js';
 import { Track } from '../track.js';
+
+// ---- Décorations (phase 8 : TECH-034, TECH-035 ; transversal TRANS-01) -------------------------------------------------------------------------------------------
+// UNE normalisation, idempotente : normalizeDeco(normalizeDeco(d)) est normalizeDeco(d). Toutes les écritures de décoration y passent : l'ajout (pose, collage, duplication,
+// prefab, lecture d'un code, restauration de l'historique : Track.addDeco) et la modification d'une décoration posée (Track.setDeco : inspecteur, gizmo, Maj + glisser,
+// sélection, calques). Elle borne et nettoie (échelle, phase, inclinaison et roulis : ce que faisait addDeco), puis ARRONDIT au pas du code (Track.encode : x, y, z et
+// échelle au centième, cap au millième) : la décoration en mémoire est exactement celle que le code relu redonnera, donc l'instantané d'historique, la signature et l'état
+// rouvert après un essai sont les mêmes (avant : une décoration posée « Libre » gardait 16,123456 m en mémoire et 16,12 dans le code ; au retour d'un essai l'éditeur jetait
+// l'historique, le presse-papiers et les calques).
+// exact : les circuits GÉNÉRÉS (circuits officiels, défi du jour, scriptTrack) gardent leurs valeurs telles que calculées — leur physique est jouée depuis la mémoire, pas
+// depuis le code, et ne doit pas changer d'un bit. Les codes existants sont déjà au pas du code : leur lecture ne change rien.
+const centi = (v) => +v.toFixed(2) || 0;      // (|| 0 : jamais −0 ; même pas que Track.encode)
+const milliRy = (v) => +v.toFixed(3) || 0;
+export function normalizeDeco(d, { exact = false } = {}) {
+  if (!d || !DECO_ORDER.includes(d.k)) return null;
+  const deco = {
+    k: d.k, x: +d.x, y: +d.y, z: +d.z, ry: +d.ry || 0, s: Math.max(0.2, Math.min(20, +d.s || 1)),
+    c: d.c | 0, u: d.u ? String(d.u).slice(0, 400) : '',
+  };
+  const g = Math.max(0, Math.min(63, d.g | 0));
+  if (g) deco.g = g;                     // groupe (calque de l'éditeur ; logique du circuit)
+  // Obstacles : décalage de phase (0 à 1) pour désynchroniser plusieurs obstacles.
+  if (isObstacle(deco.k)) { deco.ph = Math.max(0, Math.min(0.95, Math.round((+d.ph || 0) * 20) / 20)); deco.s = Math.max(0.5, Math.min(2.5, deco.s)); }
+  // 0.11.3 : une position illisible (code abîmé : coordonnée vide) refuse la décoration, comme pour un solide : gardée, elle devenait 0 au ré-encodage (circuit instable).
+  if (!Number.isFinite(deco.x) || !Number.isFinite(deco.y) || !Number.isFinite(deco.z)) return null;
+  // 0.9.68 : un solide (pilier, poutre, mur, bloc) compte pour la physique : jamais incliné ni roulé (rx, rz ignorés), échelle bornée (voir solids.js).
+  const solid = isSolid(deco.k);
+  if (solid) {
+    deco.s = Math.max(SOLID_SCALE[0], Math.min(SOLID_SCALE[1], deco.s));
+    if (!Number.isFinite(deco.ry)) return null;
+  }
+  if (!exact) {
+    deco.x = centi(deco.x); deco.y = centi(deco.y); deco.z = centi(deco.z); deco.s = centi(deco.s);
+    deco.ry = Number.isFinite(deco.ry) ? milliRy(deco.ry) : 0;
+  }
+  // Inclinaison (rx : nez vers le bas / le haut) et roulis (rz) : purement VISUELS pour une décoration ; pour un obstacle seul le roulis rz compte (physique), par pas de 45°.
+  // Ramenés dans ]−π, π] puis arrondis au millième, de façon IDEMPOTENTE (track/shared.js) ; absents (0) quand la décoration est droite, pour que les codes existants ne changent pas.
+  if (isObstacle(deco.k)) {
+    // Phase 3 : un obstacle peut être ROULÉ autour de son axe z (posé sur un mur, un plan incliné ou au plafond : son haut est la normale de la route). Multiples de 45° seulement
+    // (la forme de contact tourne avec lui, voir obstacles.js : toLocalObs) ; l'inclinaison rx reste refusée.
+    // (TECH-002 : normalizeRoll est idempotente : π reste π à chaque lecture du code ; voir track/shared.js)
+    const r = normalizeRoll(+d.rz);
+    if (r) deco.rz = r;
+  } else if (!solid) {
+    for (const a of ['rx', 'rz']) {
+      const r = normalizeAngle(+d[a]);
+      if (r) deco[a] = r;
+    }
+  }
+  // Couleur personnalisée (#rrggbb) : prend le pas sur l'index de couleur c.
+  if (typeof d.cc === 'string' && HEX.test(d.cc)) deco.cc = d.cc.toLowerCase();
+  // Pièce perso : ses formes voyagent avec la décoration ; jamais vide (au plus MAX_CUSTOM_DECOS par circuit : Track.addDeco).
+  if (deco.k === 'custom') {
+    deco.cp = sanitizeDecoParts(d.cp);
+    if (!deco.cp.length) return null;
+  }
+  return deco;
+}
+
 export const editMethods = {
   // Revêtement (avec paramètre en %). Renvoie true si quelque chose a changé.
   setSurface(tile, s, p = 0) {
@@ -123,49 +181,31 @@ export const editMethods = {
     return true;
   },
 
-  addDeco(d) {
+  // Ajoute une décoration, NORMALISÉE (normalizeDeco, plus haut) ; null si elle est refusée (limite de MAX_DECOS, de pièces perso, kind inconnu, position illisible).
+  // exact : circuits GÉNÉRÉS seulement (circuits officiels, scriptTrack) — valeurs gardées à la précision du calcul (voir normalizeDeco).
+  addDeco(d, { exact = false } = {}) {
     if (this.decos.length >= MAX_DECOS) return null;
-    const deco = {
-      k: d.k, x: +d.x, y: +d.y, z: +d.z, ry: +d.ry || 0, s: Math.max(0.2, Math.min(20, +d.s || 1)),
-      c: d.c | 0, u: d.u ? String(d.u).slice(0, 400) : '',
-    };
-    const g = Math.max(0, Math.min(63, d.g | 0));
-    if (g) deco.g = g;                     // groupe (calque de l'éditeur ; logique du circuit)
-    // Obstacles : décalage de phase (0 à 1) pour désynchroniser plusieurs obstacles.
-    if (isObstacle(deco.k)) { deco.ph = Math.max(0, Math.min(0.95, Math.round((+d.ph || 0) * 20) / 20)); deco.s = Math.max(0.5, Math.min(2.5, deco.s)); }
-    if (!DECO_ORDER.includes(deco.k)) return null;
-    // 0.11.3 : une position illisible (code abîmé : coordonnée vide) refuse la décoration, comme pour un solide : gardée, elle devenait 0 au ré-encodage (circuit instable).
-    if (!Number.isFinite(deco.x) || !Number.isFinite(deco.y) || !Number.isFinite(deco.z)) return null;
-    // 0.9.68 : un solide (pilier, poutre, mur, bloc) compte pour la physique : jamais incliné ni roulé (rx, rz ignorés), échelle bornée (voir solids.js).
-    const solid = isSolid(deco.k);
-    if (solid) {
-      deco.s = Math.max(SOLID_SCALE[0], Math.min(SOLID_SCALE[1], deco.s));
-      if (!Number.isFinite(deco.x) || !Number.isFinite(deco.y) || !Number.isFinite(deco.z) || !Number.isFinite(deco.ry)) return null;
-    }
-    // Inclinaison (rx : nez vers le bas / le haut) et roulis (rz) : purement VISUELS pour une décoration ; pour un obstacle seul le roulis rz compte (physique), par pas de 45°.
-    // Ramenés dans ]−π, π] puis arrondis au millième, de façon IDEMPOTENTE (track/shared.js) ; absents (0) quand la décoration est droite, pour que les codes existants ne changent pas.
-    if (isObstacle(deco.k)) {
-      // Phase 3 : un obstacle peut être ROULÉ autour de son axe z (posé sur un mur, un plan incliné ou au plafond : son haut est la normale de la route). Multiples de 45° seulement
-      // (la forme de contact tourne avec lui, voir obstacles.js : toLocalObs) ; l'inclinaison rx reste refusée.
-      // (TECH-002 : normalizeRoll est idempotente : π reste π à chaque lecture du code ; voir track/shared.js)
-      const r = normalizeRoll(+d.rz);
-      if (r) deco.rz = r;
-    } else if (!solid) {
-      for (const a of ['rx', 'rz']) {
-        const r = normalizeAngle(+d[a]);
-        if (r) deco[a] = r;
-      }
-    }
-    // Couleur personnalisée (#rrggbb) : prend le pas sur l'index de couleur c.
-    if (typeof d.cc === 'string' && HEX.test(d.cc)) deco.cc = d.cc.toLowerCase();
-    // Pièce perso : ses formes voyagent avec la décoration ; au plus MAX_CUSTOM_DECOS par circuit, jamais vide.
-    if (deco.k === 'custom') {
-      deco.cp = sanitizeDecoParts(d.cp);
-      if (!deco.cp.length || this.decos.filter((o) => o.k === 'custom').length >= MAX_CUSTOM_DECOS) return null;
-    }
+    const deco = normalizeDeco(d, { exact });
+    if (!deco) return null;
+    if (deco.k === 'custom' && this.decos.filter((o) => o.k === 'custom').length >= MAX_CUSTOM_DECOS) return null;
     this.decos.push(deco);
     this.version++;
     return deco;
+  },
+
+  // Phase 8 (TECH-035) : LA façon de modifier une décoration posée (inspecteur, gizmo, Maj + glisser, déplacement / rotation / niveau d'une sélection, calques) : la
+  // décoration modifiée est renormalisée comme à l'ajout, puis recopiée dans le MÊME objet (la sélection de l'inspecteur reste valable) ; un champ que la normalisation
+  // retire (inclinaison d'un solide, roulis nul, couleur libre effacée…) disparaît. Faux si la décoration modifiée serait refusée (position illisible…) : rien ne change.
+  // Avant, ces chemins écrivaient les valeurs brutes (d.rx = …) : l'instantané d'historique les gardait, la restauration les normalisait ; après annuler / rétablir le
+  // circuit n'égalait plus l'instantané (pas fantôme, pile « rétablir » effacée, circuit enregistré « modifié »), et un solide incliné l'était dans l'éditeur seulement.
+  setDeco(d, patch) {
+    const n = normalizeDeco({ ...d, ...patch });
+    if (!n) return false;
+    if (JSON.stringify(n) === JSON.stringify(d)) return true;
+    for (const k of Object.keys(d)) if (!(k in n)) delete d[k];
+    Object.assign(d, n);
+    this.version++;
+    return true;
   },
 
   removeDeco(d) {

@@ -4,6 +4,7 @@ import { CELL, LEVEL_H, ROAD_TOP, MAX_LEVEL } from '../constants.js';
 import * as THREE from '../vendor/three.module.min.js';
 import { PIECES, tileCenter, baseY } from '../pieces.js';
 import { isObstacle } from '../obstacles.js';
+import { isSolid } from '../solids.js';
 import { arrowPose } from '../tileInfo.js';
 import { TAU } from './shared.js';
 import { yawOf } from '../inspector.js';
@@ -21,7 +22,7 @@ export const gizmoMethods = {
     if (this.mode === 'rotate') {
       // Pièce : seulement autour de la verticale, par quarts de tour (elle vit sur la grille : voir docs/ROTATIONS.md). Obstacle : autour de la verticale (sa forme de
       // contact est celle du jeu). Autre décoration : les TROIS axes (cap Y, inclinaison X, roulis Z), au pas d'angle choisi dans l'inspecteur (5° par défaut).
-      const free = !tile && this.sel && !isObstacle(this.sel.obj.k);
+      const free = !tile && this.sel && !isObstacle(this.sel.obj.k) && !isSolid(this.sel.obj.k);      // (phase 8, TECH-035 : un solide est toujours droit, comme un obstacle)
       this.tc.showX = free; this.tc.showZ = free; this.tc.showY = true;
       this.tc.setRotationSnap(tile ? Math.PI / 2 : (this.angleStep || 5) * Math.PI / 180);
     } else {
@@ -82,18 +83,19 @@ export const gizmoMethods = {
       if (ed._applyTilePatch(obj, patch)) ed._changed();
       else if (!this._warned) { this._warned = true; ed.app.ui.flash(ed._refusalText(ed._lastRefusal) || 'Place occupée : la pièce reste où elle est'); }      // (phase 8 : débordement d'une pente au mur… dit sa raison)
     } else {
+      // Phase 8 (TECH-035) : par Track.setDeco, la normalisation du modèle (positions au centième, angles au millième, solide jamais incliné) : ce que le gizmo écrit est ce
+      // que l'historique et le code reliront. Le fantôme du gizmo, lui, reste libre pendant le geste (il se recale au relâchement : _onDrag).
+      let patch;
       if (this.mode === 'translate') {
         const [x, z] = ed._snapPos(p.position.x, p.position.z);
-        obj.x = x; obj.z = z; obj.y = p.position.y;
-      } else if (isObstacle(obj.k)) obj.ry = ((yawOf(p.quaternion) % TAU) + TAU) % TAU;
+        patch = { x, z, y: p.position.y };
+      } else if (isObstacle(obj.k) || isSolid(obj.k)) patch = { ry: ((yawOf(p.quaternion) % TAU) + TAU) % TAU };
       else {
         // Les trois angles, relus de l'orientation du gizmo dans l'ordre du rendu (cap, inclinaison, roulis) ; une inclinaison ou un roulis nuls ne sont pas écrits.
         const e = new THREE.Euler().setFromQuaternion(p.quaternion, 'YXZ');
-        obj.ry = ((e.y % TAU) + TAU) % TAU;
-        for (const [k, v] of [['rx', e.x], ['rz', e.z]]) { if (Math.abs(v) > 1e-4) obj[k] = +v.toFixed(4); else delete obj[k]; }
+        patch = { ry: ((e.y % TAU) + TAU) % TAU, rx: Math.abs(e.x) > 1e-4 ? e.x : 0, rz: Math.abs(e.z) > 1e-4 ? e.z : 0 };
       }
-      ed.track.version++;
-      ed._changed();
+      if (ed.track.setDeco(obj, patch)) ed._changed();
     }
   },
 };

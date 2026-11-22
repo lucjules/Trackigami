@@ -330,6 +330,95 @@ try {
     assert.equal(after.filter((k) => k.startsWith('start')).length, 1);
     await ctx.close();
   });
+  // Phase 8 (TECH-034) : une décoration posée « Libre » à la souris (coordonnées quelconques), puis Essai, puis retour : tout ce que l'éditeur avait mis de côté revient.
+  // Avant : l'instantané du circuit rouvert (relu du code, arrondi) différait de celui qu'on avait quitté, et l'état gardé était jeté (historique 3 → 1, calques perdus…).
+  await test('TECH-034 : décoration libre posée à la souris, Essai, retour : historique, presse-papiers, calques masqués / verrouillés conservés ; la « pièce perso » garde ses formes', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await ed(page, (t) => window.copytrack.session.setTool(t), 'straight'); await press(page, 'KeyP', 3);
+    await ed(page, (t) => window.copytrack.session.setTool(t), 'finish'); await press(page, 'KeyP', 1);
+    // Calques : une ligne droite dans le groupe 2 (masqué), une autre dans le groupe 3 (verrouillé) ; presse-papiers : une zone copiée.
+    await ed(page, () => {
+      const E = window.copytrack.session, T = E.track;
+      T.tiles[1].g = 2; T.tiles[2].g = 3; T.version++; E._changed(); E._commit();
+      E.setGroupHidden(2, true); E.setGroupLocked(3, true);
+      E.setTool('select'); E.sel = { x0: -6, z0: -12, x1: 6, z1: 6 }; E.copySel(true); E.sel = null;      // (les pièces des calques masqué et verrouillé ne sont pas copiées : les autres le sont)
+      E.setTool('deco:cone'); E.deco.snap = 0; E.target.set(16, E.levelY(), -48); E.dist = 140;
+    });
+    await page.waitForTimeout(500);
+    const nDecos = await ed(page, () => window.copytrack.session.track.decos.length);
+    await page.mouse.move(611, 377); await page.mouse.move(613, 379);
+    await page.waitForTimeout(300);
+    await page.mouse.down(); await page.mouse.up();
+    await page.waitForFunction((n) => window.copytrack.session.track.decos.length === n + 1, nDecos, { timeout: 8000, polling: 50 });
+    // La pièce perso : l'outil garde ses formes (E.deco.cp) ; une première pose.
+    const before = await ed(page, async () => {
+      const E = window.copytrack.session, d = E.track.decos[E.track.decos.length - 1];
+      const { sanitizeDecoParts } = await import('/js/customDeco.js');
+      E.deco.cp = sanitizeDecoParts([{ s: 'box', x: 0, y: 1, z: 0, sx: 2, sy: 1, sz: 1, ry: 0, c: '#ff0000' }, { s: 'sphere', x: 0, y: 2.5, z: 0, sx: 1, sy: 1, sz: 1, ry: 0, c: '#00ff00' }]);
+      E.setTool('deco:custom');
+      return { x: d.x, z: d.z, offGrid: Math.abs(d.x * 2 - Math.round(d.x * 2)) > 1e-6 || Math.abs(d.z * 2 - Math.round(d.z * 2)) > 1e-6, hist: E.history.length, hIndex: E.hIndex, clip: !!E.clip, cp: E.deco.cp.length, tool: E.tool };
+    });
+    if (!before.offGrid) throw new Error('précondition : la décoration est posée hors de la grille (Libre) : ' + JSON.stringify(before));
+    if (before.hist < 4 || !before.clip) throw new Error('précondition : historique et presse-papiers en place : ' + JSON.stringify(before));
+    await page.evaluate(() => window.copytrack.session.test());
+    await page.waitForFunction(() => window.copytrack.session && window.copytrack.session.kind !== 'editor' && window.copytrack.mode === 'race', null, { timeout: 30000, polling: 100 });
+    await page.waitForTimeout(1500);
+    await page.evaluate(() => window.copytrack.quitRace());
+    await page.waitForFunction(() => window.copytrack.session && window.copytrack.session.kind === 'editor', null, { timeout: 30000, polling: 100 });
+    await page.waitForTimeout(500);
+    const back = await ed(page, () => {
+      const E = window.copytrack.session;
+      return { hist: E.history.length, hIndex: E.hIndex, clip: !!E.clip, hidden: E.hiddenGroups ? [...E.hiddenGroups] : [], locked: E.lockedGroups ? [...E.lockedGroups] : [], cp: E.deco.cp ? E.deco.cp.length : 0, tool: E.tool, dirty: E.isDirty() };
+    });
+    assert.equal(back.hist, before.hist, 'historique d\'annulation conservé');
+    assert.equal(back.hIndex, before.hIndex);
+    assert.equal(back.clip, true, 'presse-papiers conservé');
+    assert.deepEqual(back.hidden, [2], 'calque masqué conservé');
+    assert.deepEqual(back.locked, [3], 'calque verrouillé conservé');
+    assert.equal(back.tool, 'deco:custom');
+    assert.equal(back.cp, before.cp, 'la pièce perso garde ses formes');
+    // Une pose avec la pièce perso : elle réussit (avant : « Maximum de 500 décorations atteint », l'outil n'avait plus de formes).
+    const n2 = await ed(page, () => window.copytrack.session.track.decos.length);
+    await page.mouse.move(640, 400); await page.mouse.move(642, 402); await page.waitForTimeout(300);
+    await page.mouse.down(); await page.mouse.up();
+    await page.waitForFunction((n) => window.copytrack.session.track.decos.length === n + 1, n2, { timeout: 8000, polling: 50 });
+    const undo = await ed(page, () => { const E = window.copytrack.session; E.undo(); E.undo(); return E.track.decos.length; });
+    assert.equal(undo, n2 - 1, 'annuler remonte l\'historique d\'avant l\'essai (la décoration libre est retirée)');
+    await ctx.close();
+  });
+  // Phase 8 (TECH-035) : l'inspecteur écrit par la normalisation du modèle ; un solide ne propose ni inclinaison ni roulis.
+  await test('TECH-035 : inclinaison de 37,5° saisie dans l\'inspecteur, annuler / rétablir : le rétablissement est intact (pas de pas fantôme) ; un pilier n\'a ni inclinaison, ni roulis, ni « Retourner »', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await ed(page, () => {
+      const E = window.copytrack.session;
+      E.track.addDeco({ k: 'cone', x: 20.5, y: 0, z: 20.5, ry: 0, s: 1 }); E.track.addDeco({ k: 'pillar', x: 60, y: 0, z: 20, ry: 0, s: 1 });
+      E._changed(); E._commit(); E.setTool('inspect'); E.inspector.select('deco', E.track.decos[0]);
+    });
+    await page.waitForTimeout(300);
+    const input = page.locator('#ed-insp label.insp-row', { hasText: 'Inclinaison (X)' }).locator('input[type=number]');
+    await input.fill('37.5'); await input.dispatchEvent('change');
+    await page.waitForTimeout(200);
+    const r = await ed(page, () => {
+      const E = window.copytrack.session, d = E.track.decos[0];
+      const rx = d.rx, n = E.history.length;
+      E.undo(); const undone = E.track.decos[0].rx || 0;
+      E.redo(); const same = E._snapshot() === E.history[E.hIndex];
+      E.undo(); E._commit();      // (un clic de l'inspecteur qui ne change rien)
+      const kept = E.history.length; E.redo();
+      return { rx, n, undone, same, kept, after: E.track.decos[0].rx, dirty: E.isDirty() };
+    });
+    assert.equal(r.rx, 0.654, 'au millième');
+    assert.equal(r.undone, 0);
+    assert.equal(r.same, true, 'après annuler / rétablir, le circuit égale l\'instantané courant');
+    assert.equal(r.kept, r.n, 'aucun pas fantôme : la pile « rétablir » est intacte');
+    assert.equal(r.after, 0.654, 'rétablir redonne l\'inclinaison');
+    await ed(page, () => { const E = window.copytrack.session; E.inspector.select('deco', E.track.decos[1]); });
+    await page.waitForTimeout(300);
+    const panel = await page.locator('#ed-insp').innerText();
+    assert.match(panel, /Cap \(Y\)/);
+    assert.doesNotMatch(panel, /Inclinaison \(X\)|Roulis \(Z\)|Retourner|Remettre droit/, 'un solide n\'expose ni inclinaison ni roulis');
+    await ctx.close();
+  });
   await test('rangement 0.12 sur téléphone (844 × 390) : le panneau est un tiroir, il se referme après un choix ; la vue reste dégagée', async () => {
     const { ctx, page } = await open(844, 390);
     const drawer = () => page.evaluate(() => { const r = document.getElementById('ed-palette').getBoundingClientRect(); return r.right > 60 && r.left < 70; });

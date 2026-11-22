@@ -3,6 +3,7 @@
 import { CELL, LEVEL_H, MAX_LEVEL, SURF_PHYS } from './constants.js';
 import { PIECES, forkBranchX, localToWorld, baseY, cpKind, toLocal, sampleLocal } from './pieces.js';
 import { Track } from './track.js';
+import { quarterTurn } from './track/shared.js';
 import { placementPlan, applyPlacement } from './placement.js';
 import { centerlineWorld } from './ribbons.js';
 import { junctionEnds } from './connect.js';
@@ -238,7 +239,7 @@ export function moveSelection(track, rect, tiles, decos, dx, dz) {
   if (!dx && !dz) return false;
   if (!replaceTiles(track, tiles, tiles.map((t) => ({ ...t, x: t.x + dx, z: t.z + dz })))) return false;
   const sc = scriptsIn(track, rect);
-  for (const o of decos) { o.x += dx * CELL; o.z += dz * CELL; }
+  for (const o of decos) track.setDeco(o, { x: o.x + dx * CELL, z: o.z + dz * CELL });      // (phase 8, TECH-035 : normalisées comme à l'ajout)
   for (const s of sc) { s.x += dx; s.z += dz; }
   track.version++;
   return true;
@@ -251,7 +252,9 @@ export function rotateSelection(track, rect, tiles, decos) {
   const R = rotateClip({ ...clip, tiles: clip.tiles.concat([]), decos: clip.decos.concat([]) }, true);
   const P = placedClip(R, rect.x0, rect.z0, 0, false);      // (rotation en place : les niveaux ne bougent jamais)
   if (!replaceTiles(track, tiles, P.tiles)) return false;
-  decos.forEach((d, i) => { Object.assign(d, { x: P.decos[i].x, z: P.decos[i].z, ry: P.decos[i].ry }); });
+  // (phase 8, TECH-035 : par Track.setDeco ; le cap tourne d'un quart AU PAS DU CODE — track/shared.js, quarterTurn — pour que quatre rotations en place redonnent exactement
+  // le circuit d'origine, alors que le cap est arrondi au millième à chaque écriture)
+  decos.forEach((d, i) => { track.setDeco(d, { x: P.decos[i].x, z: P.decos[i].z, ry: quarterTurn(d.ry, -1) }); });
   const sc = scriptsIn(track, rect);
   for (const s of sc) { const rx = s.x - rect.x0, rz = s.z - rect.z0; s.x = rect.x0 + (clip.h - 1 - rz); s.z = rect.z0 + rx; }
   track.version++;
@@ -263,7 +266,7 @@ export function rotateSelection(track, rect, tiles, decos) {
 // n'était plus celle du circuit) ; et rien ne vérifiait ce qu'une pièce occupe SOUS son niveau (à l'envers, pente descendante, route sur un mur : elle finissait sous le sol).
 export function shiftLevel(track, tiles, decos, d) {
   if (!replaceTiles(track, tiles, tiles.map((t) => ({ ...t, l: t.l + d })))) return false;
-  for (const o of decos) { o.y += d * LEVEL_H; }
+  for (const o of decos) track.setDeco(o, { y: o.y + d * LEVEL_H });
   if (decos.length) track.version++;
   return true;
 }

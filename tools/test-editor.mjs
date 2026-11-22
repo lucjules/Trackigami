@@ -351,4 +351,68 @@ test('flèche verticale : le niveau suit par demi-niveaux (0,5 → 1 → 1,5), j
   assert.equal(at(1.4), 1.5);
   done(s);
 });
-await finish('Éditeur : pot de peinture, validateur de placement (TECH-003, 052, 053), gizmo (TECH-037).');
+
+console.log('TECH-034 / 035 : décorations écrites par le gizmo et Maj + glisser, annuler / rétablir');
+const decoTrack = () => { const t = new Track('dd'); t.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); return t; };
+const decoGizmo = (s, d, mode) => {
+  const ins = Object.create(Inspector.prototype);
+  Object.assign(ins, { ed: s, sel: { kind: 'deco', obj: d }, mode, proxy: new THREE.Object3D(), tc: { axis: 'XYZ' } });
+  s.deco = { snap: 0 }; s.inspector = { ...s.inspector, dragging: false };
+  return ins;
+};
+test('gizmo, décoration libre : position et angles écrits au pas du code ; annuler / rétablir intact, aucun pas fantôme', () => {
+  const tr = decoTrack(); const s = session(tr);
+  const d = tr.addDeco({ k: 'cone', x: 10, y: 1, z: 10, ry: 0, s: 1 }); s._commit();
+  const g = decoGizmo(s, d, 'translate');
+  g.proxy.position.set(12.345678, 1.98765, -3.14159);
+  g._onGizmo(); s._commit();
+  assert.deepEqual([d.x, d.y, d.z], [12.35, 1.99, -3.14]);
+  g.mode = 'rotate'; g.proxy.rotation.order = 'YXZ'; g.proxy.rotation.set(0.33333, 1.23456, -0.1111);
+  g._onGizmo(); s._commit();
+  assert.deepEqual([d.ry, d.rx, d.rz], [1.235, 0.333, -0.111]);
+  const n = s.history.length;
+  s.undo(); s.redo();
+  assert.equal(s._snapshot(), s.history[s.hIndex]);
+  s.undo(); s._commit();
+  assert.equal(s.history.length, n, 'la pile « rétablir » reste intacte');
+  done(s);
+});
+test('gizmo, solide (pilier) : seulement le cap, jamais d\'inclinaison ni de roulis', () => {
+  const tr = decoTrack(); const s = session(tr);
+  const d = tr.addDeco({ k: 'pillar', x: 10, y: 0, z: 10, ry: 0, s: 1 });
+  const g = decoGizmo(s, d, 'rotate');
+  g.proxy.rotation.order = 'YXZ'; g.proxy.rotation.set(0.4, 0.7, 0.2);
+  g._onGizmo();
+  assert.ok(!('rx' in d) && !('rz' in d));
+  assert.ok(d.ry > 0.6 && d.ry < 0.8, 'le cap suit : ' + d.ry);
+  done(s);
+});
+test('Maj + glisser, décoration : la hauteur suit le geste au centième (même par pas plus fins que le centimètre), un seul pas d\'annulation, rétablir intact', () => {
+  const tr = decoTrack(); const s = session(tr);
+  const d = tr.addDeco({ k: 'cone', x: 10, y: 1, z: 10, ry: 0, s: 1 }); s._commit();
+  Object.assign(s, { tool: 'inspect', camLocked: false, _metersPerPixel: () => 0.0031 });
+  Object.defineProperty(s, 'menuOpen', { value: false });
+  s.inspector = { ...s.inspector, dragging: false, sel: { kind: 'deco', obj: d } };
+  for (let i = 0; i < 10; i++) s._shiftY(-1);      // 10 × 3,1 mm vers le haut
+  s._endShiftY();
+  assert.equal(d.y, 1.03, 'le reste sous le centimètre n\'est pas perdu');
+  assert.equal(s.history.length, 3);
+  s.undo(); assert.equal(tr.decos[0].y, 1); s.redo(); assert.equal(tr.decos[0].y, 1.03);
+  assert.equal(s._snapshot(), s.history[s.hIndex]);
+  done(s);
+});
+test('sélection : déplacer, pivoter, monter une zone avec des décorations libres : elles restent au pas du code, annuler / rétablir intact', () => {
+  const tr = decoTrack(); const s = session(tr);
+  tr.add({ t: 'straight', x: 1, z: 0, l: 0, r: 0 });
+  tr.addDeco({ k: 'cone', x: 40.004, y: 0.333, z: 8.123, ry: 0.4444, s: 1.234 }); s._commit();
+  s.sel = { x0: 1, z0: 0, x1: 1, z1: 0 }; s.tool = 'select';
+  s.moveSel(1, 0); s.rotateSel(); s.shiftSel(1);
+  const d = tr.decos[0];
+  for (const k of ['x', 'y', 'z', 's']) assert.equal(d[k], +d[k].toFixed(2), k);
+  assert.equal(d.ry, +d.ry.toFixed(3));
+  const n = s.history.length;
+  while (s.hIndex > 0) s.undo();
+  while (s.hIndex < n - 1) { s.redo(); assert.equal(s._snapshot(), s.history[s.hIndex]); }
+  done(s);
+});
+await finish('Éditeur : pot de peinture, validateur de placement (TECH-003, 052, 053), gizmo (TECH-037), décorations normalisées (TECH-034, 035).');

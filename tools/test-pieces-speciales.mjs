@@ -199,7 +199,7 @@ test('décoration : posée là où le rayon touche (route à altitude quelconque
   assert.equal(self._decoAt().y, 0, 'au sol');
   self._placeDeco();
   assert.equal(tr.decos.length, 1); assert.ok(Math.abs(tr.decos[0].y) < 1e-6);
-  assert.ok(Math.abs(tr.decos[0].x - self._decoAt().x) < 1e-9);
+  assert.equal(tr.decos[0].x, +self._decoAt().x.toFixed(2), 'au point visé, au pas du code (phase 8, TECH-034 : la mémoire est ce que le code relu redonnera)');
   const hover = { x: 100.5, z: 77.25, cx: 4, cz: 3 };
   self.ndc.set(9, 9); self.hover = hover; assert.deepEqual([self._decoAt().x, self._decoAt().z], [100.5, 77.25], 'sans rayon : le plan du niveau courant');
 });

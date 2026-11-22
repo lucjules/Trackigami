@@ -14,6 +14,7 @@ import { DEFAULT_AMBIANCE, cleanAmbiance, ambianceToArray, ambianceFromArray } f
 import { COLOR_KEYS, MP, W2, cleanColors } from './track/shared.js';
 import { surfaceMethods } from './track/surfaces.js';
 import { editMethods } from './track/edit.js';
+export { normalizeDeco } from './track/edit.js';
 import { sanitizeLogic, logicToArray, logicFromArray, logicSig } from './sim/logic.js';
 import { PROFILE_IDS } from './physics/profiles.js';
 export const MAX_CELL = 4000;          // bornes de la grille, en cases (voir Track.normalize)
@@ -1175,7 +1176,7 @@ export function scriptTrack(name, script, opts = {}) {
   }
   if (split) throw new Error(`${name} : bifurcation SPL sans MRG`);
   if (tsplit) throw new Error(`${name} : bifurcation en T (TSPL) sans TMRG`);
-  for (const d of opts.decos || []) tr.addDeco(d);
+  for (const d of opts.decos || []) tr.addDeco(d, { exact: true });      // (circuit généré : valeurs exactes, voir track/edit.js, normalizeDeco)
   tr.path = path;
   tr.turtle = { x, z, h, l };   // position finale (sert à refermer les circuits à tours)
   return tr;

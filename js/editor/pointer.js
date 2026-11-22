@@ -202,9 +202,9 @@ export const pointerMethods = {
       const pos = kind === 'tile' ? new THREE.Vector3((obj.x + PIECES[obj.t].size / 2) * CELL, this.levelY(obj.l), (obj.z + PIECES[obj.t].size / 2) * CELL) : new THREE.Vector3(obj.x, obj.y, obj.z);
       const dy = -dyPx * this._metersPerPixel(pos);
       if (kind === 'deco') {
-        obj.y += dy;
-        this.track.version++;
-        this._changed();
+        // (phase 8, TECH-035 : par Track.setDeco, au centième comme le code ; le reste d'un geste plus fin que le centimètre est gardé pour le mouvement suivant)
+        const want = obj.y + (this._yAccD || 0) + dy;
+        if (this.track.setDeco(obj, { y: want })) { this._yAccD = want - obj.y; this._changed(); }
       } else {
         this._yAcc = (this._yAcc || 0) + dy / LEVEL_H;
         const step = Math.trunc(this._yAcc * 2) / 2;                      // les pièces montent par demi-niveaux
@@ -231,7 +231,7 @@ export const pointerMethods = {
 
   // Maj relâchée : un seul pas d'historique pour tout le geste.
   _endShiftY() {
-    this._yAcc = 0; this._yWarn = false; this._ptrY = null;
+    this._yAcc = 0; this._yAccD = 0; this._yWarn = false; this._ptrY = null;
     if (this._shiftYDirty) { this._shiftYDirty = false; this._commit(); }
   },
 

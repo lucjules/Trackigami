@@ -935,7 +935,7 @@ function wallSolid(t, def, o, i, a, ux, uz) {
   const s = o.s || 1, side = (tile.o === 1 ? 1 : -1) * 4 * s, dy = o.wall === 'bas' ? -8 * s : 0;
   const q = (v, st) => Math.round(v / st) * st;
   let k = Math.round(datan2(ux, uz) / (Math.PI / 8)); while (k > 8) k -= 16; while (k <= -8) k += 16;
-  t.addDeco({ k: o.k, x: q(a[0] - uz * side, 0.5), y: q(a[1] + dy, 0.1), z: q(a[2] + ux * side, 0.5), ry: (k * Math.PI) / 8, s, c: o.c || 0, ph: 0 });
+  t.addDeco({ k: o.k, x: q(a[0] - uz * side, 0.5), y: q(a[1] + dy, 0.1), z: q(a[2] + ux * side, 0.5), ry: (k * Math.PI) / 8, s, c: o.c || 0, ph: 0 }, { exact: true });      // (circuit généré : valeurs exactes, voir normalizeDeco)
   const P = t.path, laps = def.laps > 1 ? def.laps : 1, one = laps > 1 ? (P.length - 1) / laps + 1 : P.length;
   if (!P.wallLine) P.wallLine = new Array(P.length).fill(0);
   const want = o.wall === 'bas' ? 6 : -6, d = (j) => hypot2(P[j][0] - a[0], P[j][2] - a[2]);
@@ -977,7 +977,8 @@ export function buildBuiltin(def) {
       // Panneaux et solides (0.9.74) : cap (+ rot) sur la grille de π/8, ramené dans ]−π, π] (π exact : quatre quarts de tour dans l'éditeur redonnent le même cap).
       // Obstacles : calcul d'avant, inchangé au bit près.
       if (o.rot || !isObstacle(o.k)) { let k = Math.round((ry + (o.rot || 0)) / (Math.PI / 8)); while (k > 8) k -= 16; while (k <= -8) k += 16; ry = (k * Math.PI) / 8; } else ry = +ry.toFixed(4);
-      t.addDeco({ k: o.k, x: q(a[0] + (-dz / l) * (o.side || 0), 0.5), y: q(a[1] + (o.dy || 0), 0.1), z: q(a[2] + (dx / l) * (o.side || 0), 0.5), ry, s: o.s || 1, c: o.c || 0, ph: o.ph || 0 });
+      // (circuit généré : valeurs exactes, jouées depuis la mémoire ; voir track/edit.js, normalizeDeco)
+      t.addDeco({ k: o.k, x: q(a[0] + (-dz / l) * (o.side || 0), 0.5), y: q(a[1] + (o.dy || 0), 0.1), z: q(a[2] + (dx / l) * (o.side || 0), 0.5), ry, s: o.s || 1, c: o.c || 0, ph: o.ph || 0 }, { exact: true });
     }
     for (const o of def.obst.filter((x) => x.wall).sort((x, y) => x.at - y.at)) {
       const i = Math.min(n - 2, Math.floor(n * o.at)), a = P[i], b = P[i + 1], dx = b[0] - a[0], dz = b[2] - a[2], l = hypot2(dx, dz) || 1;
