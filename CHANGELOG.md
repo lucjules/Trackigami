@@ -6,6 +6,17 @@ multijoueurs y sont liés. Une version qui change `PHYS_VER` impose de **redépl
 
 *Les nombres des sections anciennes (portées en cases, vitesses de saut…) sont ceux du monde de leur époque ; le monde est passé de cases de 24 m à 32 m en 0.9.11.*
 
+## Bêta 0.16.1 — filet de tests avant les corrections du noyau, du modèle et des entrées
+
+**`PHYS_VER` reste 38**, rien ne change dans le jeu : cette version n'ajoute que des tests (et le numéro de version). Elle prépare les phases qui toucheront le noyau déterministe (la fermeture de `js/verify.js`, 42 fichiers), le modèle de circuit, les entrées et la persistance : jusqu'ici aucun test automatique ne finissait une vraie course en direct pour la faire rejouer par le chemin du serveur, et aucun ne reproduisait les défauts connus de l'audit (`docs/audit/AUDIT_COMPLET.md`).
+
+- **Mécanisme « défaut connu » : `bugConnu(id, fn)`** (`tools/harness.mjs`, essayé par `test-harnais`). `fn` écrit ce que le jeu *devrait* faire : le test réussit tant que le défaut est présent, et échoue dès qu'il est corrigé (« le défaut <id> est corrigé : retire bugConnu et garde ce test comme test de régression »). Une exception qui n'est pas une assertion (test cassé, mise en scène ratée : `precondition`) est un échec, jamais un défaut « connu ». `BUG_VERBOSE=1` montre comment chaque défaut se manifeste.
+- **Course en direct ↔ rejeu** (`tools/test-live-replay.mjs`, Chromium) : « Premiers Éclats » et « Laminoir » (obstacles) courus par `RaceSession.update` / `_stepOnce` avec un pilote automatique bruité à graine fixe, trois retours au checkpoint par la vraie touche R (dont deux vers un vrai checkpoint), et pour deux autres courses des réapparitions automatiques ; puis le code relu, `replayRun`, `GhostRunner` pas à pas (écart de position 0 m à chaque pas) et `verifyRun` côté Node. **Résultat : identiques.** Variante TECH-015 (erreur injectée dans la boucle) en défaut connu.
+- **Noyau** (`tools/test-noyau-defauts.mjs`) : TECH-001 (retour au checkpoint aérien, puis sur les plaques moto, bateau, deltaplane), TECH-013 (vitesse de départ), TECH-014 (logique « temps » avec chrono conservé), GAME-004 (téléportation de plus de 3 m à la réception sur un ruban : un fuzz de 144 courses perturbées à graines fixes sur « Épave Engloutie » la retrouve ; la graine 348437 de l'audit n'est pas retrouvée, les sondes d'origine étant perdues).
+- **Modèle** (`tools/test-modele-defauts.mjs`) : TECH-002 (obstacle roulé de π : roulis, signature, `verifyPublish`, `verifyRun`), TECH-034 et TECH-035 (écritures non arrondies, annuler / rétablir, solide incliné). Le déplacement direct d'une décoration (x, y, z) n'est pas un défaut : testé comme tel.
+- **Entrées** (`tools/test-browser-entrees.mjs`, Chromium, vrais événements clavier, manette simulée) : TECH-004 (Entrée sur « Reprendre »), TECH-005 (A tenu à l'ouverture de la pause et de l'arrivée), TECH-006 (case de liaison cliquée puis course), TECH-017 (P, T, C, H sous la fenêtre « Commandes »), chacun avec un témoin sans défaut.
+- Documentation : `docs/TESTS.md`.
+
 ## Bêta 0.16.0 — le jeu s'appelle Trackigami
 
 **`PHYS_VER` reste 38**, rien ne change dans la course : records, fantômes, médailles et classements restent valables.

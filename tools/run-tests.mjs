@@ -4,7 +4,7 @@
 // bilan. Contrairement à l'ancienne chaîne de `&&`, un échec n'arrête pas les autres : on voit tout ce qui casse d'un seul coup.
 //   node tools/run-tests.mjs physique     ne lance que les fichiers dont le nom contient « physique »
 //   node tools/run-tests.mjs --list       liste les fichiers
-// Le test navigateur (test-browser.mjs, qui demande Playwright et Chromium) se lance à part : npm run test:browser.
+// Les tests navigateur (test-browser*.mjs et test-live-replay.mjs, qui demandent Playwright et Chromium) se lancent à part : npm run test:browser.
 import { spawn } from 'node:child_process';
 import { readdirSync, existsSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
@@ -14,7 +14,9 @@ import { dirname, join } from 'node:path';
 const dir = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const filter = args.find((a) => !a.startsWith('--'));
-const files = readdirSync(dir).filter((f) => /^test-.*\.mjs$/.test(f) && !f.startsWith('test-browser')).sort();
+// Les tests navigateur (Playwright + Chromium) se lancent à part (npm run test:browser) : test-browser*.mjs, et test-live-replay.mjs (course en direct ↔ rejeu), qui n'a pas ce préfixe.
+const BROWSER_ONLY = (f) => f.startsWith('test-browser') || f === 'test-live-replay.mjs';
+const files = readdirSync(dir).filter((f) => /^test-.*\.mjs$/.test(f) && !BROWSER_ONLY(f)).sort();
 if (args.includes('--list')) { console.log(files.join('\n')); process.exit(0); }
 
 // Contrôles qui ne sont pas des suites de tests : [fichier, muet ?]. « check-generated » réécrit sw.js un instant : il passe seul, avant le reste.
