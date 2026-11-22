@@ -24,7 +24,10 @@ const CIRCUIT_TABS = [['gen', 'Général'], ['course', 'Course'], ['cond', 'Cond
 
 // Recherche : minuscules, sans accents, blancs réduits.
 const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
-const WIND_DIRS = [[0, 'Vers le nord'], [45, 'Vers le nord-est'], [90, 'Vers l’est'], [135, 'Vers le sud-est'], [180, 'Vers le sud'], [225, 'Vers le sud-ouest'], [270, 'Vers l’ouest'], [315, 'Vers le nord-ouest']];
+// Direction du vent : TOUS les pas de 15° que la règle accepte (TECH-056 : la liste n'avait que les pas de 45° — un code venu d'ailleurs avec windDir 30 était réécrit en 45° et changeait de
+// signature à la validation de la fenêtre). Les huit points cardinaux gardent leur nom ; les autres, leur cap en degrés.
+const WIND_NAMED = { 0: 'Vers le nord', 45: 'Vers le nord-est', 90: 'Vers l’est', 135: 'Vers le sud-est', 180: 'Vers le sud', 225: 'Vers le sud-ouest', 270: 'Vers l’ouest', 315: 'Vers le nord-ouest' };
+const WIND_DIRS = Array.from({ length: 24 }, (_, i) => [i * 15, WIND_NAMED[i * 15] || `Cap ${i * 15}°`]);
 // Options proposées dans l'onglet « Options » : bascules (route) et choix exclusifs (checkpoint, thème, mouvement).
 // Avec une pièce choisie, elles s'ajoutent à la pose (aperçu compris) ; sans pièce, elles s'appliquent à la pièce cliquée.
 const OPTION_GROUPS = [
@@ -1167,7 +1170,7 @@ export const paletteMethods = {
     $f('pp-g0').value = T.g0 || 100;
     $f('pp-veh').value = T.veh0 || 'car';
     $f('pp-ig').checked = !!T.flip0;
-    $f('pp-grip').value = T.grip; $f('pp-wind').value = T.wind; $f('pp-winddir').value = String(Math.round(T.windDir / 45) * 45 % 360);
+    $f('pp-grip').value = T.grip; $f('pp-wind').value = T.wind; $f('pp-winddir').value = String(Math.round(T.windDir / 15) * 15 % 360);
     $f('pp-sky').value = T.ambiance.sky; $f('pp-fog').value = T.ambiance.fog; $f('pp-music').value = T.ambiance.music;
     $f('pp-weather').value = T.ambiance.weather; $f('pp-cycle').value = T.ambiance.cycle;
     $f('pp-sun-on').checked = T.ambiance.sunAz >= 0; $f('pp-sun').value = T.ambiance.sunAz >= 0 ? T.ambiance.sunAz : 90;

@@ -54,7 +54,7 @@ export function buildWikiPage() {
 
   // ---- Icônes de la palette de l'éditeur : l'objet ICONS de js/editor/palette.js, évalué sans le reste du module (qui a besoin du DOM) ----------------
   const src = read('js/editor/palette.js').split('\n');
-  const start = src.findIndex((l) => l.startsWith('const WIND_DIRS'));
+  const start = src.findIndex((l) => l.startsWith('const WIND_NAMED'));
   const open = src.findIndex((l, i) => i > start && l.startsWith('const ICONS = {'));
   const close = src.findIndex((l, i) => i > open && l === '};');
   if (start < 0 || open < 0 || close < 0) throw new Error('js/editor/palette.js : objet ICONS introuvable (le wiki lit ses icônes)');

@@ -420,6 +420,8 @@ test('sélection : déplacer, pivoter, monter une zone avec des décorations lib
 // Phase 9 : défauts indépendants de l'éditeur (TECH-036, 038, 054, 055, 056, 057, 058, 059, 062).
 import { scriptsToLogic } from '../js/logicText.js';
 import { clipWithoutGroups } from '../js/editorTools.js';
+import { scriptTrack } from '../js/track.js';
+import { canonicalSnapshot, withoutVerification, testGravity } from '../js/editor/history.js';
 const layerSession = (track, extra = {}) => { const s = session(track, extra); s.hiddenGroups = new Set(); s.lockedGroups = new Set(); s.view = { setGroupVisible() {}, rebuild() {} }; s.circuitId = 'c-test'; return s; };
 
 console.log('TECH-036 : calques verrouillés ou masqués et décorations');
@@ -494,6 +496,101 @@ test('coller dans un AUTRE circuit (ou un prefab) remet les groupes à 0 ; dans 
   // rotation du presse-papiers : l'origine suit
   s1.clip = clip; s1.rotateClipboard(); assert.equal(s1.clip.origin, 'c-test');
   done(s1); done(s2); done(s3);
+});
+
+console.log('TECH-054 : un autre circuit chargé dans la session');
+const verifiedTrack = () => { const t = scriptTrack('v', 'start S3 finish'); t.setVerified(12.345); return t; };
+const loadable = (track) => { const s = layerSession(track); s.target = { x: 0, z: 0, set() {} }; s._savedSnap = s._saveKey(); return s; };
+test('importer après avoir masqué et verrouillé des calques : calques remis à zéro (les groupes du nouveau circuit sont visibles et modifiables) ; le presse-papiers sait qu\'il vient d\'un autre circuit', () => {
+  const tr = verifiedTrack(); tr.tiles[1].g = 1; tr.version++;
+  const shown = [];
+  const s = loadable(tr); s.view = { setGroupVisible: (g, v) => shown.push([g, v]), rebuild() {} };
+  s.setGroupHidden(1, true); s.setGroupLocked(2, true); shown.length = 0;
+  const before = s.circuitId;
+  const other = scriptTrack('autre', 'start S2 finish'); other.tiles[1].g = 1; other.tiles[2].g = 2;
+  s.loadCode(other.encode());
+  assert.equal(s.hiddenGroups.size, 0); assert.equal(s.lockedGroups.size, 0);
+  assert.deepEqual(shown, [[1, true]], 'le groupe 1 est ré-affiché dans la vue');
+  assert.ok(s._layerOk(s.track.tiles[1]) && s._layerOk(s.track.tiles[2]), 'les groupes 1 et 2 du circuit importé sont libres');
+  assert.notEqual(s.circuitId, before);
+  s.newTrack();
+  assert.equal(s.hiddenGroups.size + s.lockedGroups.size, 0);
+  done(s);
+});
+test('annuler un « Nouveau » ou un import rend le circuit d\'avant AVEC sa vérification ; rétablir rend le nouveau (non vérifié)', () => {
+  for (const how of ['newTrack', 'loadCode']) {
+    const tr = verifiedTrack(), sig = tr.signature();
+    precondition(tr.verified, 'le circuit est vérifié');
+    const s = loadable(tr);
+    if (how === 'newTrack') s.newTrack(); else s.loadCode(scriptTrack('autre', 'start S2 finish').encode());
+    assert.equal(tr.verified, false, how + ' : le nouveau circuit n\'est pas vérifié');
+    s.undo();
+    assert.equal(tr.signature(), sig, how + ' : le circuit d\'avant est revenu');
+    assert.equal(tr.verified, true, how + ' : avec sa vérification');
+    assert.equal(tr.vt, 12.345);
+    s.redo();
+    assert.equal(tr.verified, false, how + ' : rétabli : le nouveau circuit');
+    done(s);
+  }
+});
+test('revenir à un état déjà vérifié le redonne vérifié (la vérification courante est gardée par un instantané qui n\'en a pas)', () => {
+  const tr = scriptTrack('v', 'start S3 finish'); const s = layerSession(tr); s._commit();
+  tr.setVerified(9.5); precondition(tr.verified, 'vérifié');
+  tr.add({ t: 'straight', x: 3, z: 0, l: 0, r: 0 }); s._commit();
+  assert.equal(tr.verified, false, 'modifié : plus vérifié');
+  s.undo();
+  assert.equal(tr.verified, true, 'annulé : l\'état vérifié est revenu vérifié');
+  done(s);
+});
+test('retour d\'essai : une vérification terminée pendant l\'essai ne fait pas jeter l\'historique (le contenu est le même) et n\'ajoute pas de pas fantôme', () => {
+  const tr = decoTrack(); tr.add({ t: 'straight', x: 0, z: -1, l: 0, r: 0 });
+  const s = layerSession(tr); s._commit();
+  const quitte = canonicalSnapshot(s._snapshot());
+  tr.setVerified(7);
+  const rouvert = session(Track.decode(tr.encode()))._snapshot();
+  assert.notEqual(quitte, rouvert, 'mise en scène : le texte diffère par la vérification');
+  assert.equal(withoutVerification(quitte), withoutVerification(rouvert));
+  done(s);
+});
+
+console.log('TECH-055 : test depuis le curseur et gravité');
+test('test depuis le curseur : le sens de gravité est celui de la pièce visée, pas celui de la règle « gravité inversée au départ »', () => {
+  const tr = new Track('f'); tr.setParams({ flip0: true });
+  tr.add({ t: 'start', x: 0, z: 0, l: 6, r: 0, v: 1 });
+  const ground = tr.add({ t: 'straight', x: 0, z: -1, l: 0, r: 0 }), ceiling = tr.add({ t: 'straight', x: 0, z: -2, l: 6, r: 0, v: 1 }), twist = tr.add({ t: 'twist', x: 3, z: 0, l: 3, r: 0 });
+  assert.equal(testGravity(ground), 1, 'route au sol d\'un circuit flip0 : gravité normale');
+  assert.equal(testGravity(ceiling), -1, 'route posée au plafond : inversée');
+  assert.equal(testGravity(twist), 1, 'un ruban retourne la voiture lui-même');
+  // de bout en bout : testHere transmet ce sens
+  const s = layerSession(tr); const got = [];
+  s.app.testTrack = (st, spawn) => got.push(spawn.gs);
+  s._targetTile = () => ground; s.testHere();
+  s._targetTile = () => ceiling; s.testHere();
+  assert.deepEqual(got, [1, -1]);
+  done(s);
+});
+
+console.log('TECH-059 : sortir quand l\'enregistrement échoue');
+test('stockage plein : on reste dans l\'éditeur ET une fenêtre propose « Rester », « Exporter le code » et « Quitter sans enregistrer » ; quitter sans enregistrer sort (puis va où on allait)', async () => {
+  const { editorFlowMethods } = await import('../js/app/editorFlow.js');
+  const tr = decoTrack(); const s = layerSession(tr);
+  const modals = [], menus = [], shared = [], after = [];
+  s.kind = 'editor'; s.autoSave = () => 'failed';
+  const app = { ...editorFlowMethods, session: s, ui: { modal: (m) => modals.push(m), flash() {} }, showMenu: (m) => menus.push(m), shareModal: (code, name) => shared.push([code, name]), _editorKeep: {} };
+  global.document = global.document || { createElement: () => ({ set innerHTML(v) { this.html = v; } }) };
+  assert.equal(app.leaveEditor(() => after.push('mytracks')), false, 'on reste');
+  assert.deepEqual(menus, [], 'pas de sortie');
+  assert.equal(modals.length, 1);
+  assert.deepEqual(modals[0].actions.map((a) => a.label), ['Rester dans l’éditeur', 'Exporter le code', 'Quitter sans enregistrer']);
+  modals[0].actions[1].onClick(); await new Promise((r) => setTimeout(r, 5));
+  assert.equal(shared.length, 1, 'l\'export ouvre la fenêtre de partage avec le code du circuit');
+  assert.equal(shared[0][0], tr.encode());
+  assert.deepEqual(menus, []);
+  modals[0].actions[2].onClick(); await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(menus, ['menu'], 'quitter sans enregistrer sort');
+  assert.deepEqual(after, ['mytracks'], 'et va où on allait');
+  assert.equal(app._editorKeep, null);
+  done(s);
 });
 
 await finish('Éditeur : pot de peinture, validateur de placement (TECH-003, 052, 053), gizmo (TECH-037), décorations normalisées (TECH-034, 035).');

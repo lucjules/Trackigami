@@ -419,6 +419,147 @@ try {
     assert.doesNotMatch(panel, /Inclinaison \(X\)|Roulis \(Z\)|Retourner|Remettre droit/, 'un solide n\'expose ni inclinaison ni roulis');
     await ctx.close();
   });
+  // ---- Phase 9 : défauts indépendants de l'éditeur ----------------------------------------------------------------------------------------------------
+  // Écran d'un point 3D (le projeté de la caméra de l'éditeur).
+  const screenOf = (page, x, y, z) => page.evaluate(async ([x, y, z]) => {
+    const THREE = await import('/js/vendor/three.module.min.js');
+    const A = window.copytrack, r = A.renderer.domElement.getBoundingClientRect(), v = new THREE.Vector3(x, y, z).project(A.camera);
+    return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height };
+  }, [x, y, z]);
+  await test('TECH-036 : clic droit (outil décoration) et gomme à la souris : une décoration d\'un calque verrouillé ou masqué n\'est pas effacée ; celle d\'un calque libre l\'est', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await ed(page, () => {
+      const E = window.copytrack.session, T = E.track;
+      T.clear(); T.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 });
+      T.addDeco({ k: 'cone', x: 16, y: 0, z: 16, ry: 0, s: 1, g: 2 }); T.addDeco({ k: 'cone', x: 16, y: 0, z: 48, ry: 0, s: 1, g: 3 }); T.addDeco({ k: 'cone', x: 16, y: 0, z: 80, ry: 0, s: 1 });
+      E._changed(); E._commit(); E.setGroupLocked(2, true); E.setGroupHidden(3, true);
+      E.target.set(16, E.levelY(), 48); E.dist = 160;
+    });
+    await page.waitForTimeout(400);
+    for (const [z, tool, button] of [[16, 'deco:tree', 'right'], [48, 'deco:tree', 'right'], [16, 'erase', 'left'], [48, 'erase', 'left']]) {
+      await ed(page, (t) => window.copytrack.session.setTool(t), tool);
+      const p = await screenOf(page, 16, 0, z);
+      await page.mouse.move(p.x, p.y); await page.mouse.move(p.x + 1, p.y + 1); await page.waitForTimeout(150);
+      await page.mouse.click(p.x + 1, p.y + 1, { button });
+      await page.waitForTimeout(150);
+      assert.equal(await ed(page, () => window.copytrack.session.track.decos.filter((d) => d.g).length), 2, `${tool} / ${button} sur z = ${z} : décoration protégée intacte`);
+    }
+    await ed(page, (t) => window.copytrack.session.setTool(t), 'erase');
+    const p = await screenOf(page, 16, 0, 80);
+    await page.mouse.move(p.x, p.y); await page.mouse.move(p.x + 1, p.y + 1); await page.waitForTimeout(150);
+    await page.mouse.click(p.x + 1, p.y + 1);
+    await page.waitForFunction(() => window.copytrack.session.track.decos.length === 2, null, { timeout: 5000, polling: 50 });
+    await ctx.close();
+  });
+  await test('TECH-038 : un groupe cité seulement par la logique n\'est pas proposé par « Nouveau groupe » (fenêtre « Groupes et calques »)', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await ed(page, () => {
+      const E = window.copytrack.session, T = E.track;
+      T.clear(); T.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); T.add({ t: 'straight', x: 0, z: -1, l: 0, r: 0 });
+      T.setLogic({ v: 1, off: [1], vars: 0, rules: [{ on: ['start'], if: [], do: [['show', 1]], once: true }] });
+      E._changed(); E._commit(); E.setTool('select'); E.sel = { x0: 0, z0: -1, x1: 0, z1: -1 }; E.openGroups();
+    });
+    await page.waitForSelector('.ed-groups [data-a="new"]');
+    await page.locator('.ed-groups [data-a="new"]').click();
+    await page.waitForTimeout(200);
+    const r = await ed(page, () => { const T = window.copytrack.session.track; return { groups: T.tiles.map((t) => t.g), lg: T.logicGroups() }; });
+    assert.deepEqual(r.groups, [0, 2], 'la pièce est rangée dans le groupe 2, pas dans le groupe 1 de la logique (caché au départ)');
+    await ctx.close();
+  });
+  await test('TECH-057 : Ctrl+A sélectionne aussi les décorations hors de l\'emprise des pièces ; Suppr les efface', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await ed(page, () => { const E = window.copytrack.session, T = E.track; T.clear(); T.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); T.addDeco({ k: 'tree', x: 500, y: 0, z: -400, ry: 0, s: 1 }); E._changed(); E._commit(); E.setTool('inspect'); });
+    await page.keyboard.press('Control+a'); await page.waitForTimeout(200);
+    assert.equal(await ed(page, () => window.copytrack.session._selDecos().length), 1);
+    await ed(page, () => window.copytrack.session.deleteSel(true));
+    assert.equal(await ed(page, () => window.copytrack.session.track.decos.length), 0);
+    await ctx.close();
+  });
+  await test('TECH-054 / 058 : importer un circuit après avoir masqué des calques : calques remis à zéro, un presse-papiers d\'avant colle sans groupes ; annuler l\'import rend l\'ancien circuit vérifié', async () => {
+    const { ctx, page } = await open(1280, 720);
+    const r = await ed(page, async () => {
+      const E = window.copytrack.session, T = E.track, { scriptTrack } = await import('/js/track.js');
+      T.clear(); T.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); T.add({ t: 'straight', x: 0, z: -1, l: 0, r: 0, g: 1 }); T.setVerified(11.5);
+      E._changed(); E._commit();
+      E.setTool('select'); E.sel = { x0: 0, z0: -1, x1: 0, z1: -1 }; E.copySel(true); E.sel = null;      // (copié AVANT de masquer : un calque masqué ne se copie pas)
+      E.setGroupHidden(1, true); E.setGroupLocked(1, true);
+      const other = scriptTrack('Autre', 'start S2 finish'); other.tiles[1].g = 1;
+      E.loadCode(other.encode());
+      const a = { hidden: E.hiddenGroups.size, locked: E.lockedGroups.size, mine: E._layerOk(T.tiles[1]), verified: T.verified };
+      E.setTool('select'); E.hover = { cx: 6, cz: 6 }; E.level = 0; E.doPaste();
+      const pasted = T.tiles.filter((t) => t.x === 6 && t.z === 6).map((t) => t.g | 0);
+      E.undo(); E.undo();
+      return { ...a, pasted, back: { name: T.name, verified: T.verified, vt: T.vt } };
+    });
+    assert.deepEqual([r.hidden, r.locked, r.mine, r.verified], [0, 0, true, false]);
+    assert.deepEqual(r.pasted, [0], 'collé dans un autre circuit : groupe 0');
+    assert.equal(r.back.verified, true, 'annuler l\'import rend l\'ancien circuit vérifié : ' + JSON.stringify(r.back));
+    await ctx.close();
+  });
+  await test('TECH-056 : un code avec windDir 30 : ouvrir « Circuit » et valider ne change ni la direction ni la signature du vent', async () => {
+    const { ctx, page } = await open(1280, 720);
+    const before = await page.evaluate(async () => {
+      const { scriptTrack } = await import('/js/track.js'), t = scriptTrack('Vent', 'start S4 finish');
+      t.setParams({ wind: 40, windDir: 30 });
+      await window.copytrack.openEditor({ code: t.encode(), name: 'Vent' });
+      return { dir: t.windDir, sig: t.signature() };
+    });
+    await page.waitForFunction(() => window.copytrack.session && window.copytrack.session.kind === 'editor' && window.copytrack.session.track.name === 'Vent', null, { timeout: 30000, polling: 100 });
+    assert.equal(before.dir, 30);
+    await page.evaluate(() => { window.copytrack.ui.closeModal(); window.copytrack.session.openParams('cond'); });
+    await page.waitForSelector('#pp-winddir');
+    assert.equal(await page.locator('#pp-winddir').inputValue(), '30', 'la liste propose 30°');
+    await page.locator('#modal-actions button.primary').click();      // « Appliquer »
+    await page.waitForTimeout(300);
+    const after = await ed(page, () => { const T = window.copytrack.session.track; return { dir: T.windDir, wind: T.wind, sig: T.signature() }; });
+    assert.equal(after.wind, 40);
+    assert.equal(after.dir, 30, 'la direction reste 30° (avant : réécrite en 45°)'); assert.equal(after.sig, before.sig, 'la signature ne change pas');
+    await ctx.close();
+  });
+  await test('TECH-062 : vue par niveau : les pièces estompées d\'un calque masqué ne s\'affichent pas', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await ed(page, () => {
+      const E = window.copytrack.session, T = E.track;
+      T.clear(); T.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); T.add({ t: 'straight', x: 0, z: -1, l: 5, r: 0, g: 4 });
+      E._changed(); E._commit(); E.focusLevel = true; E.setLevel(0); E.needsRebuild = true;
+    });
+    await page.waitForTimeout(600);
+    const count = () => ed(page, () => { const V = window.copytrack.session.view; return V.group.children.filter((c) => c.material === V.dimMat && c.visible).length; });
+    assert.ok(await count() >= 1, 'précondition : la pièce du niveau 5 est estompée');
+    await ed(page, () => window.copytrack.session.setGroupHidden(4, true));
+    assert.equal(await count(), 0, 'calque masqué : rien d\'estompé à l\'écran');
+    await ed(page, () => { const E = window.copytrack.session; E.needsRebuild = true; E.setLevel(1); E.setLevel(0); });
+    await page.waitForTimeout(500);
+    assert.equal(await count(), 0, 'après reconstruction : toujours masquée');
+    await ctx.close();
+  });
+  await test('TECH-059 : stockage plein : « Retour » reste dans l\'éditeur et propose d\'exporter le code ou de quitter sans enregistrer ; le bandeau « Recharger » ne recharge pas dans le dos du joueur', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await ed(page, () => { const E = window.copytrack.session; E.track.clear(); E.track.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); E.track.add({ t: 'straight', x: 0, z: -1, l: 0, r: 0 }); E._changed(); E._commit(); window.__keepAlive = 'oui'; });
+    await page.evaluate(() => { const S = window.Storage, real = S.prototype.setItem; window.__realSet = real; S.prototype.setItem = function (k, v) { if (/track|mine|draft|editor/i.test(k)) throw new window.DOMException('plein', 'QuotaExceededError'); return real.call(this, k, v); }; });
+    await page.evaluate(() => window.copytrack.leaveEditor());
+    await page.waitForFunction(() => /Circuit non enregistré/.test(document.getElementById('modal').textContent), null, { timeout: 5000 });
+    const labels = await page.evaluate(() => [...document.querySelectorAll('#modal-actions button')].map((b) => b.textContent));
+    assert.deepEqual(labels, ['Rester dans l’éditeur', 'Exporter le code', 'Quitter sans enregistrer']);
+    assert.equal(await ed(page, () => window.copytrack.session.kind), 'editor', 'toujours dans l\'éditeur');
+    // bandeau de mise à jour : pas de rechargement
+    await page.evaluate(() => { window.copytrack.ui.closeModal(); window.copytrack._newVersion = 'bêta 99'; window.copytrack.maybeShowUpdate(); document.querySelector('#update-bar [data-up="reload"]').click(); });
+    await page.waitForFunction(() => /Circuit non enregistré/.test(document.getElementById('modal').textContent) && [...document.querySelectorAll('#modal-actions button')].some((b) => /Recharger sans enregistrer/.test(b.textContent)), null, { timeout: 5000 });
+    assert.equal(await page.evaluate(() => window.__keepAlive), 'oui', 'la page n\'a pas été rechargée');
+    // exporter le code
+    await page.evaluate(() => { window.copytrack.ui.closeModal(); window.copytrack.leaveEditor(); });
+    await page.waitForFunction(() => /Circuit non enregistré/.test(document.getElementById('modal').textContent));
+    await page.evaluate(() => [...document.querySelectorAll('#modal-actions button')].find((b) => /Exporter/.test(b.textContent)).click());
+    await page.waitForFunction(() => /Partager le circuit/.test(document.getElementById('modal-title').textContent), null, { timeout: 5000 });
+    assert.match(await page.locator('#modal-body textarea').inputValue(), /^SHW3:/, 'le code du circuit est proposé');
+    // quitter sans enregistrer
+    await page.evaluate(() => { window.copytrack.ui.closeModal(); window.copytrack.leaveEditor(); });
+    await page.waitForFunction(() => /Circuit non enregistré/.test(document.getElementById('modal').textContent));
+    await page.evaluate(() => [...document.querySelectorAll('#modal-actions button')].find((b) => /Quitter sans/.test(b.textContent)).click());
+    await page.waitForFunction(() => window.copytrack.mode === 'menu', null, { timeout: 8000 });
+    await page.evaluate(() => { window.Storage.prototype.setItem = window.__realSet; });
+    await ctx.close();
+  });
   await test('rangement 0.12 sur téléphone (844 × 390) : le panneau est un tiroir, il se referme après un choix ; la vue reste dégagée', async () => {
     const { ctx, page } = await open(844, 390);
     const drawer = () => page.evaluate(() => { const r = document.getElementById('ed-palette').getBoundingClientRect(); return r.right > 60 && r.left < 70; });

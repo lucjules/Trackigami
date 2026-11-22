@@ -25,7 +25,11 @@ export const updateMethods = {
     }
     bar.innerHTML = `<span>Nouvelle version disponible :</span><b>${esc(v)}</b><button type="button" class="btn primary" data-up="reload">Recharger</button><button type="button" class="btn" data-up="later">Plus tard</button>`;
     bar.querySelector('[data-up="reload"]').onclick = () => {
-      if (this.mode === 'editor' && this.session && this.session.autoSave) this.session.autoSave();
+      // (TECH-059 : si l'éditeur n'a pas pu enregistrer, on ne recharge pas dans son dos : la fenêtre propose d'exporter le code, ou de recharger sans enregistrer)
+      if (this.mode === 'editor' && this.session && this.session.autoSave && this.session.autoSave() === 'failed') {
+        this.saveFailedModal(this.session, { leaveLabel: 'Recharger sans enregistrer', onLeave: () => location.reload() });
+        return;
+      }
       location.reload();
     };
     bar.querySelector('[data-up="later"]').onclick = () => { this._updateHidden = true; bar.remove(); };

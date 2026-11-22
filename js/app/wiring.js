@@ -233,7 +233,7 @@ export const wiringMethods = {
     ed.toggleMenu(false);          // toute autre action (y compris un élément d'un menu) referme les menus
     switch (a) {
       case 'menu': this.leaveEditor(); break;
-      case 'open': if (this.leaveEditor()) this.showScreen('mytracks'); break;
+      case 'open': this.leaveEditor(() => this.showScreen('mytracks')); break;
       case 'saveas': ed.saveCopy(); break;
       case 'rename': ed.renameDialog(); break;
       case 'topview': ed.toggleTopView(); ed._refreshUI(); break;

@@ -8278,6 +8278,30 @@ var Track = class _Track {
       ...s
     ].sort((a, b) => a - b);
   }
+  // Numéros de groupe CITÉS par la logique du circuit (cachés au départ, cibles de zone, conditions, actions), même si aucune pièce n'y est rangée (TECH-038).
+  logicGroups() {
+    const L4 = sanitizeLogic(this.lg), s = /* @__PURE__ */ new Set();
+    if (!L4) return [];
+    for (const g of L4.off) s.add(g);
+    for (const r of L4.rules) {
+      if (r.on[0] === "zone") s.add(r.on[1]);
+      for (const c of r.if) if (c[0] === "shown" || c[0] === "hidden") s.add(c[1]);
+      for (const a of r.do) if (a[0] === "show" || a[0] === "hide" || a[0] === "toggle") s.add(a[1]);
+    }
+    return [
+      ...s
+    ].sort((a, b) => a - b);
+  }
+  // Groupes RÉSERVÉS : ceux qui contiennent quelque chose, qui ont un nom ou que la logique cite (un « nouveau groupe » ne doit jamais en réutiliser un).
+  reservedGroups() {
+    return [
+      .../* @__PURE__ */ new Set([
+        ...this.usedGroups(),
+        ...this.groupNames().map(([g]) => g),
+        ...this.logicGroups()
+      ])
+    ].sort((a, b) => a - b);
+  }
   // ---- Sérialisation -----------------------------------------------------
   encode() {
     const arr = [];
@@ -20395,4 +20419,4 @@ Deno.serve(createHandler({
   serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   allowedOrigin: Deno.env.get("ALLOWED_ORIGIN") ?? "*"
 }));
-globalThis.__COPYTRACK_BUILD__ = "89bded0c2739ea09";
+globalThis.__COPYTRACK_BUILD__ = "e0d0222ce4fd31a3";

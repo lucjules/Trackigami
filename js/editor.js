@@ -18,7 +18,7 @@ import { toolMethods } from './editor/tools.js';
 import { groupMethods } from './editor/groups.js';
 import { logicUiMethods } from './editor/logicUi.js';
 import { selectionMethods } from './editor/selection.js';
-import { historyMethods, canonicalSnapshot } from './editor/history.js';
+import { historyMethods, canonicalSnapshot, withoutVerification } from './editor/history.js';
 import { prefabMethods } from './editor/prefabs.js';
 import { cdecoMethods } from './editor/cdeco.js';
 import { scriptsUiMethods } from './editor/scriptsUi.js';
@@ -135,8 +135,8 @@ export class EditorSession {
     app._editorKeep = null;
     // (phase 8, TECH-034 : comparaison sur la forme CANONIQUE de l'instantané quitté — celui du circuit écrit en code puis relu, comme l'essai le fait — ; avant, une seule
     // décoration posée « Libre » suffisait à faire jeter l'historique, le presse-papiers et les calques masqués ou verrouillés à chaque retour d'essai)
-    const kept = !!(keep && state.keepId === keep.id && canonicalSnapshot(keep.history[keep.hIndex]) === this.history[0]);
-    if (kept) this._restoreKeep(keep);
+    const kept = !!(keep && state.keepId === keep.id && withoutVerification(canonicalSnapshot(keep.history[keep.hIndex])) === withoutVerification(this.history[0]));
+    if (kept) { this._restoreKeep(keep); this.history[this.hIndex] = this.history[0]; }      // (le pas courant devient l'état rouvert : une vérification terminée pendant l'essai n'ajoute pas de pas fantôme)
 
     // Le gizmo (TransformControls) s'abonne aux clics AVANT l'éditeur : il décide le premier s'il est saisi.
     this.inspector = new Inspector(this);

@@ -6,6 +6,7 @@ import { Track, tileToRow, rowToTile, lossBlocking, normalizeDeco } from '../tra
 import { lossMessage, lossNote } from '../lossMessage.js';
 import { setEditorDraft, saveMyTrack, newId, wroteOk } from '../storage.js';
 import { centerlineWorld } from '../ribbons.js';
+import { newCircuitId } from './shared.js';
 export const historyMethods = {
   exportState() {
     return {
@@ -57,7 +58,9 @@ export const historyMethods = {
     const data = JSON.parse(snap);
     const { vt, vh, decor } = this.track;
     fillFromSnapshot(this.track, data);
-    this.track.vt = vt; this.track.vh = vh;
+    // (TECH-054 : la vérification est dans l'instantané — annuler un « Nouveau » ou un import rend le circuit d'avant AVEC la sienne. Un instantané sans vérification garde celle
+    // du moment : revenir à un état qu'on avait vérifié le redonne vérifié, la signature (vh) décide.)
+    if (data.v && data.v[0] > 0) { this.track.vt = data.v[0]; this.track.vh = data.v[1]; } else { this.track.vt = vt; this.track.vh = vh; }
     if (this.track.decor !== decor) { this._applyDecor(); this.gridKey = ''; }
     this._changed(false);
     this.needsRebuild = true;
@@ -164,9 +167,20 @@ export const historyMethods = {
     if (r === 'saved') this.app.ui.flash(`« ${this.track.name} » enregistré dans « Mes circuits ».`, 2.4);
   },
 
+  // Un autre circuit est chargé dans la session (Nouveau, Importer) : ce qui n'appartient qu'au circuit d'avant est remis à zéro — calques masqués et verrouillés (TECH-054 :
+  // les groupes 1, 2 du nouveau circuit restaient invisibles ou verrouillés) et circuit d'origine du presse-papiers (TECH-058).
+  _resetForOtherTrack() {
+    for (const g of this.hiddenGroups || []) this.view.setGroupVisible(g, true);
+    this.hiddenGroups = new Set(); this.lockedGroups = new Set();
+    this.circuitId = newCircuitId();
+    this.selGroup = 0;
+  },
+
   newTrack() {
     const r = this.autoSave();
     if (r === 'failed') return;
+    this._commit();      // (l'état d'avant, avec sa vérification, est le dernier pas : « annuler » le rend tel quel — TECH-054)
+    this._resetForOtherTrack();
     this.track.clear();
     this.track.name = 'Mon circuit';
     this.track.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 });
@@ -213,6 +227,8 @@ export const historyMethods = {
     const t = Track.decode(code);
     const r = this.autoSave();
     if (r === 'failed') return;
+    this._commit();      // (voir newTrack)
+    this._resetForOtherTrack();
     const tr = this.track;
     tr.clear();
     for (const tile of t.tiles) tr.add(tile);
@@ -281,7 +297,7 @@ export const historyMethods = {
     }
     const a = pts[0], b = pts[1];
     const yaw = Math.atan2(-(b[0] - a[0]), -(b[2] - a[2]));
-    const gs = (t.v && PIECES[t.t].kind !== 'ribbon' && PIECES[t.t].kind !== 'loop') || this.track.flip0 ? -1 : 1;
+    const gs = testGravity(t);
     this.app.testTrack(this._stateForTest(), { x: a[0] + (b[0] - a[0]) * 0.5, y: a[1], z: a[2] + (b[2] - a[2]) * 0.5, yaw, gs });
   },
 
@@ -297,6 +313,11 @@ export const historyMethods = {
   },
 };
 
+// Sens de gravité d'un test lancé depuis le curseur (TECH-055, décision D-2 par défaut) : celui de la PIÈCE VISÉE (à l'envers : -1), et non celui de la règle « gravité inversée
+// au départ » (flip0), qui ne vaut que pour la pièce de départ (raccordRaceLogic : placeAtStart). Avant, sur un circuit qui démarre au plafond, tester depuis une route
+// ordinaire posée au sol mettait la voiture en gravité inversée : elle tombait vers le ciel. Les rubans (vrille, looping…) retournent la voiture eux-mêmes : gravité normale.
+export const testGravity = (t) => (t.v && PIECES[t.t].kind !== 'ribbon' && PIECES[t.t].kind !== 'loop' ? -1 : 1);
+
 // ---- Instantanés d'historique (phase 8 : TECH-034, TECH-035 ; transversal TRANS-01) -------------------------------------------------------------------------------
 // Une chaîne JSON par état : pièces (lignes TILE_FIELDS), décorations NORMALISÉES (normalizeDeco, la normalisation du modèle : ce que la restauration redonne), noms de
 // groupes, logique, tours, réglages. Écriture = relecture : snapshotOf(fillFromSnapshot(t, s)) === s pour tout instantané s écrit par snapshotOf. Avant, l'instantané gardait les
@@ -304,6 +325,7 @@ export const historyMethods = {
 const decoRow = (o) => { const n = normalizeDeco(o) || o; return [n.k, n.x, n.y, n.z, n.ry, n.s, n.c, n.u, n.ph || 0, n.cc || '', n.cp || null, n.g || 0, n.rx || 0, n.rz || 0]; };      // (cp : formes d'une pièce perso, sans elles l'annulation la perdait)
 export function snapshotOf(track) {
   return JSON.stringify({
+    ...(track.vt > 0 ? { v: [track.vt, track.vh] } : {}),      // vérification de l'auteur (TECH-054) : absente tant que le circuit n'a jamais été vérifié
     t: track.tiles.map(tileToRow),
     d: track.decos.map(decoRow),
     gn: track.groupNames(),
@@ -333,4 +355,12 @@ export function fillFromSnapshot(track, data) {
 // rouvert dans l'éditeur). Sert à comparer, au retour d'un essai, l'état mis de côté et l'état rouvert (TECH-034) sans dépendre d'une valeur gardée plus finement en mémoire.
 export function canonicalSnapshot(snap) {
   return snapshotOf(Track.decode(fillFromSnapshot(new Track(''), JSON.parse(snap)).encode()));
+}
+
+// Le même instantané sans la vérification de l'auteur : elle change quand on vérifie (course de vérification), sans que le CONTENU du circuit change ; le retour d'un essai
+// compare le contenu (TECH-034 / 054).
+export function withoutVerification(snap) {
+  const d = JSON.parse(snap);
+  delete d.v;
+  return JSON.stringify(d);
 }

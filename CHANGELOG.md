@@ -6,6 +6,23 @@ multijoueurs y sont liés. Une version qui change `PHYS_VER` impose de **redépl
 
 *Les nombres des sections anciennes (portées en cases, vitesses de saut…) sont ceux du monde de leur époque ; le monde est passé de cases de 24 m à 32 m en 0.9.11.*
 
+## Bêta 0.16.8 — éditeur : neuf défauts indépendants (calques, groupes, états gardés, sélection, collage, sortie)
+
+**`PHYS_VER` reste 39** ; aucune clé de classement ne change, les circuits existants et les 72 circuits officiels se relisent à l'identique (aucun changement du format du code, de la signature ni de la physique). **Fonction `submit-score` régénérée** (`npm run build:function`) : seul `Track` y gagne deux méthodes de lecture (`logicGroups`, `reservedGroups`) ; rien n'est déployé.
+
+Audit : `TECH-036`, `TECH-038`, `TECH-054`, `TECH-055`, `TECH-056`, `TECH-057`, `TECH-058`, `TECH-059`, `TECH-062` (lot LOT-3, éditeur). Deux commits : calques, groupes, sélection, collage, vue par niveau ; puis états gardés au mauvais moment et sortie.
+
+- **La gomme et le clic droit n'effacent plus de décorations de calques verrouillés ou masqués** (`TECH-036`) : le repli « décoration la plus proche » ne filtrait pas les calques (le rayon, lui, le faisait) ; la pipette non plus.
+- **Un groupe cité par la logique n'est plus « libre »** (`TECH-038`) : « Nouveau groupe », la liste des groupes, les listes de l'éditeur de logique et la conversion des déclencheurs de cases comptent les groupes cachés au départ, cibles de règles, de conditions ou d'actions, même vidés de leurs pièces. Avant, « Nouveau groupe » redonnait le numéro 1 d'un groupe caché au départ par la logique, et la conversion rangeait une route dedans : elle devenait cachée au départ.
+- **Annuler un « Nouveau » ou un import rend le circuit d'avant avec sa vérification ; un autre circuit chargé remet les calques à zéro** (`TECH-054`) : la vérification de l'auteur est dans l'instantané d'historique (absente tant que le circuit n'a jamais été vérifié ; un état déjà vérifié annulé puis rétabli reste vérifié), et Nouveau / Importer remettent à zéro les calques masqués et verrouillés. Le retour d'un essai compare le contenu sans la vérification : une vérification terminée pendant l'essai ne fait pas jeter l'historique.
+- **Test depuis le curseur : le sens de gravité est celui de la pièce visée** (`TECH-055`, décision D-2 par défaut). Avant, sur un circuit dont la règle « gravité inversée au départ » est cochée, tester depuis une route posée au sol mettait la voiture en gravité inversée : elle tombait vers le ciel. La règle ne vaut que pour la pièce de départ (comme `placeAtStart`).
+- **La direction du vent se règle par pas de 15°** (`TECH-056`), comme la règle : avec les pas de 45° de la liste, valider la fenêtre « Circuit » sur un code venu d'ailleurs avec 30° le réécrivait en 45° et changeait sa signature.
+- **« Tout sélectionner » prend les décorations hors des pièces** (`TECH-057`), et fonctionne sur un circuit réduit à des décorations.
+- **Coller dans un autre circuit remet les groupes à 0** (`TECH-058`) : le presse-papiers retient le circuit d'où il vient ; un prefab (origine inconnue) est traité de même. Dans le même circuit, les groupes sont gardés. Un message le dit.
+- **Plus d'impasse quand l'enregistrement échoue** (`TECH-059`) : « Retour » (ou « Mes circuits ») avec un stockage plein ou un code trop long ouvre une fenêtre « Circuit non enregistré » : rester, exporter le code, ou quitter sans enregistrer. Le bandeau « Recharger » (nouvelle version) ne recharge plus dans le dos du joueur : même fenêtre, avec « Recharger sans enregistrer ».
+- **La vue par niveau ne montre plus les calques masqués** (`TECH-062`) : les pièces estompées d'un groupe ont leur propre maillage, masqué avec le calque.
+- Tests : un test par identifiant dans `tools/test-editor.mjs` (et `tools/test-trackview.mjs` pour `TECH-062`), tous échouent sur le code d'avant ; dans Chromium, sept scénarios de l'éditeur (souris, Ctrl+A, fenêtres « Groupes et calques », « Circuit », stockage plein, bandeau de mise à jour).
+
 ## Bêta 0.16.7 — éditeur : un validateur de placement, une normalisation de décoration
 
 **`PHYS_VER` reste 39** : la physique ne change pas. Aucune clé de classement ne change ; les codes de circuits existants se relisent à l'identique (corpus de compatibilité, codes au hasard, 72 circuits officiels). **Fonction `submit-score` régénérée** (`npm run build:function`) : y changent la garde de placement de l'éditeur (absente hors de l'éditeur) et la normalisation de décoration (un code écrit par le jeu est déjà au pas du code : sa lecture ne change pas) ; rien n'est déployé.
