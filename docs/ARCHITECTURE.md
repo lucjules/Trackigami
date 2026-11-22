@@ -223,3 +223,26 @@ Rien ici n'est dans la fermeture de la vérification serveur (`js/verify.js`) : 
 - `js/extend.js` (pur) : l'outil « Prolonger » (`editor/tools.js : extend`, touche P).
 - `js/camrig.js` (pur, visuel) : aides de la caméra de poursuite (anticipation, compensation du retard, pente, visée de réception, sortie de ruban) ; `js/race/camera.js` n'y lit que l'état de la voiture.
 - La matrice est un test de non-régression : une évolution de physique ou de géométrie qui change un résultat fait échouer `tools/test-continuite.mjs` jusqu'à `--update` (changement voulu).
+
+## Entrées : l'arbitre (0.16.1, hors noyau de simulation)
+
+Le clavier, la manette et le tactile alimentent **un seul état** (`js/input.js` : `keys`, `pressed`, `padEdges`) que lisent la course, l'éditeur, le garage, les menus et les fenêtres. Pour qu'un geste n'agisse que là où il est destiné, **un contexte est actif à la fois** : `App.inputContext()` (`js/main.js`) le calcule à chaque image et `ui.js` le resynchronise à l'ouverture / la fermeture d'une fenêtre ou d'une superposition ; `Input.setContext()` remet les états à zéro à chaque transition. Le contrat détaillé est en tête de `js/input.js`.
+
+| Contexte | Quand | Prend en compte |
+| --- | --- | --- |
+| `capture` | une case de liaison attend une touche ou un bouton | la capture seulement (Échap l'annule) |
+| `modal` | une fenêtre (`ui.modal`) est ouverte | Échap / « retour » (fermer), flèches et « valider » à la manette ; **aucune** action de course ni raccourci d'éditeur |
+| `overlay` | pause ou arrivée affichée | la course (Échap / P reprend, T / Entrée rejoue à l'arrivée) et la navigation de menu ; « valider » demande un relâchement préalable |
+| `race` | course sans superposition | touches, manette et boutons tactiles de course |
+| `editor` | éditeur | raccourcis de l'éditeur, dont les raccourcis Ctrl |
+| `garage`, `menu` | garage, accueil, listes, profil | navigation de menu ; Échap = clic sur le « ← Retour » visible (`goBack()`) |
+
+Règles à ne pas casser en y touchant :
+
+- **Une transition vide `pressed` et `padEdges`** et remet l'état précédent des boutons de manette sur l'état courant ; « valider » reste verrouillé tant que A n'a pas été relâché (A est aussi « accélérer »). `keys` n'est pas vidé : le pilotage continue.
+- **Entrée / Espace sur un contrôle activable** (bouton, lien, carte) activent ce contrôle une fois et ne sont **jamais** une action de jeu. Les autres touches (R, C…) restent lues, y compris depuis un bouton focalisé (barre d'outils de l'éditeur).
+- **Une fenêtre ouverte prend les entrées et le focus** : aucune action de course ni raccourci d'éditeur dessous ; en solo, l'ouvrir en course met en pause (jamais en multijoueur).
+- **Les boutons tactiles déclenchent des actions** (`input.post`), pas des codes de touche ; les aides qui citent une touche se produisent avec `keyLabel` (`refreshKeyHints`, `hintKey`).
+- **Une capture de liaison est annulée** (`cancelCapture`) à tout changement d'écran, d'onglet, de course et à l'ouverture d'une fenêtre.
+- **Le format des commandes enregistrées n'est pas concerné** : `input.drive()`, `quantSteer` et `InputRecorder` restent tels quels (replays, fantômes et vérification serveur en dépendent ; test live ↔ rejeu).
+- Tests : `tools/test-entrees.mjs` (arbitre, sans navigateur) et les parcours « entrées » de `tools/test-browser.mjs`.

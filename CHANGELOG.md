@@ -6,6 +6,21 @@ multijoueurs y sont liés. Une version qui change `PHYS_VER` impose de **redépl
 
 *Les nombres des sections anciennes (portées en cases, vitesses de saut…) sont ceux du monde de leur époque ; le monde est passé de cases de 24 m à 32 m en 0.9.11.*
 
+## Bêta 0.16.1 — un arbitre d'entrées : plus de course perdue ni de réglage corrompu par un geste ordinaire
+
+**`PHYS_VER` reste 38**, rien ne change dans la course : records, replays, fantômes, médailles et classements restent valables. Aucune commande enregistrée ne change (le format `quantSteer` / `InputRecorder` et `input.drive()` sont intacts ; le test live ↔ rejeu reste vert).
+
+Cause commune corrigée (audit, `TRANS-03`) : un seul état de touches était partagé par les pages du jeu, la course et l'éditeur, sans arbitre ni remise à zéro aux transitions. Désormais **un contexte actif** (capture de touche, fenêtre, pause / arrivée, course, éditeur, garage, menu) décide ce qui est pris en compte ; les états sont remis à zéro à chaque transition. Le contrat (qui consomme quoi, dans quel contexte) est en tête de `js/input.js` et dans `docs/ARCHITECTURE.md`.
+
+- **Entrée sur « Reprendre » ne relance plus la course** (`TECH-004`). Entrée / Espace sur un bouton, un lien ou une carte l'active une seule fois, sans autre effet (même chose pour « Retour au checkpoint » et « 🎬 Vidéo » du Theater). Le bouton reste activable au clavier.
+- **Manette : A tenu ne valide plus rien tout seul** (`TECH-005`). La pause reste ouverte quand on accélère avec A, l'écran d'arrivée n'est plus relancé aussitôt. Les fronts « menu » de la manette sont suivis à chaque image et « valider » exige un relâchement de A après l'ouverture d'une superposition. La navigation à la manette est inchangée.
+- **Une case de liaison oubliée ne corrompt plus les commandes** (`TECH-006`). La capture d'une touche ou d'un bouton de manette (scrutation de 8 s) est annulée à tout changement d'écran, d'onglet, de course ou d'ouverture d'une fenêtre ; une capture remplacée par une autre rend sa case.
+- **Plus de commande de course sous une fenêtre** (`TECH-017`). P, T, C, H, R n'agissent plus derrière « Commandes », « Classement » ou un bilan ; en solo, ouvrir une fenêtre en pleine course met la course en pause (jamais en multijoueur). La fenêtre prend le focus clavier (Entrée n'active plus un bouton caché derrière elle) et le rend à la fermeture.
+- **Éditeur : raccourcis Ctrl sans effet sous une fenêtre** (`TECH-033`). Ctrl+Z / Y / A / X / D / V et « ? » ne touchent plus au circuit pendant que la fenêtre « Circuit » (ou calques, logique…) est ouverte.
+- **Boutons tactiles** (`TECH-020`) : « ⟲ », « ↺ » et « ❚❚ » déclenchent directement leur action, même si le joueur a réassigné les touches. Les aides qui citaient R, Entrée ou Échap (pause, arrivée, barre du replay, fin de replay, message « bloqué », fenêtre « Commandes ») suivent maintenant les liaisons du joueur (traduites en anglais).
+- **Échap** (`TECH-065`) passe par le même chemin que « ← Retour » : il rouvre le panneau de l'accueil d'où l'on venait, et revient dans le garage.
+- Tests : `tools/test-entrees.mjs` (arbitre, sans navigateur) ; `tools/test-browser.mjs` (sept parcours : Entrée sur les boutons, manette A tenu, capture oubliée, fenêtres, tactile, éditeur, Échap) ; `test-i18n` (aides traduites quelles que soient les touches).
+
 ## Bêta 0.16.0 — le jeu s'appelle Trackigami
 
 **`PHYS_VER` reste 38**, rien ne change dans la course : records, fantômes, médailles et classements restent valables.
