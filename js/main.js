@@ -253,7 +253,11 @@ class App {
     if (this._errTimes.length === 1 || this._errTimes.length === 2) console.error(GAME_NAME + ' : erreur dans la boucle de jeu', e);
     try {
       const S = this.session;
-      if (this._errTimes.length === 1 && S.state === 'racing' && !S.replay && typeof S.respawn === 'function') { S.respawn(); this.ui.flash('Incident : retour au dernier checkpoint.', 2.5); }
+      // Une exception au milieu d'un pas : l'état de la voiture et l'enregistrement ne sont plus garantis d'accord. La course continue, mais elle est marquée
+      // non vérifiable : ni record, ni envoi au classement, ni replay (race/finish.js : _finishUnverified). Une erreur hors d'un pas (rendu, interface) laisse la
+      // simulation intacte : le retour au checkpoint, lui, est ENREGISTRÉ (respawn(true)), si bien que les commandes rejouent la même course (TECH-015).
+      if (S._stepping && !S.demo && !S.replay) { S.unverifiable = true; S._stepping = false; }
+      if (this._errTimes.length === 1 && S.state === 'racing' && !S.replay && typeof S.respawn === 'function') { S.respawn(true); this.ui.flash('Incident : retour au dernier checkpoint.', 2.5); }
       else if (this._errTimes.length === 2) { this.quitRace(); this.ui.flash('Une erreur est survenue : la course a été interrompue.', 4); }
     } catch (e2) { console.error(GAME_NAME + ' : la reprise après erreur a échoué', e2); }
   }

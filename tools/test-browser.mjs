@@ -1616,6 +1616,74 @@ try {
     await leaveToMenu();
   });
 
+  // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+  // Cycle de vie d'une session de course (TRANS-08, TRANS-04 côté client : TECH-015, 016, 018, 066).
+  // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+  const lcStart = async () => {
+    await app(() => window.copytrack.playBuiltin(0));
+    await waitApp(() => window.copytrack.session && window.copytrack.session.state === 'racing', null, 40000);
+  };
+  const lcMenu = async () => { await app(() => window.copytrack.showMenu('menu')); await waitApp(() => window.copytrack.mode === 'menu'); };
+  // Faux serveur de classement : `delay` ms de latence, puis un résultat « 1er ». Les envois sont comptés et gardés (window.__sent).
+  const fakeSubmit = (delay) => app(async (ms) => {
+    const { online } = await import('/js/online.js');
+    window.__sent = [];
+    online.submitScore = (p) => new Promise((res) => { window.__sent.push(p); setTimeout(() => res({ improved: true, rank: 1, total: 3, best: p.time }), ms); });
+  }, delay);
+  const lcClean = () => app(async () => { (await import('/js/storage.js')).clearRecords(); });
+  const dropProvoked = () => { for (let i = errors.length - 1; i >= 0; i--) if (/exception de test/.test(errors[i])) errors.splice(i, 1); };
+
+  await test('cycle de vie (TECH-015) : erreur dans la boucle en pleine course : retour au checkpoint ENREGISTRÉ (le record se rejoue au même temps) ; erreur au milieu d\'un pas : course non vérifiable, ni record, ni envoi, ni replay', async () => {
+    await lcClean();
+    await fakeSubmit(10);
+    // Une course complète, pilotée par l'autopilote à travers input.drive, AVEC une erreur injectée à ~700 pas. `kind` : 'rendu' (erreur hors d'un pas) ou 'pas' (au milieu d'un pas).
+    const play = async (kind) => {
+      await lcStart();
+      const out = await app(async (kind) => {
+        const A = window.copytrack, S = A.session, { Autopilot } = await import('/js/autopilot.js'), { GhostRunner } = await import('/js/replay.js'), st = await import('/js/storage.js');
+        const bot = new Autopilot(S.track.path, { latLimit: 56 * 0.8 }); bot.reset(S.phys);
+        A.input.drive = () => bot.control(S.phys);
+        let injected = false;
+        if (kind === 'rendu') { const o = S.render.bind(S); S.render = (...a) => { if (!injected && S.logic.steps > 700) { injected = true; throw new Error('exception de test (rendu)'); } return o(...a); }; }
+        else { const o = S.sim.drive.bind(S.sim); S.sim.drive = (...a) => { if (!injected && S.logic.steps > 700) { injected = true; throw new Error('exception de test (pas)'); } return o(...a); }; }
+        window.__ctErrors = [];
+        for (let n = 0; S.state !== 'finished' && n < 90000; n++) { try { S.update(0.02); } catch (e) { A._loopError(e); } }
+        delete A.input.drive;
+        await new Promise((r) => setTimeout(r, 300));
+        const replay = (inputs) => { const g = new GhostRunner(S.track, { inputs }); let k = 0; while (!g.done && k++ < 90000) g.step(); return g.done ? g.logic.time : null; };
+        const rec = st.getRecord(S.trackKey);
+        return {
+          injected, state: S.state, errs: window.__ctErrors.length, unverifiable: !!S.unverifiable, respawns: S.stats.respawns,
+          lastRun: S.lastRun ? { time: S.lastRun.time, replay: replay(S.lastRun.inputs) } : null,
+          record: rec ? { time: rec.time, replay: rec.inputs ? replay(rec.inputs) : null } : null,
+          sent: window.__sent.map((p) => ({ time: p.time, replay: replay(p.inputs) })),
+          replayButton: !document.getElementById('fin-replay').classList.contains('hidden'),
+        };
+      }, kind);
+      dropProvoked();
+      return out;
+    };
+    // 1. Erreur hors d'un pas : le retour est dans l'enregistrement, tout se rejoue au même temps.
+    const a = await play('rendu');
+    assert.ok(a.injected && a.errs === 1 && a.state === 'finished', 'une erreur, la course est finie : ' + JSON.stringify(a));
+    assert.ok(a.respawns >= 1, 'retour au checkpoint fait');
+    assert.ok(a.lastRun && a.lastRun.replay != null && Math.abs(a.lastRun.replay - a.lastRun.time) < 1e-6, `le rejeu des commandes redonne le temps de la course (${a.lastRun && a.lastRun.time} vs ${a.lastRun && a.lastRun.replay})`);
+    assert.ok(a.record && Math.abs(a.record.replay - a.record.time) < 1e-6, 'le record enregistré se rejoue au même temps');
+    assert.equal(a.sent.length, 1, 'le record est envoyé au classement');
+    assert.ok(Math.abs(a.sent[0].replay - a.sent[0].time) < 1e-6, 'et le serveur, en rejouant, retrouverait ce temps');
+    assert.equal(a.unverifiable, false);
+    await lcMenu(); await lcClean(); await fakeSubmit(10);
+    // 2. Erreur au milieu d'un pas : l'état de la voiture est incertain ; rien n'est présenté comme rejouable.
+    const b = await play('pas');
+    assert.ok(b.injected && b.state === 'finished', 'la course se termine malgré l\'incident : ' + JSON.stringify(b));
+    assert.equal(b.unverifiable, true, 'course marquée non vérifiable');
+    assert.equal(b.lastRun, null, 'aucun replay trompeur');
+    assert.equal(b.record, null, 'aucun record enregistré');
+    assert.equal(b.sent.length, 0, 'aucun envoi au classement');
+    assert.equal(b.replayButton, false, '« Revoir la course » n\'est pas proposé');
+    await lcMenu(); await lcClean();
+  });
+
   await test('fantôme rival (haut d\'un classement) : affiché sur la piste, suit son enregistrement, étiquette au nom du rival', async () => {
     await app(() => window.copytrack.playBuiltin(0));
     await waitApp(() => window.copytrack.session && window.copytrack.session.state, null, 40000);

@@ -256,7 +256,9 @@ export class UI {
       else lines.push('Toutes les médailles sont à toi ✦');
     }
     const rw = $('fin-reward');
-    if (info.reward) {
+    if (info.incident) {
+      rw.innerHTML = '<small>Incident pendant la course : arrivée non enregistrée (ni record, ni récompense, ni replay).</small>';
+    } else if (info.reward) {
       rw.innerHTML = `+${info.reward.coins} ◆ pièces${info.reward.first ? '<small>Bonus 1re fois ×2</small>' : ''}`;
     } else if (info.verified) {
       rw.innerHTML = 'Circuit vérifié ✔<small>Ton temps = médaille cristal.</small>';

@@ -18,6 +18,7 @@ export default {
   'Moteur coupé': 'Engine cut',
   'Réception ratée': 'Bad landing',
   'Chrono maintenu': 'Clock kept running',
+  'Incident pendant la course : arrivée non enregistrée (ni record, ni récompense, ni replay).': 'Incident during the race: this finish is not saved (no record, no reward, no replay).',      // (0.16.2) erreur au milieu d'un pas : course non vérifiable
   'Bloqué ? {k:t} : retour au checkpoint': 'Stuck? {k}: back to the checkpoint',      // (0.16.1) la touche suit les liaisons du joueur (ou le bouton tactile)
   'Bloqué ? Pause › Retour au checkpoint': 'Stuck? Pause › Back to checkpoint',
   'Caméra : {name:t}': 'Camera: {name:t}',

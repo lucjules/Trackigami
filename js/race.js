@@ -174,6 +174,7 @@ export class RaceSession {
     this.recorder = new InputRecorder();
     this.tick = 0;          // pas de course depuis le départ (ne recule jamais, contrairement au chrono)
     this._pendingRespawn = false;
+    this._stepping = false; this.unverifiable = false;      // un nouvel essai repart d'un enregistrement vierge : plus d'incident à reporter
     this.stats = { wallHits: 0, respawns: 0, perfects: 0, turbos: 0, rings: 0 };
     this.statsSnap = { perfects: 0, turbos: 0, rings: 0 };     // compteurs au dernier checkpoint : un retour (R) les annule
     for (const g of this.ghosts) g.car.group.visible = false;      // (le fantôme est une suite déterministe : sa course, déjà calculée, est relue, pas rejouée)
@@ -284,7 +285,16 @@ export class RaceSession {
     return this.aids && this.state === 'racing' ? this.aids.apply(raw, this.phys) : raw;      // commandes effectives : ce sont elles qui sont enregistrées
   }
 
+  // Un pas de course. `_stepping` reste VRAI si une exception interrompt le pas : l'état de la voiture est alors peut-être à moitié mis à jour, et ce qui
+  // a déjà été enregistré (commande poussée, compteur de pas) ne correspond plus à ce que la simulation a fait. App._loopError le lit et marque la course
+  // `unverifiable` : jamais de record, d'envoi ni de replay qui prétendrait la reproduire (TECH-015).
   _stepOnce() {
+    this._stepping = true;
+    this._stepBody();
+    this._stepping = false;
+  }
+
+  _stepBody() {
     const app = this.app;
     const inp = this._input();
     inp.steer = quantSteer(inp.steer);      // volant au centième : replay identique
