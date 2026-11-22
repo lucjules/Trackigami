@@ -1559,6 +1559,32 @@ try {
     } finally { await ctxT.close(); await app((q) => window.copytrack.quality.apply(q), q0); }
   });
 
+  await test('entrées (TECH-065) : Échap passe par « ← Retour » (panneau de l\'accueil restauré) ; dans le garage, Échap revient au menu', async () => {
+    await leaveToMenu();
+    await click('[data-action="sub-play"]');
+    await waitApp(() => window.copytrack._menuSubOpen === 'play');
+    await click('[data-action="play"]');
+    await waitApp(() => window.copytrack._screen === 'tracks');
+    await page.keyboard.press('Escape');
+    await waitApp(() => window.copytrack._screen === 'menu');
+    assert.equal(await app(() => window.copytrack._menuSubOpen), 'play', 'Échap rouvre le panneau d\'où l\'on venait, comme « ← Retour »');
+    // Échap dans le panneau lui-même : retour aux six catégories (comme « ← Retour »), sans fenêtre ni autre écran.
+    await page.keyboard.press('Escape');
+    await waitApp(() => window.copytrack._menuSubOpen === null);
+    assert.equal(await app(() => window.copytrack._screen), 'menu');
+    // Fiche d'un circuit : Échap revient à la liste d'où l'on venait.
+    await app(() => { window.copytrack.showScreen('tracks'); window.copytrack.openBuiltinHub(0, 'tracks'); });
+    await waitApp(() => window.copytrack._screen === 'race-hub');
+    await page.keyboard.press('Escape');
+    await waitApp(() => window.copytrack._screen === 'tracks');
+    await app(() => window.copytrack.showScreen('menu'));
+    await app(() => window.copytrack.openGarage());
+    await waitApp(() => window.copytrack.mode === 'garage');
+    await settle();
+    await page.keyboard.press('Escape');
+    await waitApp(() => window.copytrack.mode === 'menu');
+  });
+
   await test('fantôme rival (haut d\'un classement) : affiché sur la piste, suit son enregistrement, étiquette au nom du rival', async () => {
     await app(() => window.copytrack.playBuiltin(0));
     await waitApp(() => window.copytrack.session && window.copytrack.session.state, null, 40000);

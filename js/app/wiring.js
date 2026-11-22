@@ -107,11 +107,7 @@ export const wiringMethods = {
       if (this.identity.kind !== 'account' && !checkPseudo(e.target.value).ok) { e.target.value = this.settings.playerName; e.target.classList.remove('bad'); this.ui.flash('Pseudo inchangé : ' + checkPseudo(e.target.value).error); }
     });
     $('prof-tabs').addEventListener('click', (e) => { const t = e.target.closest('[data-ptab]'); if (t) { this.audio.click(); this.setProfileTab(t.dataset.ptab); } });      // (les onglets sont reconstruits selon l'entrée : Profil, Progression, Paramètres)
-    // Échap dans un panneau de l'accueil : retour aux six catégories (ni modale ouverte, ni autre écran).
-    document.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape' || this._screen !== 'menu' || this.ui.modalOpen || !this._menuSubOpen) return;
-      e.preventDefault(); this._menuSub(null, true);
-    });
+    // (Échap dans un panneau de l'accueil, dans un écran ou dans le garage : main.js l'envoie à goBack() ci-dessous, le même chemin que le clic sur « ← Retour ».)
     // (0.12.6) Flèches du clavier dans les menus, le garage et les fenêtres : la même navigation spatiale que la manette (_padNav). Les champs (texte, liste,
     // curseur) gardent leurs flèches ; en course et dans l'éditeur, les flèches restent au pilotage et à la caméra (sauf dans une fenêtre ouverte hors course).
     document.addEventListener('keydown', (e) => {
@@ -362,6 +358,21 @@ export const wiringMethods = {
   },
 
   // ------------------------------------------------------------ Navigation manette
+  // Le bouton « ← Retour » VISIBLE de l'écran (ou du panneau de l'accueil, ou du garage) ouvert. root : un conteneur déjà trouvé, sinon on le cherche.
+  _backButton(root) {
+    if (!root) root = this.mode === 'garage' ? $('garage') : [...document.querySelectorAll('.screen:not(.hidden)')][0];
+    return root ? root.querySelector('.menu-panel:not(.hidden) [data-action="sub-back"], [data-action="back"], [data-action="hub-back"], [data-action="garage-back"]') : null;
+  },
+
+  // Retour : un clic sur ce bouton, donc exactement le chemin du joueur à la souris (panneau d'origine restauré par _lastPanel, fiche du circuit, garage…).
+  // Échap (main.js) et « B » à la manette (_padNav) passent par là (TECH-065). Faux s'il n'y a pas de bouton retour à l'écran.
+  goBack(root) {
+    const b = this._backButton(root);
+    if (!b) return false;
+    b.click();
+    return true;
+  },
+
   _padNav(m) {
     const visible = (el) => el.offsetParent !== null || el.getClientRects().length > 0;
     let root = null;
@@ -373,8 +384,7 @@ export const wiringMethods = {
     if (!root) return;
     if (m.back) {
       if (this.ui.modalOpen) { this.ui.closeModal(); return; }
-      const back = root.querySelector('.menu-panel:not(.hidden) [data-action="sub-back"], [data-action="back"], [data-action="hub-back"], [data-action="garage-back"]');
-      if (back) back.click();
+      this.goBack(root);
       return;
     }
     const items = [...root.querySelectorAll('button:not([disabled]), .card, .gcard, select, input[type=checkbox], input[type=range]')].filter(visible);

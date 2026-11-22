@@ -469,7 +469,9 @@ class App {
       }
       if (this._disco && this.scenery) this.scenery.sky.material.uniforms.horizon.value.setHSL((now / 4000) % 1, 0.8, 0.55);
       if (this.ui.modalOpen && this.input.hit('Escape')) this.ui.closeModal();
-      if (this.mode === 'menu' && !this.ui.modalOpen && this.input.hit('Escape')) { if (this._screen === 'race-hub') this.closeRaceHub(); else this.showScreen('menu'); }
+      // Échap dans un écran, un panneau de l'accueil ou le garage : le même chemin que le bouton « ← Retour » visible (TECH-065). Sans bouton retour (écran
+      // sans panneau d'origine), on retombe sur l'accueil.
+      if ((ctx === 'menu' || ctx === 'garage') && this.input.hit('Escape') && !this.goBack() && this.mode === 'menu') { if (this._screen === 'race-hub') this.closeRaceHub(); else if (this._screen !== 'menu') this.showScreen('menu'); }
       if (this.session) this.session.update(dt);
       // Profil Ultra Potato : on ne dessine qu'une image sur deux (la physique et les commandes continuent à pleine vitesse). Dans les menus (rien à
       // piloter, une simple animation de fond) on dessine à 30 images/s au plus : la machine chauffe moins et la batterie dure. Le banc d'essai de la
