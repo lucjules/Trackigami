@@ -39,7 +39,15 @@ import { DrivingAids, aidsActive, aidedKey, steerCurve } from './aids.js';
 const CAR_COLOR = '#ffd23e';   // éclat quand la voiture retrouve sa forme d'origine (les plaques ont la couleur de leur revêtement : SURFACES)
 
 export class RaceSession {
+  // Construction à l'épreuve des exceptions (TECH-016) : si une étape lève (commandes de replay illisibles, circuit incohérent…), tout ce qui a déjà été créé
+  // (vue du circuit, voiture, traces, fantômes, mini-carte, écouteurs du salon…) est libéré avant que l'exception ne remonte à l'application, qui revient proprement
+  // au menu ou à la fiche (App._raceBuildFailed). Sans cela, ces objets restaient dans la scène et le jeu restait en mode « course » sans session.
   constructor(app, track, opts = {}) {
+    this.app = app;
+    try { this._build(app, track, opts); } catch (e) { this._abortBuild(); throw e; }
+  }
+
+  _build(app, track, opts) {
     this.app = app;
     this.track = track;
     this.opts = opts;
@@ -716,6 +724,28 @@ export class RaceSession {
       const lv = rumbleLevels({ speed: p.fwdSpeed, slip: p.grounded ? p.slip : 0, offTrack: !!p.offTrack, boosting: p.boost > 0, grounded: p.grounded, scale: sc });
       if (lv.strong + lv.weak > 0.03) this.app.input.rumble(lv.strong, lv.weak, 140);
     }
+  }
+
+  // Libération d'une construction interrompue : chaque pièce n'existe peut-être pas encore, et un échec de nettoyage ne doit pas masquer l'erreur d'origine.
+  _abortBuild() {
+    const safe = (f) => { try { f(); } catch { /* nettoyage au mieux */ } };
+    safe(() => clearTimeout(this._goT));
+    safe(() => this._trainDispose());
+    safe(() => this._theaterDispose());
+    safe(() => { if (this.view) this.view.dispose(); });
+    safe(() => { if (this.miniMap) { this.miniMap.dispose(); this.miniMap = null; } });
+    safe(() => { if (this.car) this.car.dispose(); });
+    safe(() => { if (this.skids) this.skids.dispose(); });
+    safe(() => { if (this.ghostCar) this.ghostCar.dispose(); });
+    safe(() => { for (const g of this.ghosts || []) g.car.dispose(); });
+    safe(() => { if (this.rivals) this._clearRivals(); });
+    safe(() => { if (this.multi && this._onSnap) { this.multi.room.off('snapshot', this._onSnap); this.multi.room.off('left', this._onLeft); } });
+    safe(() => { for (const rc of this.remote ? this.remote.values() : []) rc.dispose(); });
+    safe(() => { if (this.trailRib) this.trailRib.dispose(); });
+    safe(() => { if (this.envFx) this.envFx.dispose(); });
+    safe(() => this.app.camera.up.set(0, 1, 0));
+    safe(() => this.app.particles.clear());
+    safe(() => this.app.audio.engine(null));
   }
 
   dispose() {

@@ -227,7 +227,7 @@ class App {
     this.ui.showScreen(null);
     this.ui.setMode('race');
     $('replay-bar').classList.add('hidden');
-    this.session = new RaceSession(this, track, opts);
+    try { this.session = new RaceSession(this, track, opts); } catch (e) { this._raceBuildFailed(e, opts); return; }
     // Musique du circuit : celle de l'auteur (ambiance.js) ou le chill de course ; en multijoueur ou en leçon, toujours le chill.
     const mus = !(opts && (opts.multi || opts.academy)) && track.ambiance ? track.ambiance.music : '';
     if (mus === 'none') this.audio.music.stop(); else this.audio.music.play(mus === 'menu' ? 'menu' : 'game');
@@ -288,8 +288,30 @@ class App {
     this.playTrack(back.track, back.opts);
   }
 
+  // La construction d'une course a levé (TECH-016) : RaceSession a libéré ce qu'elle avait créé ; on remet l'application en état cohérent (aucune session
+  // fantôme, pas de mode « course » sans session), on revient où le joueur était (menu, liste, fiche du circuit, salon) et on le lui dit. back : le « retour »
+  // d'un Replay Theater ({ hub, from } ou { track, opts }).
+  _raceBuildFailed(e, opts = {}, back = null) {
+    console.error(GAME_NAME + ' : la course n’a pas pu être construite', e);
+    try { if (this.errors) this.errors.capture('build', e); } catch { /* sans importance */ }
+    this.session = null;
+    try {
+      if (back && back.hub) this._backToHub(back.hub, back.from);
+      else this._leaveTo(back ? {} : opts);
+    } catch (e2) {
+      console.error(GAME_NAME + ' : le retour après une course avortée a échoué', e2);
+      this.session = null;
+      try { this.showMenu('menu'); } catch { /* dernier recours : le menu lui-même est en cause */ }
+    }
+    this.ui.flash('Cette course n’a pas pu démarrer (données illisibles). Retour en arrière.', 4.5);
+  }
+
   quitRace() {
-    const opts = this.session ? this.session.opts : {};
+    this._leaveTo(this.session ? this.session.opts : {});
+  }
+
+  // Où l'on retourne en quittant une course lancée avec `opts` (ou une course qui n'a pas pu démarrer).
+  _leaveTo(opts) {
     if (opts.multi) { this._leaveRaceToLobby(opts.multi.room); return; }
     if (opts.academy) { this.showMenu('menu'); this.academyMenu(); return; }
     if (opts.mode) { this.showMenu('menu'); this.modesMenu(); return; }

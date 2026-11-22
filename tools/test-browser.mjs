@@ -1631,7 +1631,7 @@ try {
     online.submitScore = (p) => new Promise((res) => { window.__sent.push(p); setTimeout(() => res({ improved: true, rank: 1, total: 3, best: p.time }), ms); });
   }, delay);
   const lcClean = () => app(async () => { (await import('/js/storage.js')).clearRecords(); });
-  const dropProvoked = () => { for (let i = errors.length - 1; i >= 0; i--) if (/exception de test/.test(errors[i])) errors.splice(i, 1); };
+  const dropProvoked = () => { for (let i = errors.length - 1; i >= 0; i--) if (/exception de test|la course n’a pas pu être construite/.test(errors[i])) errors.splice(i, 1); };
 
   await test('cycle de vie (TECH-015) : erreur dans la boucle en pleine course : retour au checkpoint ENREGISTRÉ (le record se rejoue au même temps) ; erreur au milieu d\'un pas : course non vérifiable, ni record, ni envoi, ni replay', async () => {
     await lcClean();
@@ -1682,6 +1682,40 @@ try {
     assert.equal(b.sent.length, 0, 'aucun envoi au classement');
     assert.equal(b.replayButton, false, '« Revoir la course » n\'est pas proposé');
     await lcMenu(); await lcClean();
+  });
+
+  await test('cycle de vie (TECH-016) : record aux commandes illisibles : « Regarder » refusé proprement ; une exception à la construction ramène au menu ou à la fiche, sans session fantôme ni objet de scène laissé', async () => {
+    const snap = () => app(() => { const A = window.copytrack; return { scene: A.scene.children.length, track: A.scenery.trackGroup.children.length }; });
+    await lcClean();
+    await app(async () => { const A = window.copytrack, s = await import('/js/storage.js'), v = await import('/js/version.js'); s.saveRecord(A.builtins[0].key, { time: 33.3, inputs: '%%%not-base64%%%', pv: v.PHYS_VER, date: Date.now(), splits: [] }); A.showMenu('tracks'); A.openBuiltinHub(0, 'tracks'); });
+    await waitApp(() => !document.getElementById('race-hub').classList.contains('hidden') && document.getElementById('hub-watch'));
+    await page.waitForTimeout(400);
+    assert.equal(await app(() => document.getElementById('hub-watch').disabled), true, '« Regarder mon record » n\'est pas proposé quand les commandes sont illisibles');
+    const before = await snap();
+    // Appel direct (import de sauvegarde, donnée du cloud) : message clair, retour à la fiche, aucune session fantôme.
+    const r = await app(async () => {
+      const A = window.copytrack, s = await import('/js/storage.js'), d = A._hub.desc;
+      try { await A.watchRecord(d, s.getRecord(d.key)); return { thrown: null }; } catch (e) { return { thrown: String(e.message) }; }
+    });
+    await page.waitForTimeout(300);
+    const st = await app(() => { const A = window.copytrack; return { mode: A.mode, demo: !!(A.session && A.session.demo), hub: !document.getElementById('race-hub').classList.contains('hidden'), toast: document.getElementById('toast').textContent }; });
+    assert.deepEqual(r, { thrown: null }, 'aucune exception ne s\'échappe');
+    assert.equal(st.mode, 'menu', 'pas de mode « course » sans session');
+    assert.ok(st.demo, 'la scène du menu (session de démonstration) est de retour, pas de session fantôme');
+    assert.ok(st.hub, 'retour à la fiche du circuit');
+    assert.match(st.toast, /n’a pas pu démarrer/, 'message clair');
+    assert.deepEqual(await snap(), before, 'la scène n\'a gardé aucun objet de la course avortée');
+    // Construction qui échoue ailleurs (replay sans commandes valides, ouvert directement) : retour au menu.
+    await lcMenu();
+    const before2 = await snap();
+    await app(() => { const A = window.copytrack; A.playTrack(A.builtins[0].track, { replay: { inputs: '%%%not-base64%%%', time: 1 }, trackKey: null }); });
+    await page.waitForTimeout(300);
+    const st2 = await app(() => { const A = window.copytrack; return { mode: A.mode, demo: !!(A.session && A.session.demo) }; });
+    assert.deepEqual(st2, { mode: 'menu', demo: true });
+    assert.deepEqual(await snap(), before2, 'scène propre');
+    dropProvoked();            // (les erreurs journalisées ci-dessus sont CELLES QU'ON A PROVOQUÉES : console.error de la construction avortée)
+    await lcClean();
+    await app(() => window.copytrack.showMenu('menu'));
   });
 
   await test('fantôme rival (haut d\'un classement) : affiché sur la piste, suit son enregistrement, étiquette au nom du rival', async () => {
