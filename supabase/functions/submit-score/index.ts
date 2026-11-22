@@ -16407,6 +16407,17 @@ var BASIS = {
 var LAND = {
   dl: 0
 };
+var LAND_CONVERGED = 0.01;
+var LAND_ALONG_MARGIN = 2;
+var LAND_STEP = 2;
+var LAND_TURN = Math.PI / 24;
+var LAND_MIN = 32;
+var LAND_MAX = 1024;
+var LAND_ITERS = 24;
+var LAND_EPS = 1e-5;
+var samplesCache = /* @__PURE__ */ new WeakMap();
+var LP = {};
+var LF = {};
 var MATCH_OFF = [
   0,
   1.5
@@ -16604,6 +16615,46 @@ var ribbonMethods = {
     }
     return false;
   },
+  // Recherche fine du point du ruban le plus proche de p (GAME-004) : n échantillons, n proportionnel à la longueur du ruban ET à sa rotation totale (calculé une fois
+  // par ruban), puis affinage par projection sur la tangente, borné à l'intervalle des deux échantillons voisins (il ne saute pas d'une spire à l'autre), jusqu'à
+  // convergence ou LAND_ITERS itérations. Déterministe : mêmes opérations, dans le même ordre, sur tous les moteurs.
+  _closestRibbonU(tile, rib, p) {
+    let n = samplesCache.get(rib);
+    if (n === void 0) {
+      let turn = 0, tx = 0, ty = 0, tz = 0;
+      for (let i = 0; i <= 256; i++) {
+        frameLocal(rib, i / 256, LF);
+        if (i > 0) turn += dacos(clamp(tx * LF.tx + ty * LF.ty + tz * LF.tz, -1, 1));
+        tx = LF.tx;
+        ty = LF.ty;
+        tz = LF.tz;
+      }
+      n = Math.min(LAND_MAX, Math.max(LAND_MIN, Math.ceil((rib.len || 0) / LAND_STEP), Math.ceil(turn / LAND_TURN)));
+      samplesCache.set(rib, n);
+    }
+    const c = tileCenter(tile, CC), r = tile.r;
+    let bi = 0, bd = Infinity;
+    for (let i = 0; i <= n; i++) {
+      rib.pos(i / n, LP);
+      rotVec(r, LP.x, LP.z, TMP);
+      const dx = p.x - (TMP.x + c.x), dy = p.y - LP.y, dz = p.z - (TMP.z + c.z);
+      const d = dx * dx + dy * dy + dz * dz;
+      if (d < bd) {
+        bd = d;
+        bi = i;
+      }
+    }
+    const lo = Math.max(0, bi - 1) / n, hi = Math.min(n, bi + 1) / n;
+    let u = bi / n;
+    for (let it = 0; it < LAND_ITERS; it++) {
+      const F = frameWorld(tile, rib, u, this.F);
+      const dt = (p.x - F.px) * F.tx + (p.y - F.py) * F.ty + (p.z - F.pz) * F.tz;
+      const nu = clamp(u + dt / F.ds, lo, hi);
+      if (Math.abs(dt) < LAND_EPS || nu === u) break;
+      u = nu;
+    }
+    return u;
+  },
   // Atterrissage en plein milieu d'un ruban (retombée sur le haut d'un L, au fond d'un looping...).
   _tryLandRibbon() {
     const p = this.pos, q = this.prev, v = this.vel;
@@ -16627,8 +16678,15 @@ var ribbonMethods = {
         const dt = (p.x - F2.px) * F2.tx + (p.y - F2.py) * F2.ty + (p.z - F2.pz) * F2.tz;
         u = clamp(u + dt / F2.ds, 0, 1);
       }
+      let F = frameWorld(tile, rib, u, this.F);
+      let along = (p.x - F.px) * F.tx + (p.y - F.py) * F.ty + (p.z - F.pz) * F.tz;
+      if (Math.abs(along) > LAND_CONVERGED) {
+        u = this._closestRibbonU(tile, rib, p);
+        F = frameWorld(tile, rib, u, this.F);
+        along = (p.x - F.px) * F.tx + (p.y - F.py) * F.ty + (p.z - F.pz) * F.tz;
+      }
       if (u <= 2e-3 || u >= 0.998) continue;
-      const F = frameWorld(tile, rib, u, this.F);
+      if (Math.abs(along) > this.speed * DT + LAND_ALONG_MARGIN) continue;
       const dl = (p.x - F.px) * F.rx + (p.y - F.py) * F.ry + (p.z - F.pz) * F.rz;
       if (F.kc > 1e-4) {
         LAND.dl = dl;
@@ -20245,4 +20303,4 @@ Deno.serve(createHandler({
   serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   allowedOrigin: Deno.env.get("ALLOWED_ORIGIN") ?? "*"
 }));
-globalThis.__COPYTRACK_BUILD__ = "92bde34143470928";
+globalThis.__COPYTRACK_BUILD__ = "c517df1a7a9592b8";

@@ -79,7 +79,7 @@ Règles pour tout fichier du noyau (la fermeture des imports de `js/verify.js` :
 - pas d'horloge ni de hasard (le défi du jour dérive d'une graine, la date UTC est une entrée) ;
 - `abs`, `min`, `max`, `floor`, `round`, `trunc`, `sign`, `sqrt` restent permis : leur résultat est imposé.
 
-`tools/phys-fingerprint.mjs` rejoue 204 scénarios (pilote automatique et commandes pseudo-aléatoires sur les 72 circuits, défis du jour, obstacles, pièces mobiles, bifurcation, revêtements, véhicules, retours au checkpoint) et
+`tools/phys-fingerprint.mjs` rejoue 206 scénarios (pilote automatique et commandes pseudo-aléatoires sur les 72 circuits, défis du jour, obstacles, pièces mobiles, bifurcation, revêtements, véhicules, retours au checkpoint, réceptions sur ruban) et
 condense l'état exact de la voiture (bits des flottants) en un hachage par scénario, enregistré dans `tools/phys-fingerprint.json`. L'empreinte doit être **identique sous Node, Deno et Chromium** : la CI
 la recalcule sous Deno (`deno run -A tools/phys-fingerprint.mjs`) et dans un navigateur (`tools/test-browser.mjs`).
 

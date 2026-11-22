@@ -1,6 +1,6 @@
 {
  "version": 39,
- "combined": "ed83666362b88c5f",
+ "combined": "e6b94d0edef05744",
  "scenarios": {
   "bot:eclats": "904d51b19f7f814f",
   "noise:eclats": "49477e3fdfa9a1c9",
@@ -205,6 +205,8 @@
   "respawn:start-plate:moto": "c1ed48b5b1d6eb27",
   "respawn:v0-200": "8db77761e1781af9",
   "respawn:v0-100:noise": "a76079ffa6caa377",
-  "respawn:keepclock:logic": "22c35b7b0adf5d0d"
+  "respawn:keepclock:logic": "22c35b7b0adf5d0d",
+  "game004:epave:349198": "8d09338b6941ffe1",
+  "game004:epave:349322": "c4a5a102ac666594"
  }
 }

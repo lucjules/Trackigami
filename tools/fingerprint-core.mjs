@@ -16,8 +16,9 @@
 import { BUILTIN_TRACKS, buildBuiltin } from '../js/tracks.js';
 import { Track, scriptTrack } from '../js/track.js';
 import { CarPhysics } from '../js/physics.js';
-import { InputRecorder, GhostRunner } from '../js/replay.js';
+import { InputRecorder, GhostRunner, quantSteer } from '../js/replay.js';
 import { Simulation } from '../js/simulation.js';
+import { Autopilot } from '../js/autopilot.js';
 import { dailyChallenge } from '../js/daily.js';
 import { PHYS_VER } from '../js/version.js';
 import { dsin, datan2, hypot2 } from '../js/dmath.js';
@@ -116,6 +117,36 @@ function pilotInputs(track, steps, rAt) {
     rec.push(inp, r);
     sim.step(inp);
     if (sim.lost) sim.rewind();
+  }
+  return rec.encode();
+}
+
+// Commandes du pilote automatique perturbé (épisodes de maladresse tirés d'un générateur à graine fixe : même modèle que tools/test-noyau-defauts.mjs et
+// tools/test-receptions.mjs), produites par une Simulation ; le hachage ne lit que leur rejeu par GhostRunner (runGhost).
+function perturbedInputs(track, seed, steps) {
+  const sim = new Simulation(track), rec = new InputRecorder();
+  sim.start();
+  const bot = new Autopilot(track.path, { latLimit: 56 * 0.8 });
+  bot.reset(sim.phys);
+  let s = seed >>> 0, ep = '', left = 0;
+  const r = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+  const EPISODES = ['jerk', 'brake', 'cut', 'drift', 'stop', 'uturn'];
+  for (let i = 0; i < steps && !sim.logic.finished; i++) {
+    let inp = bot.control(sim.phys);
+    if (left <= 0 && r() < 0.004) { ep = EPISODES[Math.floor(r() * EPISODES.length)]; left = 20 + Math.floor(r() * 150); }
+    if (left > 0) {
+      left--;
+      if (ep === 'jerk') inp = { ...inp, steer: r() < 0.5 ? -1 : 1 };
+      else if (ep === 'brake') inp = { ...inp, throttle: false, brake: true };
+      else if (ep === 'cut') inp = { ...inp, throttle: false, brake: false };
+      else if (ep === 'drift') inp = { ...inp, brake: true, steer: inp.steer < 0 ? -1 : 1 };
+      else if (ep === 'stop') inp = { steer: 0, throttle: false, brake: true };
+      else inp = { steer: 1, throttle: true, brake: false };
+    }
+    inp = { steer: quantSteer(inp.steer), throttle: !!inp.throttle, brake: !!inp.brake };
+    rec.push(inp, false);
+    sim.step(inp);
+    if (sim.lost) { sim.rewind(); bot.reset(sim.phys); }
   }
   return rec.encode();
 }
@@ -307,6 +338,12 @@ function customScenarios() {
       { on: ['time', 900], do: [['toggle', 9]] },
     ] });
     out['respawn:keepclock:logic'] = runKeepClock(t, 120 * 40, (i) => ({ steer: 0, throttle: i >= 1080, brake: false }), [960, 2400]);
+  }
+  // 11. Réception sur ruban (GAME-004, phase 6) : la voiture tombée du haut du double looping d'« Épave » n'y est plus posée 52-55 m plus loin ; elle continue de
+  // tomber et elle est rappelée au checkpoint (graines du pilote perturbé qui téléportaient la voiture : sauts aux pas 4138 et 2666).
+  for (const [seed, steps] of [[349198, 4600], [349322, 3100]]) {
+    const inputs = perturbedInputs(byId('epave'), seed, steps);
+    out['game004:epave:' + seed] = runGhost(byId('epave'), { inputs }, steps, 10);
   }
   return out;
 }

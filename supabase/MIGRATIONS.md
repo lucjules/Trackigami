@@ -16,7 +16,7 @@ Reste signalé par Supabase, voulu : fonctions `security definer` appelables (c'
 règle RLS (fermées à tous) ; à faire par l'éditeur : la protection contre les mots de passe divulgués.
 Les paragraphes historiques plus bas (« rien n'a été exécuté sur la production ») datent d'avant ce constat.
 
-**À faire, version 0.16.4 (`PHYS_VER` 39)** : la fonction `submit-score` régénérée dans le dépôt (`npm run build:function`) n'est **pas** déployée ; celle en ligne rejoue `PHYS_VER` 38 et refusera les temps de la 0.16.4. Déployer dans l'ordre fonction → site (`docs/DEPLOIEMENT.md`), puis `node tools/check-deployed.mjs` (empreinte de build identique, `physVer` 39). Aucune étape SQL.
+**À faire, versions 0.16.4 et 0.16.5 (`PHYS_VER` 39)** : la fonction `submit-score` régénérée dans le dépôt (`npm run build:function`) n'est **pas** déployée ; celle en ligne rejoue `PHYS_VER` 38 et refusera les temps de ces versions. La 0.16.5 change encore la physique sous le même `PHYS_VER` 39 (réception sur ruban, GAME-004), ce qui n'est permis que parce que la 0.16.4 n'a jamais été en ligne : déployer la fonction de la **0.16.5** (ou d'une version plus récente), jamais celle de la 0.16.4 seule. Ordre fonction → site (`docs/DEPLOIEMENT.md`), puis `node tools/check-deployed.mjs` (empreinte de build identique, `physVer` 39). Aucune étape SQL.
 
 ## Procédure de mise à jour complète (production)
 

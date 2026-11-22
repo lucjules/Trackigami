@@ -6,6 +6,18 @@ multijoueurs y sont liés. Une version qui change `PHYS_VER` impose de **redépl
 
 *Les nombres des sections anciennes (portées en cases, vitesses de saut…) sont ceux du monde de leur époque ; le monde est passé de cases de 24 m à 32 m en 0.9.11.*
 
+## Bêta 0.16.5 — réception sur ruban : plus de téléportation sur un looping
+
+**`PHYS_VER` reste 39** : la 0.16.4 (qui l'a introduit) n'a jamais été déployée, aucun temps n'existe sous ce numéro. **Fonction `submit-score` à redéployer** : c'est celle de la **0.16.5** (`npm run build:function` est fait dans le dépôt) qu'il faut mettre en ligne, pas celle de la 0.16.4 (rien n'est déployé : jalon D1, `docs/DEPLOIEMENT.md`, puis `node tools/check-deployed.mjs`).
+
+Audit : `GAME-004`. **Aucun circuit intégré n'est touché** : temps de référence, médailles, `npm run sim` (72 circuits) et les 204 scénarios d'empreinte existants sont identiques au bit près ; 2 scénarios sont ajoutés (206).
+
+- **Une réception sur un ruban (looping, vrille, tube, mur…) n'est acceptée que là où la voiture touche vraiment la route.** Sur le double looping d'« Épave », une voiture tombée du haut du looping pouvait y être posée en un pas 52 à 56 m plus loin et 22 m plus haut : la recherche du point du ruban le plus proche n'avait pas convergé (ruban de 265 m, très courbe) et l'écart le long de la route n'était jamais contrôlé. Désormais, si la recherche ne converge pas, une recherche fine reprend (échantillons proportionnels à la longueur et à la courbure du ruban, affinage borné) ; et la voiture n'est posée que si elle est au droit du point trouvé (écart le long de la route ≤ vitesse × 1/120 s + 2 m). Sinon elle continue de tomber et elle est rappelée au checkpoint.
+- **Aucune réception légitime n'est refusée** : les 227 réceptions des courses mesurées (pilote automatique et pilote perturbé sur les 72 circuits, défis du jour) ont un écart d'au plus 1 mm et restent identiques ; un balayage de 50 160 arrivées en vol sur les 128 types de rubans (4 vitesses, 5 angles, tubes compris) donne exactement les mêmes réceptions avant et après.
+- **Exploitabilité** (recherche bornée, 8 190 manœuvres simples à partir du pilote automatique sur « Épave ») : 5 trajectoires déclenchaient la téléportation, chacune dans une fenêtre de 4 pas (33 ms), et aucune ne faisait gagner de temps (+2,00 s). Aucun raccourci trouvé.
+- L'entrée par une extrémité de ruban a été vérifiée : pas le même défaut (recalage borné par construction, au plus 3,0 m mesurés sur 1 532 entrées), non modifiée.
+- Tests : `tools/test-receptions.mjs` (balayage, recherche fine, cas d'« Épave ») ; les reproductions `bugConnu` GAME-004 de `tools/test-noyau-defauts.mjs` sont devenues des tests ordinaires (fuzz de 144 courses perturbées : aucun saut de plus de 3 m en un pas).
+
 ## Bêta 0.16.4 — retour au checkpoint : la voiture revient dans l'état complet du point de retour
 
 **`PHYS_VER` passe à 39 ; fonction `submit-score` à redéployer** (`npm run build:function` est fait dans le dépôt ; le déploiement, lui, n'est PAS fait : jalon D1, procédure `docs/DEPLOIEMENT.md`, puis `node tools/check-deployed.mjs`). Tant que la fonction en ligne rejoue `PHYS_VER` 38, les temps de cette version sont refusés (« le serveur est en cours de mise à jour ») et restent sur l'appareil. Les records et replays d'avant ne sont plus rejouables (leur `pv` est 38) : ils restent affichés comme temps.
