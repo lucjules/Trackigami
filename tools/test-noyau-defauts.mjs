@@ -1,16 +1,17 @@
-// Défauts CONNUS du noyau de simulation (phase « filet de sécurité », audit docs/audit/AUDIT_COMPLET.md) : node tools/test-noyau-defauts.mjs   (npm test)
+// Défauts du noyau de simulation relevés par l'audit (docs/audit/AUDIT_COMPLET.md), devenus tests de régression : node tools/test-noyau-defauts.mjs   (npm test)
 //
-// Ce fichier ne corrige rien. Chaque défaut listé est reproduit dans un `bugConnu(id, …)` (tools/harness.mjs) qui écrit ce que le jeu DEVRAIT faire : le test réussit tant que le
-// défaut existe, et échoue dès qu'il est corrigé (« retire bugConnu et garde ce test comme test de régression »). À côté, des tests ordinaires (préconditions, contrôles) prouvent
-// que la mise en scène est bonne : sans eux, un test cassé passerait pour un défaut présent.
-//   TECH-001  retour au checkpoint sur / après une plaque de transformation : le véhicule redevient une voiture (boucle de réapparitions sans fin) — CORRIGÉ (PHYS_VER 39) :
-//             ses reproductions sont devenues des tests de régression ordinaires (avec le retour aérien qui repartait à l'arrêt au bord du vide, même cause)
-//   TECH-013  vitesse de départ (v0) perdue au retour au point de départ — CORRIGÉ (PHYS_VER 39) : test de régression ordinaire
-//   TECH-014  multijoueur : règle de logique « à T s » jamais rejouée après un retour avec chrono conservé (keepClock) — CORRIGÉ (PHYS_VER 39) : test ordinaire
-//   GAME-004  téléportation (> 3 m en un pas) à la réception sur un ruban (double looping d'« Épave Engloutie »)
-// TECH-001, TECH-013 et TECH-014 sont corrigés (PHYS_VER 39) ; GAME-004 reste un défaut connu. Corriger l'un d'eux change PHYS_VER (fermeture de js/verify.js) : voir docs/ARCHITECTURE.md, « Changer la physique ».
+// Ce fichier est né en phase « filet de sécurité » : chaque défaut y était reproduit dans un `bugConnu(id, …)` (tools/harness.mjs) qui écrivait ce que le jeu DEVAIT
+// faire. Les quatre sont corrigés ; leurs reproductions sont gardées telles quelles comme tests ordinaires. À côté, des tests de mise en scène et de contrôle prouvent
+// que chaque situation est bien celle du défaut : sans eux, un test cassé passerait pour un défaut corrigé.
+//   TECH-001  retour au checkpoint sur / après une plaque de transformation : le véhicule redevenait une voiture (boucle de réapparitions sans fin) — corrigé, PHYS_VER 39
+//             (avec le retour aérien qui repartait à l'arrêt au bord du vide, même cause)
+//   TECH-013  vitesse de départ (v0) perdue au retour au point de départ — corrigé, PHYS_VER 39
+//   TECH-014  multijoueur : règle de logique « à T s » jamais rejouée après un retour avec chrono conservé (keepClock) — corrigé, PHYS_VER 39
+//   GAME-004  téléportation (> 3 m en un pas) à la réception sur un ruban (double looping d'« Épave Engloutie ») — corrigé en phase 6, PHYS_VER toujours 39
+//             (la 0.16.4 n'a jamais été déployée) ; balayage des réceptions légitimes et recherche fine : tools/test-receptions.mjs
+// Toute correction de ce genre change la physique (fermeture de js/verify.js) : voir docs/ARCHITECTURE.md, « Changer la physique ».
 import assert from 'node:assert/strict';
-import { test, finish, bugConnu, precondition } from './harness.mjs';
+import { test, finish, precondition } from './harness.mjs';
 import { Simulation } from '../js/simulation.js';
 import { GhostRunner, InputRecorder, quantSteer } from '../js/replay.js';
 import { Autopilot } from '../js/autopilot.js';
@@ -411,14 +412,14 @@ function perturbedRun(seed, { maxSeconds = 130, stopAtJump = false, trace = fals
   return { jumps, snaps, steps: rec.length, inputs: rec.encode(), trace: path };
 }
 const FUZZ_FROM = 349100, FUZZ_COUNT = 144, FUZZ_BUDGET_MS = 90000;
-const KNOWN_SEEDS = [349198, 349322];            // deux graines de ce modèle qui téléportent la voiture (55,4 m au pas 4138 ; 52,4 m au pas 2666)
+const KNOWN_SEEDS = [349198, 349322];            // deux graines de ce modèle qui téléportaient la voiture avant la phase 6 (55,4 m au pas 4138 ; 52,4 m au pas 2666)
 
 test('GAME-004 contrôle : la graine d\'origine de l\'audit (348437) ne téléporte pas avec ce modèle de perturbation (le cas d\'origine n\'est pas retrouvé tel quel) ; la course est valide', () => {
   const o = perturbedRun(348437);
   assert.deepEqual(o.jumps, []);
   assert.ok(o.steps > 2000, `${o.steps} pas joués`);
 });
-test('GAME-004 contrôle : la trajectoire perturbée (téléportation comprise) est rejouée à l\'identique, pas par pas, par le chemin du serveur (GhostRunner) : le serveur verrait la même chose', () => {
+test('GAME-004 contrôle : la trajectoire perturbée de la graine 349198 (qui téléportait la voiture avant la phase 6) est rejouée à l\'identique, pas par pas, par le chemin du serveur (GhostRunner) : le serveur verrait la même chose', () => {
   const o = perturbedRun(KNOWN_SEEDS[0], { stopAtJump: true, trace: true });
   const g = new GhostRunner(buildBuiltin(EPAVE), { inputs: o.inputs });
   for (let k = 0; k < o.steps; k++) {
@@ -428,22 +429,22 @@ test('GAME-004 contrôle : la trajectoire perturbée (téléportation comprise) 
   }
   assert.ok(o.steps > 1000, `${o.steps} pas comparés, un à un, au bit près`);
 });
-bugConnu('GAME-004', () => {
+test('GAME-004 (corrigé) : graines 349198 et 349322 sur « Épave » : aucun saut de position > 3 m en un pas', () => {
   for (const seed of KNOWN_SEEDS) {
     const o = perturbedRun(seed, { stopAtJump: true });
     assert.deepEqual(o.jumps, [], `graine ${seed} : téléportation de la voiture en un seul pas`);
   }
-}, 'graines 349198 et 349322 sur « Épave » : aucun saut de position > 3 m en un pas');
-bugConnu('GAME-004', () => {
+});
+test(`GAME-004 (corrigé) : fuzz de ${FUZZ_COUNT} courses perturbées (graines ${FUZZ_FROM} à ${FUZZ_FROM + FUZZ_COUNT - 1}) : aucun saut de position > 3 m en un pas`, () => {
   const t0 = Date.now();
   let done = 0, found = null;
   for (let s = FUZZ_FROM; s < FUZZ_FROM + FUZZ_COUNT && !found; s++) {
-    if (Date.now() - t0 > FUZZ_BUDGET_MS) throw new Error(`budget de temps du fuzz dépassé après ${done} courses sur ${FUZZ_COUNT} : le résultat n'est pas concluant (ce n'est pas « défaut corrigé »)`);
+    if (Date.now() - t0 > FUZZ_BUDGET_MS) throw new Error(`budget de temps du fuzz dépassé après ${done} courses sur ${FUZZ_COUNT} : le résultat n'est pas concluant`);
     const o = perturbedRun(s, { stopAtJump: true });
     done++;
     if (o.jumps.length) found = { seed: s, ...o.jumps[0] };
   }
   assert.equal(found, null, `fuzz de ${FUZZ_COUNT} courses perturbées (graines ${FUZZ_FROM} à ${FUZZ_FROM + FUZZ_COUNT - 1}) : ${found ? `saut de ${found.metres} m en un pas (graine ${found.seed}, pas ${found.step}, évènements ${found.events}, de ${found.from} à ${found.to})` : ''}`);
-}, `fuzz de ${FUZZ_COUNT} courses perturbées (graines ${FUZZ_FROM} à ${FUZZ_FROM + FUZZ_COUNT - 1}) : aucun saut de position > 3 m en un pas`);
+});
 
-await finish('Défauts du noyau : TECH-001, 013 et 014 corrigés (tests de régression) ; GAME-004 reproduit (défaut connu).');
+await finish('Défauts du noyau : TECH-001, 013, 014 et GAME-004 corrigés (tests de régression).');
