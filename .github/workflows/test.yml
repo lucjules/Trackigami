@@ -1,5 +1,5 @@
 name: tests
-on: [push, pull_request, workflow_dispatch]      # (workflow_dispatch : relancer à la main, pour éprouver la stabilité de la CI)
+on: [push, pull_request, workflow_dispatch, workflow_call]      # (workflow_dispatch : relancer à la main, pour éprouver la stabilité de la CI ; workflow_call : le déploiement (deploiement.yml) rejoue TOUTE cette suite avant de toucher à la production)
 
 permissions:
   contents: read

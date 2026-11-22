@@ -1,0 +1,153 @@
+name: déploiement
+# Mise en production dans le BON ORDRE : tests → construction de la fonction → [approbation] → déploiement de `submit-score` et `ice` → contrôle d'empreinte (barrière) → publication du site.
+# Pourquoi : le serveur ne vérifie les temps qu'avec la physique qui l'a produit (PHYS_VER, égalité stricte) ; tant que la fonction n'est pas à jour, TOUS les temps du nouveau site sont refusés
+# (supabase/MIGRATIONS.md, docs/ARCHITECTURE.md « Changer la physique »). Ici le site n'est publié QU'APRÈS la fonction, et seulement si `tools/check-deployed.mjs` constate qu'elle est en ligne.
+# Procédure pour le propriétaire (secrets, environnement protégé, réglage de GitHub Pages, vérifications au premier déploiement, retour arrière) : docs/DEPLOIEMENT.md.
+#
+# Déclenchement : publication sur `main` (la branche de production) ET lancement à la main (Actions › déploiement › Run workflow ; « à blanc » coché par défaut).
+# À blanc : tests, construction, vérification du fichier, contrôle du jeton Supabase (lecture seule), constat de l'écart avec la production : RIEN n'est déployé ni publié.
+#
+# Secret (Settings › Environments › production › Environment secrets ; jamais écrit dans le dépôt ni dans les journaux) :
+#   SUPABASE_ACCESS_TOKEN   jeton d'accès personnel Supabase (supabase.com/dashboard/account/tokens) : sert UNIQUEMENT à déployer les deux fonctions du projet. Voir docs/DEPLOIEMENT.md (portée).
+# Le projet visé est celui de js/config.js (le même que celui contrôlé par la barrière) : aucun second réglage à tenir à jour.
+# Environnement GitHub « production » : à créer avec « Required reviewers » (approbation avant tout accès au secret). Environnement « github-pages » : créé par GitHub avec le réglage Pages.
+# Relançable sans danger : déployer deux fois le même fichier ne change rien, un seul déploiement à la fois (concurrency), la publication du site se remplace.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'À blanc : ne rien déployer ni publier (tests, construction, contrôle du jeton, écart avec la production)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash                  # (bash -eo pipefail : un échec avant un « | tee » n'est jamais masqué)
+
+concurrency:
+  group: deploiement-production
+  cancel-in-progress: false      # un déploiement commencé n'est jamais interrompu à moitié par le suivant : il attend
+
+env:
+  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'oui' || 'non' }}
+  DO_NOT_TRACK: '1'              # (la CLI Supabase n'envoie pas de statistiques d'usage)
+
+jobs:
+  # 1. TOUTE la suite de tests (tests.yml : qualité, noyau, Deno, navigateurs, SQL) : un seul échec arrête tout, avant que quiconque ait à approuver quoi que ce soit.
+  tests:
+    uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
+
+  # 2. La fonction est reconstruite à partir de CE commit et doit être identique au fichier du dépôt : sinon le fichier déployé ne serait pas celui qui a été testé.
+  construire:
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      stamp: ${{ steps.stamp.outputs.stamp }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm run build:function
+      - name: les fichiers du dépôt sont déjà ceux de la construction
+        run: git diff --exit-code supabase/functions/submit-score/index.ts supabase/functions/ice/index.ts
+      - name: empreinte de build de submit-score (celle que la barrière attendra)
+        id: stamp
+        run: |
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            import { readStamp } from './tools/build-stamp.mjs';
+            const s = readStamp(readFileSync('supabase/functions/submit-score/index.ts', 'utf8'));
+            if (!s || !s.valid) { console.error('::error::empreinte absente ou invalide dans submit-score/index.ts'); process.exit(1); }
+            console.log('stamp=' + s.stamp);
+          " | tee -a "$GITHUB_OUTPUT"
+          echo "Empreinte de build de submit-score : \`$(grep -o 'stamp=.*' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)\` (commit ${GITHUB_SHA::7})" >> "$GITHUB_STEP_SUMMARY"
+
+  # 3. Déploiement des fonctions puis barrière. Environnement protégé : l'approbation (si elle est exigée) est demandée ICI, une fois les tests et la construction réussis.
+  serveur:
+    needs: construire
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      SUPABASE_CLI: supabase@2.122.1       # version de la CLI épinglée (jamais « latest » : un déploiement doit être reproductible)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: jeton présent ? projet visé
+        id: cible
+        env:
+          TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then echo "::error::Secret SUPABASE_ACCESS_TOKEN absent de l'environnement « production » (voir docs/DEPLOIEMENT.md)"; exit 1; fi
+          REF=$(node --input-type=module -e "import { CONFIG } from './js/config.js'; const h = new URL(CONFIG.supabase.url).hostname; if (!/^[a-z0-9]{20}\.supabase\.co$/.test(h)) { console.error('::error::URL Supabase inattendue dans js/config.js'); process.exit(1); } console.log(h.split('.')[0]);")
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "Projet visé : $REF (celui de js/config.js). Mode à blanc : $DRY_RUN."
+      - name: l'empreinte du fichier est celle de la construction
+        env:
+          ATTENDUE: ${{ needs.construire.outputs.stamp }}
+        run: |
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            import { readStamp } from './tools/build-stamp.mjs';
+            const s = readStamp(readFileSync('supabase/functions/submit-score/index.ts', 'utf8'));
+            if (!s || !s.valid || s.stamp !== process.env.ATTENDUE) { console.error('::error::le fichier à déployer n\'est pas celui qui a été construit (' + (s && s.stamp) + ' / ' + process.env.ATTENDUE + ')'); process.exit(1); }
+            console.log('empreinte ' + s.stamp + ' : conforme');
+          "
+      - name: 'le jeton est accepté par Supabase (lecture seule : liste des fonctions)'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: npx --yes "$SUPABASE_CLI" functions list --project-ref "${{ steps.cible.outputs.ref }}"
+      - name: 'constat AVANT déploiement (information : un écart est normal si le dépôt a changé)'
+        run: |
+          node tools/check-deployed.mjs && c=0 || c=$?
+          echo "code de sortie de check-deployed : $c (0 = conforme, 1 = écart, 2 = point non vérifié)"
+      - name: déployer « ice »
+        if: env.DRY_RUN != 'oui'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: npx --yes "$SUPABASE_CLI" functions deploy ice --project-ref "${{ steps.cible.outputs.ref }}" --use-api
+      - name: déployer « submit-score »
+        if: env.DRY_RUN != 'oui'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: npx --yes "$SUPABASE_CLI" functions deploy submit-score --project-ref "${{ steps.cible.outputs.ref }}" --use-api
+      # BARRIÈRE : la fonction EN LIGNE doit être exactement le fichier du dépôt (version de physique ET empreinte de build) ; le site n'est publié que si elle l'est.
+      # tools/barriere.sh : jusqu'à 8 essais espacés de 15 s (une fonction qui vient d'être déployée met quelques secondes à répondre). Un écart (code 1) ET un point non vérifié (code 2 : rien n'est prouvé) échouent.
+      - name: 'barrière : la fonction en ligne est celle du dépôt (tools/check-deployed.mjs)'
+        if: env.DRY_RUN != 'oui'
+        run: |
+          bash tools/barriere.sh | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: bilan
+        run: |
+          if [ "$DRY_RUN" = oui ]; then echo "À BLANC : rien n'a été déployé, rien n'a été publié." | tee -a "$GITHUB_STEP_SUMMARY"; fi
+
+  # 4. Le site, seulement si la barrière est franchie (`needs: serveur`), et jamais à blanc. Nécessite Settings › Pages › Source « GitHub Actions » (docs/DEPLOIEMENT.md).
+  # Le contenu publié est la racine du dépôt, comme la publication « depuis une branche » qu'elle remplace.
+  site:
+    needs: serveur
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: . }
+      - id: deployment
+        uses: actions/deploy-pages@v4
