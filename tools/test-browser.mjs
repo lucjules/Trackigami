@@ -1585,6 +1585,37 @@ try {
     await waitApp(() => window.copytrack.mode === 'menu');
   });
 
+  // Garde-fou « aucune commande enregistrée ne change » (arbitre d'entrées) : une course pilotée au vrai clavier, AVEC pause, « Reprendre » à Entrée et retour au checkpoint (R),
+  // doit se rejouer exactement depuis ses commandes enregistrées (même moteur que la vérification serveur : GhostRunner) : même position au pas près.
+  await test('entrées : live ↔ rejeu : une course au clavier (pause, Entrée sur « Reprendre », retour au checkpoint) se rejoue exactement depuis ses commandes enregistrées', async () => {
+    await startRaceNow();
+    await page.keyboard.down('ArrowUp');
+    await page.keyboard.down('ArrowLeft'); await page.waitForTimeout(500); await page.keyboard.up('ArrowLeft');
+    await page.keyboard.down('ArrowRight'); await page.waitForTimeout(400); await page.keyboard.up('ArrowRight');
+    await page.keyboard.press('Escape'); await settle();
+    assert.equal(await app(() => window.copytrack.session.state), 'paused');
+    await page.keyboard.press('Enter');
+    await waitApp(() => window.copytrack.session.state === 'racing');
+    await settle();
+    await page.keyboard.press('r'); await settle();
+    await page.waitForTimeout(800); await frames(6);
+    await page.keyboard.up('ArrowUp');
+    await page.keyboard.press('Escape'); await settle();              // fige la course (aucun pas de plus)
+    assert.equal(await app(() => window.copytrack.session.state), 'paused');
+    const r = await app(async () => {
+      const { GhostRunner, decodeInputs } = await import('/js/replay.js'), s = window.copytrack.session;
+      const enc = s.recorder.encode(), n = s.recorder.length, rep = decodeInputs(enc), g = new GhostRunner(s.track, { inputs: enc });
+      for (let i = 0; i < n; i++) g.step();
+      const at = (p) => [p.pos.x, p.pos.y, p.pos.z, p.vel.x, p.vel.y, p.vel.z];
+      return { n, respawns: rep.flags.filter((f) => f & 4).length, live: at(s.phys), replay: at(g.phys), steps: [s.logic.steps, g.logic.steps] };
+    });
+    assert.ok(r.n > 300, `une vraie course enregistrée (${r.n} pas)`);
+    assert.equal(r.respawns, 1, 'le retour au checkpoint est dans l\'enregistrement, une seule fois');
+    assert.deepEqual(r.replay, r.live, 'le rejeu des commandes enregistrées redonne exactement la voiture du direct');
+    assert.deepEqual(r.steps[1], r.steps[0], 'et le même chrono');
+    await leaveToMenu();
+  });
+
   await test('fantôme rival (haut d\'un classement) : affiché sur la piste, suit son enregistrement, étiquette au nom du rival', async () => {
     await app(() => window.copytrack.playBuiltin(0));
     await waitApp(() => window.copytrack.session && window.copytrack.session.state, null, 40000);
