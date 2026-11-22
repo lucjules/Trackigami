@@ -9,7 +9,7 @@
 //   2. trois retours au checkpoint par la VRAIE touche R (événements clavier de Chromium, lus par input.act('respawn') dans update) ;
 //   3. à l'arrivée, côté Node (un autre moteur de calcul que celui de la page, comme le serveur) : le code du circuit est relu (Track.decode(track.encode())) ; replayRun redonne le temps et
 //      les temps intermédiaires de la course ; GhostRunner redonne la position de la voiture à CHAQUE pas (écart 0 m au bit près) ; verifyRun, la vérification complète du serveur, accepte la course.
-//   4. Variante TECH-015 (défaut connu) : une exception injectée dans la boucle de l'application ; _loopError ramène la voiture au checkpoint SANS l'enregistrer : le rejeu diverge.
+//   4. Régression TECH-015 : une exception injectée dans la boucle de l'application (hors d'un pas) ; _loopError ramène la voiture au checkpoint par respawn(true), retour ENREGISTRÉ : le rejeu redonne la même course.
 // Déterminisme : la page est « tenue » (la boucle du jeu n'avance plus la session) ; seuls nos appels à update() font avancer la course, avec des dt fixes. Seules les touches R viennent de Chromium.
 // Playwright absent : test ignoré en local, ÉCHEC en CI (comme tools/test-browser.mjs).
 import { spawn } from 'node:child_process';
@@ -17,7 +17,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import assert from 'node:assert/strict';
-import { test, finish, bugConnu, precondition } from './harness.mjs';
+import { test, finish, precondition } from './harness.mjs';
 import { Track } from '../js/track.js';
 import { replayRun, verifyRun } from '../js/verify.js';
 import { GhostRunner } from '../js/replay.js';
@@ -54,7 +54,6 @@ const guard = (fn) => async () => {
   if (err) throw err;
 };
 const pageTest = (name, fn) => test(name, guard(fn));
-const pageBug = (id, fn, titre) => bugConnu(id, guard(fn), titre);
 
 // ---------------------------------------------------------------------------------------------------------------------------------- mise en route
 async function boot() {
@@ -282,8 +281,9 @@ try {
     } finally { await release(); }
   });
 
-  // TECH-015 : _loopError (main.js) ramène la voiture au dernier checkpoint par S.respawn() SANS le drapeau « retour » de l'enregistrement : les commandes enregistrées rejouent une autre course.
-  await pageBug('TECH-015', async () => {
+  // Régression TECH-015 : _loopError (main.js) ramenait la voiture au dernier checkpoint par S.respawn() SANS le drapeau « retour » de l'enregistrement : les commandes enregistrées rejouaient
+  // une autre course. Corrigé (respawn(true) pour une erreur hors d'un pas) : le retour est enregistré comme celui de la touche R, et le rejeu redonne la même course.
+  await pageTest('régression TECH-015 : erreur injectée dans la boucle (hors d\'un pas) puis arrivée : le retour au checkpoint est enregistré, le rejeu des commandes redonne la même course', async () => {
     await launch('eclats', 11);
     let d;
     try {
@@ -293,16 +293,17 @@ try {
       const { inputRespawns, autoRespawns } = s;
       await injectError();
       s = await advance(s.tick + 1);
-      precondition(s.autoRespawns === autoRespawns + 1 && s.inputRespawns === inputRespawns, 'la reprise après erreur de la boucle a ramené la voiture au checkpoint (respawn() sans le drapeau « touche »)');
+      assert.equal(s.inputRespawns, inputRespawns + 1, 'la reprise après erreur de la boucle a ramené la voiture au checkpoint par un retour ENREGISTRÉ (respawn(true))');
+      assert.equal(s.autoRespawns, autoRespawns, 'aucun retour non enregistré');
       d = await finishRace();
     } finally {
       for (let i = errors.length - 1; i >= 0; i--) if (/exception de test \(TECH-015\)/.test(errors[i])) errors.splice(i, 1);      // (les erreurs provoquées ne sont pas des erreurs de page)
       await release();
     }
     compareLiveToReplay(d);
-  }, 'erreur injectée dans la boucle (_loopError → respawn() sans drapeau) puis arrivée : le rejeu des commandes enregistrées redonne la même course (aujourd\'hui : il diverge)');
+  });
 } finally {
   await browser.close().catch(() => {});
   server.kill();
 }
-await finish('La course en direct et son rejeu concordent (le défaut TECH-015 reste connu).');
+await finish('La course en direct et son rejeu concordent, y compris après une erreur de la boucle (TECH-015).');

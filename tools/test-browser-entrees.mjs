@@ -1,7 +1,7 @@
 // Entrées clavier et manette dans un vrai navigateur (Chromium sans écran, WebGL logiciel) : node tools/test-browser-entrees.mjs   (npm run test:browser)
 //
-// Défauts CONNUS de la phase « filet de sécurité » (docs/audit/AUDIT_COMPLET.md, lot LOT-2 ; TRANS-03 : un seul état d'entrées partagé par l'interface et la course). Rien n'est corrigé ici :
-// chaque défaut est écrit comme ce que le jeu DEVRAIT faire dans un `bugConnu(id, …)` (tools/harness.mjs) : le test réussit tant que le défaut existe, échoue dès qu'il est corrigé.
+// Défauts relevés par la phase « filet de sécurité » (docs/audit/AUDIT_COMPLET.md, lot LOT-2 ; TRANS-03 : un seul état d'entrées partagé par l'interface et la course), écrits d'abord en
+// « défauts connus » (tools/harness.mjs). Tous sont corrigés depuis (arbitre d'entrées, js/input.js) : ces scénarios sont désormais des tests de régression ordinaires. Ce que chacun empêchait :
 // Les touches sont de VRAIS événements clavier de Chromium (page.keyboard) ; la manette est simulée par un objet que navigator.getGamepads() renvoie (injecté avant le chargement de la page).
 //   TECH-004  pause puis Entrée sur « Reprendre » : la course est relancée (chrono à zéro) au lieu de reprendre
 //   TECH-005  manette, A tenu à l'ouverture de la pause ou de l'arrivée : A « valide » le bouton focalisé (la pause se referme, la course est relancée à l'arrivée)
@@ -15,7 +15,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import assert from 'node:assert/strict';
-import { test, finish, bugConnu, precondition } from './harness.mjs';
+import { test, finish, precondition } from './harness.mjs';
 
 const require = createRequire(import.meta.url);
 const REQUIRED = !!(process.env.CI || process.env.REQUIRE_BROWSER);
@@ -55,8 +55,8 @@ async function fresh() {
   return { ctx, page };
 }
 const poll = { timeout: 30000, polling: 100 };
-// Attend n images de la boucle du jeu (et non une durée) : l'effet d'une touche arrive à l'image suivante, quelle que soit la lenteur du rendu logiciel. Un défaut absent « parce que la machine
-// était lente » ferait annoncer à tort « défaut corrigé » : c'est le risque de fausse alerte que cette attente écarte.
+// Attend n images de la boucle du jeu (et non une durée) : l'effet d'une touche arrive à l'image suivante, quelle que soit la lenteur du rendu logiciel. Sans elle, une régression pourrait
+// passer inaperçue « parce que la machine était lente » (l'effet de la touche n'aurait pas encore eu lieu).
 const frames = (page, n = 12) => page.evaluate((n) => new Promise((done) => { let k = 0; const f = () => { if (++k >= n) done(); else requestAnimationFrame(f); }; requestAnimationFrame(f); }), n);
 // Course lancée sur « Premiers Éclats », décompte passé, quelques dixièmes de seconde de course.
 async function racing(page) {
@@ -65,7 +65,7 @@ async function racing(page) {
 }
 const state = (page) => page.evaluate(() => { const s = window.copytrack.session; return { state: s.state, steps: s.logic.steps, modal: window.copytrack.ui.modalOpen, pauseShown: !document.getElementById('pause').classList.contains('hidden'), finishShown: !document.getElementById('finish').classList.contains('hidden') }; });
 
-// Un scénario : page neuve, fermée ensuite ; une erreur de la page est un échec (jamais un « défaut connu »), une assertion Node reste une assertion.
+// Un scénario : page neuve, fermée ensuite ; une erreur de la page est un échec, une assertion Node reste une assertion.
 const scenario = (fn) => async () => {
   const before = errors.length;
   const { ctx, page } = await fresh();
@@ -76,7 +76,7 @@ const scenario = (fn) => async () => {
   if (err) throw err;
 };
 const pageTest = (name, fn) => test(name, scenario(fn));
-const pageBug = (id, fn, titre) => bugConnu(id, scenario(fn), titre);
+const pageRegression = (id, fn, titre) => test(`régression ${id} : ${titre}`, scenario(fn));      // un défaut corrigé : le nom dit lequel et ce que le jeu doit faire
 
 // ---------------------------------------------------------------------------------------------------------------------------------- TECH-004
 console.log('TECH-004 : Entrée sur le bouton focalisé de la pause');
@@ -100,7 +100,7 @@ await pageTest('TECH-004 témoin : pause puis clic sur « Reprendre » : la cour
   assert.equal(after.state, 'racing');
   assert.ok(after.steps >= paused.steps, `chrono ${paused.steps} → ${after.steps}`);
 });
-await pageBug('TECH-004', async (page) => {
+await pageRegression('TECH-004', async (page) => {
   await pauseWithFocusOnResume(page);
   const paused = await state(page);
   await page.keyboard.press('Enter');                       // vraie touche Entrée sur le bouton focalisé
@@ -134,14 +134,14 @@ await pageTest('TECH-005 témoin : sans A tenu, la pause s\'ouvre et reste ouver
   const s = await state(page);
   assert.ok(s.state === 'finished' && s.finishShown, JSON.stringify(s));
 });
-await pageBug('TECH-005', async (page) => {
+await pageRegression('TECH-005', async (page) => {
   await racingWithPad(page, true);
   await openPause(page);
   await frames(page);
   const s = await state(page);
   assert.ok(s.state === 'paused' && s.pauseShown, `pause ouverte avec A tenu : elle devait rester ouverte ; état « ${s.state} », écran de pause ${s.pauseShown ? 'affiché' : 'fermé'} (A a validé « Reprendre »)`);
 }, 'manette simulée avec A tenu à l\'ouverture de la pause : la pause s\'ouvre et reste ouverte');
-await pageBug('TECH-005', async (page) => {
+await pageRegression('TECH-005', async (page) => {
   await racingWithPad(page, true);
   await arrive(page);
   await frames(page);
@@ -175,7 +175,7 @@ await pageTest('TECH-006 témoin : sans case cliquée, W accélère et les liais
   assert.ok(r.v > 3, `vitesse ${r.v}`);
   assert.deepEqual(r.keys, def);
 });
-await pageBug('TECH-006', async (page) => {
+await pageRegression('TECH-006', async (page) => {
   const def = await DEFAULT_KEYS(page);
   await armCapture(page);
   await backToMenu(page);                                   // « ← Retour » : la capture n'est pas annulée
@@ -201,7 +201,7 @@ await pageTest('TECH-017 témoin : sans fenêtre, P met en pause puis reprend ; 
   await page.waitForFunction(() => !window.copytrack.ui.modalOpen, null, poll);
   assert.equal((await state(page)).state, 'paused');
 });
-await pageBug('TECH-017', async (page) => {
+await pageRegression('TECH-017', async (page) => {
   await racing(page);
   await page.keyboard.press('KeyP');
   await page.waitForFunction(() => window.copytrack.session.state === 'paused', null, poll);
@@ -244,7 +244,7 @@ for (const [touche, quoi, mesure, attendu] of [
   ['KeyC', 'C (changer de caméra)', (s) => s.cam, 'inchangée'],
   ['KeyH', 'H (klaxon)', (s) => s.horn, 0],
 ]) {
-  await pageBug('TECH-017', async (page) => {
+  await pageRegression('TECH-017', async (page) => {
     await finishedWithWindow(page);
     await page.evaluate(() => { window.__cam0 = window.copytrack.session.camMode; });
     await page.keyboard.press(touche);
@@ -257,4 +257,4 @@ for (const [touche, quoi, mesure, attendu] of [
 
 await browser.close().catch(() => {});
 server.kill();
-await finish('Les entrées se comportent comme prévu (les défauts TECH-004, 005, 006 et 017 restent connus).');
+await finish('Les entrées se comportent comme prévu (régressions TECH-004, 005, 006 et 017).');
