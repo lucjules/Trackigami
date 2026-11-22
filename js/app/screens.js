@@ -35,6 +35,7 @@ export const screenMethods = {
   },
 
   showScreen(name) {
+    this.input.cancelCapture();      // une capture de liaison en attente ne survit pas à un changement d'écran (TECH-006)
     this._screen = name;
     // Un Échap appuyé AVANT l'ouverture de cet écran (déjà traité ailleurs, pas encore lu par la boucle) ne doit pas le refermer à l'image suivante :
     // fermer un panneau de l'accueil par Échap puis cliquer aussitôt une ligne des records rouvrait la fiche puis la refermait (comme pour ui.modal).

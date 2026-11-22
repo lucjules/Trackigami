@@ -407,7 +407,7 @@ class App {
   }
 
   // Écran Profil : quatre onglets (Compte, Sauvegardes, Options, Commandes).
-  setProfileTab(tab) { this.profileTab = tab; this._renderProfile(); }
+  setProfileTab(tab) { this.input.cancelCapture(); this.profileTab = tab; this._renderProfile(); }
 
   // ------------------------------------------------------------ Boucle
   start() {

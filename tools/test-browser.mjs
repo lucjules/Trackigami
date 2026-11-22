@@ -1420,6 +1420,50 @@ try {
     await leaveToMenu();
   });
 
+  await test('entrées (TECH-006) : une capture de touche ou de bouton en attente est annulée en quittant l\'écran : aucune liaison modifiée', async () => {
+    await installPad();
+    try {
+      const snap = () => app(() => JSON.stringify({ k: window.copytrack.input.bindings, p: window.copytrack.input.pad, sk: window.copytrack.settings.keys, sp: window.copytrack.settings.pad }));
+      await app(() => window.copytrack.showScreen('controls'));
+      await waitApp(() => document.querySelectorAll('#bind-list .bind-key').length > 4);
+      const before = await snap();
+      // Capture de touche : on clique « Retour au checkpoint » (clavier), on quitte, on lance une course et on tient W.
+      await app(() => { const rows = [...document.querySelectorAll('#bind-list .lbl')]; const i = rows.findIndex((l) => /checkpoint/i.test(l.textContent)); const keys = document.querySelectorAll('#bind-list .bind-key'); keys[i * 2].click(); });
+      assert.ok(await app(() => !!window.copytrack.input.capture), 'la capture est armée');
+      await app(() => window.copytrack.showMenu('menu'));
+      await startRaceNow();
+      await page.keyboard.down('KeyW');
+      await page.waitForTimeout(1200); await frames(6);
+      const sp = await app(() => window.copytrack.session.phys.speed);
+      await page.keyboard.up('KeyW');
+      assert.equal(await snap(), before, 'aucune liaison de touche modifiée');
+      assert.ok(sp > 3, `W accélère (${sp.toFixed(1)} m/s)`);
+      await leaveToMenu();
+      // Capture de manette (scrutation de 8 s) : on clique une case, on quitte l'écran, on presse un bouton.
+      await app(() => window.copytrack.showScreen('controls'));
+      await app(() => window.copytrack._renderControls('pad'));
+      await app(() => document.querySelectorAll('#bind-list .bind-key')[0].click());
+      await app(() => window.copytrack.showMenu('menu'));
+      await padSet(5, true); await settle(); await padSet(5, false);
+      assert.equal(await snap(), before, 'aucune liaison de manette modifiée');
+      assert.equal(await app(() => window.copytrack.input.capture), null, 'plus de capture en attente');
+      // Rien n'est perdu : sans changement d'écran, la capture lie bien la touche pressée (clavier) et le bouton pressé (manette).
+      await app(() => window.copytrack.showScreen('controls'));
+      await waitApp(() => document.querySelectorAll('#bind-list .bind-key').length > 4);
+      await app(() => window.copytrack._renderControls('race'));
+      await app(() => { const keys = document.querySelectorAll('#bind-list .bind-key'); keys[0].click(); });
+      await page.keyboard.press('KeyJ');
+      assert.equal(await app(() => window.copytrack.input.bindings.accelerate[0]), 'KeyJ', 'la capture de touche marche toujours');
+      await app(() => window.copytrack._renderControls('pad'));
+      await app(() => document.querySelectorAll('#bind-list .bind-key')[0].click());
+      await frames(3);
+      await padSet(12, true); await frames(4); await padSet(12, false);
+      assert.equal(await app(() => window.copytrack.input.pad.accelerate[0]), 12, 'la capture de bouton de manette marche toujours');
+      await app(async () => { const A = window.copytrack, I = await import('/js/input.js'); A.input.setBindings(I.defaultKeys(), I.defaultPad()); A.settings.keys = I.defaultKeys(); A.settings.pad = I.defaultPad(); A.saveSettings(); });
+    } finally { await removePad(); }
+    await app(() => window.copytrack.showMenu('menu'));
+  });
+
   await test('fantôme rival (haut d\'un classement) : affiché sur la piste, suit son enregistrement, étiquette au nom du rival', async () => {
     await app(() => window.copytrack.playBuiltin(0));
     await waitApp(() => window.copytrack.session && window.copytrack.session.state, null, 40000);

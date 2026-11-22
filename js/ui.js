@@ -172,6 +172,7 @@ export class UI {
   // actions : [{ label, primary, danger, onClick }] ; onClick renvoie false pour garder la fenêtre ouverte.
   // onClose : appelé une fois quand la fenêtre se ferme (bouton, Échap, ou remplacée par une autre) : arrêter une écoute, un minuteur...
   modal({ title, body, actions = [], wide = false, onClose = null, panelClass = '' }) {
+    if (this.app.input) this.app.input.cancelCapture();      // une fenêtre qui s'ouvre prend la main : la capture de liaison en attente est annulée (TECH-006)
     this._fireModalClose();
     this._onModalClose = onClose;
     $('modal-title').textContent = title;

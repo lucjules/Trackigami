@@ -259,6 +259,13 @@ export class Input {
     return true;
   }
 
+  // Termine la capture SANS rappeler son rappel (le bouton voulu a été lu par la scrutation de manette de Paramètres › Commandes).
+  endCapture() {
+    if (!this.capture) return;
+    this.capture = null;
+    this._changed();
+  }
+
   // Action déclenchée directement (boutons tactiles) : même durée de vie qu'un front de manette, consommée par act(). Ignorée sous une fenêtre ou une capture.
   post(action) {
     if (this.ctx === 'modal' || this.ctx === 'capture') return false;
