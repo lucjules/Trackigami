@@ -3,7 +3,13 @@
 import { medalIcon } from '../ui.js';
 import { $, esc } from '../dom.js';
 import { MEDALS, medalFor } from '../medals.js';
-import { Track, lossText, lossBlocking } from '../track.js';
+import { Track, lossBlocking } from '../track.js';
+import { lossMessage, lossNote } from '../lossMessage.js';
+import { adoptLegacyKeys } from '../keyAlias.js';
+
+// Un circuit qui porte un temps d'auteur sans être vérifié : il a été modifié depuis sa vérification, OU le jeu a changé la façon de calculer sa clé (0.16.6 : obstacles et solides hachés au
+// pas du code, TECH-039), ce qui rend « non vérifiée » toute vérification faite avant. Une course de vérification suffit.
+const UNVERIFIED_SINCE = 'Ce circuit avait été vérifié, mais il a changé depuis (ou le jeu a changé la façon de calculer sa clé de classement) : une course de vérification suffit pour le revérifier.';
 import { replayTime } from '../verify.js';
 import { PHYS_VER } from '../version.js';
 import { thumbnail } from '../editorTools.js';
@@ -81,7 +87,7 @@ export const communityMethods = {
     const wrap = document.createElement('div');
     wrap.innerHTML = verified
       ? `<p>✔ Vérifié (${formatTime(tr.vt)}) : médailles déduites de ton temps. Copie le code ou le lien de « ${esc(name)} ».</p>`
-      : `<p>⚠ <b>Non vérifié</b> : termine-le une fois pour fixer les médailles. Partageable, mais sans médailles ni pièces.</p>`;
+      : `<p>⚠ <b>Non vérifié</b> : termine-le une fois pour fixer les médailles. Partageable, mais sans médailles ni pièces.</p>${tr && tr.vt > 0 ? `<p class="meta">${esc(UNVERIFIED_SINCE)}</p>` : ''}`;
     wrap.appendChild(ta);
     const copy = (txt, msg) => {
       const done = () => this.ui.flash(msg);
@@ -123,7 +129,7 @@ export const communityMethods = {
       if (i < 0) { this.ui.flash('Circuit introuvable.'); return; }
       this.playBuiltin(i);
     } else if (trackKey.startsWith('daily-')) this.playDaily();
-    else if (track) this.launchDesc(describeUser(track));
+    else if (track) { adoptLegacyKeys(track); this.launchDesc(describeUser(track)); }
     else { this.ui.flash('Ouvre d’abord le circuit pour affronter ce fantôme.'); return; }
     if (this.session && this.session.setRivals) this.session.setRivals(rivals);
   },
@@ -131,7 +137,7 @@ export const communityMethods = {
   // ---- Communauté (circuits publiés en ligne) ----------------------------------
   // Publication : c'est ici (et seulement ici) qu'on choisit le nom et la description du circuit.
   publishTrack(track) {
-    if (!track.verified) { this.ui.flash('Vérifie d’abord ton circuit (« ✔ Vérifier » dans l’éditeur) pour pouvoir le publier.'); return Promise.resolve(false); }
+    if (!track.verified) { this.ui.flash('Vérifie d’abord ton circuit (« ✔ Vérifier » dans l’éditeur) pour pouvoir le publier.' + (track.vt > 0 ? ' ' + UNVERIFIED_SINCE : ''), track.vt > 0 ? 6 : 2.4); return Promise.resolve(false); }
     // Le serveur REJOUE la course de vérification pour confirmer le temps de l'auteur : sans elle (circuit vérifié sur un autre appareil), il faut la refaire.
     const proof = loadProof(track);
     if (!proof) { this.ui.flash('Refais la vérification de ce circuit sur cet appareil (« ✔ Vérifier » dans l’éditeur) : le serveur rejoue ta course pour confirmer ton temps.', 5); return Promise.resolve(false); }
@@ -299,6 +305,7 @@ export const communityMethods = {
       this.audio.click();
       const act = a.dataset.a;
       if (act === 'play' && track) {
+        adoptLegacyKeys(track);
         this.launchDesc(describeCommunity(track, row));
       } else if (act === 'like') {
         try {
@@ -536,8 +543,8 @@ export const communityMethods = {
       try {
         const t = Track.decode(ta.value);
         // Phase 4 : un code qui perdrait des pièces ou des options à la lecture (version plus récente du jeu) n'est pas réenregistré en silence : il est refusé, avec la raison.
-        if (lossBlocking(t)) { this.ui.flash(lossText(t) + ' Mets le jeu à jour avant de l’importer.', 6); return null; }
-        if (lossText(t)) this.ui.flash(lossText(t), 5);
+        if (lossBlocking(t)) { this.ui.flash(lossMessage(t) + ' ' + lossNote.updateToImport(), 6); return null; }
+        if (lossMessage(t)) this.ui.flash(lossMessage(t), 5);
         return t;
       } catch { this.ui.flash('Code de circuit invalide.'); return null; }
     };

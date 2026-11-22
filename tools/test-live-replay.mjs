@@ -9,7 +9,7 @@
 //   2. trois retours au checkpoint par la VRAIE touche R (événements clavier de Chromium, lus par input.act('respawn') dans update) ;
 //   3. à l'arrivée, côté Node (un autre moteur de calcul que celui de la page, comme le serveur) : le code du circuit est relu (Track.decode(track.encode())) ; replayRun redonne le temps et
 //      les temps intermédiaires de la course ; GhostRunner redonne la position de la voiture à CHAQUE pas (écart 0 m au bit près) ; verifyRun, la vérification complète du serveur, accepte la course.
-//   4. Variante TECH-015 (défaut connu) : une exception injectée dans la boucle de l'application ; _loopError ramène la voiture au checkpoint SANS l'enregistrer : le rejeu diverge.
+//   4. Régression TECH-015 : une exception injectée dans la boucle de l'application (hors d'un pas) ; _loopError ramène la voiture au checkpoint par respawn(true), retour ENREGISTRÉ : le rejeu redonne la même course.
 // Déterminisme : la page est « tenue » (la boucle du jeu n'avance plus la session) ; seuls nos appels à update() font avancer la course, avec des dt fixes. Seules les touches R viennent de Chromium.
 // Playwright absent : test ignoré en local, ÉCHEC en CI (comme tools/test-browser.mjs).
 import { spawn } from 'node:child_process';
@@ -17,7 +17,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import assert from 'node:assert/strict';
-import { test, finish, bugConnu, precondition } from './harness.mjs';
+import { test, finish, precondition } from './harness.mjs';
 import { Track } from '../js/track.js';
 import { replayRun, verifyRun } from '../js/verify.js';
 import { GhostRunner } from '../js/replay.js';
@@ -54,7 +54,6 @@ const guard = (fn) => async () => {
   if (err) throw err;
 };
 const pageTest = (name, fn) => test(name, guard(fn));
-const pageBug = (id, fn, titre) => bugConnu(id, guard(fn), titre);
 
 // ---------------------------------------------------------------------------------------------------------------------------------- mise en route
 async function boot() {
@@ -68,14 +67,19 @@ async function boot() {
     const { profile, saveProfile } = await import('/js/profile.js');
     profile().eggs = { ...(profile().eggs || {}), unlockAll: true }; saveProfile();       // (tous les chapitres jouables : « Laminoir » est au chapitre suivant)
   });
+  // La fenêtre de bienvenue est programmée 700 ms après le démarrage (main.js : start) quand le tutoriel n'était pas fait À CE MOMENT-LÀ : poser tutorialDone
+  // ensuite ne l'annule pas. Elle s'ouvrait donc pendant la première course, qui passait en pause (une fenêtre ouverte met la course en pause, TECH-017) :
+  // on l'attend (3 s au plus), puis on la ferme.
+  await page.waitForFunction(() => window.copytrack.ui.modalOpen, null, { timeout: 3000, polling: 50 }).catch(() => {});
+  await page.evaluate(() => window.copytrack.ui.closeModal());
 }
 
 // Lance un circuit et prend la main : la session n'avance plus que par nos appels (« tenue »), avec le pilote automatique bruité comme source des commandes.
-async function launch(id, seed, amp = 0.2) {
-  await page.evaluate(async ({ id, seed, amp }) => {
+async function launch(id, seed, amp = 0.2, modeId = '', script = null) {
+  await page.evaluate(async ({ id, seed, amp, modeId, script }) => {
     const A = window.copytrack;
     const [{ RaceSession }, { Autopilot }] = await Promise.all([import('/js/race.js'), import('/js/autopilot.js')]);
-    const L = window.__lr = { hold: true, inject: false, trace: [], inputRespawns: 0, autoRespawns: 0, rBack: [] };
+    const L = window.__lr = { hold: true, inject: false, trace: [], inputRespawns: 0, autoRespawns: 0, rBack: [], rSpeed: [] };
     const proto = RaceSession.prototype;
     if (!proto.__real) {
       proto.__real = proto.update;
@@ -91,8 +95,18 @@ async function launch(id, seed, amp = 0.2) {
       A.input.clearHits = () => { if (!(window.__lr && window.__lr.hold)) clear(); };      // (une touche appuyée attend l'update suivant : pas d'effacement entre deux images de la boucle)
     }
     const idx = A.builtins.findIndex((b) => b.def.id === id);
-    L.index = idx; L.key = A.builtins[idx].key;
-    A.playBuiltin(idx);
+    L.index = idx; L.key = idx >= 0 ? A.builtins[idx].key : null;
+    if (script) {                                                    // circuit construit par script dans la page (ligne du pilote comprise), sans clé de classement
+      const { scriptTrack } = await import('/js/track.js');
+      const t = scriptTrack('plaque', script.code);
+      if (script.cpOn) t.tiles.find((x) => x.s === script.cpOn).cp = 1;
+      A.playTrack(t, { trackKey: null, seed: 'live-replay', difficulty: 1 });
+      L.key = null;
+    } else if (modeId) {                                                    // mode de jeu (règles appliquées à une copie du circuit : App.playMode), sans clé de classement
+      const { BUILTIN_MODES } = await import('/js/rules.js');
+      A.playMode(BUILTIN_MODES.find((m) => m.id === modeId), A.builtins[idx].track);
+      L.key = null;
+    } else A.playBuiltin(idx);
     const S = L.S = A.session;
     if (!(S && S.constructor === RaceSession && !S.demo)) throw new Error('la session de course n\'est pas là');
     // Pilote automatique bruité, graine fixe : bruit de volant lissé (processus AR(1) à entrées centrées) + freinages brefs. Une seule lecture par pas de course.
@@ -112,8 +126,8 @@ async function launch(id, seed, amp = 0.2) {
     const stepOnce = S._stepOnce.bind(S);
     S._stepOnce = () => { const was = S.state; stepOnce(); if (was === 'racing') L.trace.push(S.phys.pos.x, S.phys.pos.y, S.phys.pos.z, S.logic.steps); };
     const respawn = S.respawn.bind(S);
-    S.respawn = (fromInput) => { const was = S.state; respawn(fromInput); if (was === 'racing') { if (fromInput === true) { L.inputRespawns++; L.rBack.push(S.logic.steps); } else L.autoRespawns++; bot.reset(S.phys); } };
-  }, { id, seed, amp });
+    S.respawn = (fromInput) => { const was = S.state; respawn(fromInput); if (was === 'racing') { if (fromInput === true) { L.inputRespawns++; L.rBack.push(S.logic.steps); L.rSpeed.push(Math.hypot(S.phys.vel.x, S.phys.vel.z)); L.rVeh = (L.rVeh || []).concat(S.phys.vehicle); } else L.autoRespawns++; bot.reset(S.phys); } };
+  }, { id, seed, amp, modeId, script });
 }
 
 // Avance la course (update, dt = 0,1 s : douze pas fixes par appel) jusqu'au pas de course `tick` (ou l'arrivée).
@@ -149,7 +163,8 @@ async function finishRace() {
   precondition(s.state === 'finished', `la course est allée jusqu'à l'arrivée (état : ${s.state}, pas ${s.tick})`);
   return page.evaluate(() => {
     const L = window.__lr, S = L.S, A = window.copytrack;
-    return { inputs: S.lastRun.inputs, time: S.lastRun.time, liveTime: S.logic.time, splits: S.logic.splits.slice(), code: S.track.encode(), key: L.key, trace: L.trace.slice(), inputRespawns: L.inputRespawns, autoRespawns: L.autoRespawns, rBack: L.rBack.slice(), ticks: S.tick, statsRespawns: S.stats.respawns, finishShown: !document.getElementById('finish').classList.contains('hidden'), mode: A.mode };
+    const run = S.opts.mode ? { inputs: S.recorder.encode(), time: S.logic.time } : S.lastRun;      // (mode de jeu : ni record ni lastRun, l'enregistreur reste)
+    return { inputs: run.inputs, time: run.time, liveTime: S.logic.time, rSpeed: L.rSpeed.slice(), rVeh: (L.rVeh || []).slice(), vehicle: S.phys.vehicle, splits: S.logic.splits.slice(), code: S.track.encode(), key: L.key, trace: L.trace.slice(), inputRespawns: L.inputRespawns, autoRespawns: L.autoRespawns, rBack: L.rBack.slice(), ticks: S.tick, statsRespawns: S.stats.respawns, finishShown: !document.getElementById('finish').classList.contains('hidden'), mode: A.mode };
   });
 }
 async function release() {
@@ -212,6 +227,49 @@ try {
     });
   }
 
+  // TECH-013 : mode « Départ lancé » (v0 = 200 km/h) ; la VRAIE touche R avant le premier checkpoint ramène au départ : la voiture repart lancée, comme « Recommencer ».
+  await pageTest('mode « Départ lancé » sur « Premiers Éclats » : touche R avant le premier checkpoint → retour au départ à 200 km/h (chrono à zéro) ; course puis rejeu identiques', async () => {
+    await launch('eclats', 11, 0.2, 'lancee');
+    try {
+      let s = await advance(1);
+      precondition(s.state === 'racing', `la course est partie (état : ${s.state})`);
+      const v0 = await page.evaluate(() => { const S = window.__lr.S; return { v0: S.track.v0, mode: S.opts.mode && S.opts.mode.id }; });
+      precondition(v0.v0 === 200 && v0.mode === 'lancee', `mode « Départ lancé » appliqué (${JSON.stringify(v0)})`);
+      s = await advance(s.tick + 60);
+      precondition(s.state === 'racing' && s.splits === 0, `avant le premier checkpoint (${s.splits} pris)`);
+      await pressR();
+      s = await advance(s.tick + 1);
+      const d0 = await page.evaluate(() => ({ rBack: window.__lr.rBack.slice(), rSpeed: window.__lr.rSpeed.slice() }));
+      assert.deepEqual(d0.rBack, [0], 'retour au départ : chrono à zéro');
+      assert.ok(Math.abs(d0.rSpeed[0] - 200 / 3.6) < 1e-6, `vitesse juste après le retour : ${(d0.rSpeed[0] * 3.6).toFixed(1)} km/h (attendu 200)`);
+      const d = await finishRace();
+      assert.equal(d.inputRespawns, 1);
+      compareLiveToReplay(d);
+    } finally { await release(); }
+  });
+
+  // TECH-001 : la course EN DIRECT (chemin B : RaceSession._stepOnce, vraie touche R) sur des plaques de transformation, puis son rejeu côté Node (chemin A).
+  for (const [label, code, cpOn] of [['checkpoint posé sur une plaque moto', 'start S2 S.o S3 S3 finish', 'moto'], ['anneau-checkpoint après une plaque moto et un tremplin', 'start S2 S.o S UU GC2 S3 finish', '']]) {
+    await pageTest(`course en direct sur plaque (${label}) : touche R après le checkpoint → la moto est rendue, sans retour en voiture ni chute ; rejeu identique`, async () => {
+      await launch('', 7, 0.05, '', { code, cpOn });
+      try {
+        let s = await advance(1);
+        precondition(s.state === 'racing', `la course est partie (état : ${s.state})`);
+        s = await advance(s.tick + 1, 1500, 1);
+        precondition(s.state === 'racing' && s.splits === 1, `checkpoint pris (${s.splits})`);
+        s = await advance(s.tick + 2);
+        await pressR();
+        s = await advance(s.tick + 3);
+        const d = await finishRace();
+        assert.equal(d.inputRespawns, 1);
+        assert.deepEqual(d.rVeh, ['moto'], 'véhicule rendu par le retour');
+        assert.equal(d.autoRespawns, 0, 'aucune chute ni réapparition automatique après le retour');
+        assert.equal(d.vehicle, 'moto', 'arrivée en moto');
+        compareLiveToReplay(d);
+      } finally { await release(); }
+    });
+  }
+
   // Sans retour : le même circuit, mêmes commandes bruitées : témoin que la comparaison passe aussi quand rien d'autre que la conduite n'intervient.
   await pageTest('témoin : « Premiers Éclats » sans aucun retour (ni touche R, ni erreur) : même comparaison, même résultat', async () => {
     await launch('eclats', 5);
@@ -223,8 +281,9 @@ try {
     } finally { await release(); }
   });
 
-  // TECH-015 : _loopError (main.js) ramène la voiture au dernier checkpoint par S.respawn() SANS le drapeau « retour » de l'enregistrement : les commandes enregistrées rejouent une autre course.
-  await pageBug('TECH-015', async () => {
+  // Régression TECH-015 : _loopError (main.js) ramenait la voiture au dernier checkpoint par S.respawn() SANS le drapeau « retour » de l'enregistrement : les commandes enregistrées rejouaient
+  // une autre course. Corrigé (respawn(true) pour une erreur hors d'un pas) : le retour est enregistré comme celui de la touche R, et le rejeu redonne la même course.
+  await pageTest('régression TECH-015 : erreur injectée dans la boucle (hors d\'un pas) puis arrivée : le retour au checkpoint est enregistré, le rejeu des commandes redonne la même course', async () => {
     await launch('eclats', 11);
     let d;
     try {
@@ -234,16 +293,17 @@ try {
       const { inputRespawns, autoRespawns } = s;
       await injectError();
       s = await advance(s.tick + 1);
-      precondition(s.autoRespawns === autoRespawns + 1 && s.inputRespawns === inputRespawns, 'la reprise après erreur de la boucle a ramené la voiture au checkpoint (respawn() sans le drapeau « touche »)');
+      assert.equal(s.inputRespawns, inputRespawns + 1, 'la reprise après erreur de la boucle a ramené la voiture au checkpoint par un retour ENREGISTRÉ (respawn(true))');
+      assert.equal(s.autoRespawns, autoRespawns, 'aucun retour non enregistré');
       d = await finishRace();
     } finally {
       for (let i = errors.length - 1; i >= 0; i--) if (/exception de test \(TECH-015\)/.test(errors[i])) errors.splice(i, 1);      // (les erreurs provoquées ne sont pas des erreurs de page)
       await release();
     }
     compareLiveToReplay(d);
-  }, 'erreur injectée dans la boucle (_loopError → respawn() sans drapeau) puis arrivée : le rejeu des commandes enregistrées redonne la même course (aujourd\'hui : il diverge)');
+  });
 } finally {
   await browser.close().catch(() => {});
   server.kill();
 }
-await finish('La course en direct et son rejeu concordent (le défaut TECH-015 reste connu).');
+await finish('La course en direct et son rejeu concordent, y compris après une erreur de la boucle (TECH-015).');

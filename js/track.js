@@ -336,24 +336,49 @@ export class Track {
 
   // Le texte dont signature() prend l'empreinte (32 bits, FNV-1a : pratique pour une clé, mais on peut FABRIQUER un autre circuit de même clé). Le serveur en
   // prend une empreinte forte (SHA-256) pour lier une clé de classement u-… à UN seul circuit (supabase/etape15-backend.sql, track_binds).
+  // Phase 7 (0.16.6, TECH-039) : obstacles et solides sont hachés AU PAS DU CODE (Track.encode : x, y, z, s au centième, cap et roulis au millième) : avant, 0,1 m et 0,01 rad
+  // (le roulis au centième) alors que la physique lit les valeurs du code : deux circuits physiquement différents (une poutre d'échelle 8 décalée de 4 cm et tournée de 4 mrad : son
+  // extrémité bouge de 0,26 m) avaient la même clé de classement. Les décorations purement visuelles gardent leur texte d'avant (0,1 m) : leur clé ne change pas.
+  // Décorations visuelles : même texte qu'avant (dixième de mètre), mais calculé APRÈS l'arrondi du code (centième, puis dixième) : pour un circuit relu d'un code les valeurs sont déjà au
+  // centième, le texte est donc exactement l'ancien (aucune clé ne change) ; pour un circuit en mémoire aux coordonnées libres, il est celui du code relu (avant : un arrondi direct au
+  // dixième pouvait différer de l'arrondi en deux temps aux frontières, ≈ 5 % par coordonnée : la clé en mémoire n'était pas celle du code).
+  // L'ancien texte reste calculable (legacySignatureText) : il sert à retrouver les records locaux d'avant (js/keyAlias.js).
   signatureText() {
     const parts = this.tiles
       .map((t) => `${t.t}:${t.x}:${t.z}:${t.l}:${t.r}:${t.s}:${t.p}:${t.v}${t.nb}${t.tn}${t.mv ? 'm' + t.mv : ''}${tileExtras(t)}`)
       .sort()
       .join('|');
     // (0.9.68 : un solide compte pour la physique : sa hauteur et son cap aussi)
-    const d = this.decos.map((o) => `${o.k}:${o.x.toFixed(1)}:${o.z.toFixed(1)}:${o.s}${isObstacle(o.k) ? `:${o.y.toFixed(1)}:${o.ry.toFixed(2)}:${o.ph || 0}${o.rz ? ':z' + o.rz.toFixed(2) : ''}` : isSolid(o.k) ? `:${o.y.toFixed(1)}:${o.ry.toFixed(2)}` : ''}`).join('|');
+    const d = this.decos.map((o) => (isObstacle(o.k) ? `${o.k}:${o.x.toFixed(2)}:${o.z.toFixed(2)}:${o.s.toFixed(2)}:${o.y.toFixed(2)}:${o.ry.toFixed(3)}:${o.ph || 0}${o.rz ? ':z' + o.rz.toFixed(3) : ''}`
+      : isSolid(o.k) ? `${o.k}:${o.x.toFixed(2)}:${o.z.toFixed(2)}:${o.s.toFixed(2)}:${o.y.toFixed(2)}:${o.ry.toFixed(3)}`
+      : `${o.k}:${(+o.x.toFixed(2)).toFixed(1)}:${(+o.z.toFixed(2)).toFixed(1)}:${+o.s.toFixed(2)}`)).join('|');
     const rules = RULES.map((r) => r.sig(this[r.key])).join('');
     return this.decor + '#' + parts + '#' + d + (this.laps > 1 ? '#L' + this.laps : '') + rules + this._logicSig();
   }
 
   // Logique du circuit : elle change la course, donc la signature ; avec elle, l'appartenance des pièces et décorations aux groupes aussi (une
   // règle « cache le groupe 2 » n'a pas le même effet selon ce qu'il contient). Sans logique : rien (les signatures d'avant ne bougent pas).
-  _logicSig() {
+  // Phase 7 (TECH-039) : une pièce est repérée par son TYPE autant que par sa case : un anneau et la route sur laquelle il est posé occupent la même case (x:z:l) ; déplacer un groupe
+  // de l'un à l'autre changeait la physique, pas la signature.
+  _logicSig(legacy = false) {
     const L = logicSig(this.lg);
     if (!L) return '';
-    const m = this.tiles.filter((t) => t.g).map((t) => `${t.x}:${t.z}:${t.l}:${t.g}`).sort().join(',') + '/' + this.decos.map((o, i) => (o.g ? `${i}:${o.g}` : '')).filter(Boolean).join(',');
+    const m = this.tiles.filter((t) => t.g).map((t) => `${legacy ? '' : t.t + ':'}${t.x}:${t.z}:${t.l}:${t.g}`).sort().join(',') + '/' + this.decos.map((o, i) => (o.g ? `${i}:${o.g}` : '')).filter(Boolean).join(',');
     return '#LG' + hashString(L + '|' + m);
+  }
+
+  // L'ancien texte de signature, FIGÉ (algorithme d'avant la phase 7 : obstacles et solides à 0,1 m et 0,01 rad, roulis au centième, groupes repérés par x:z:l). NE PLUS LE MODIFIER :
+  // les records, courses et fantômes locaux d'avant la 0.16.6 sont rangés sous la clé u-… qu'il donne (js/keyAlias.js les retrouve). flipPi : l'ancienne normalisation du roulis de π
+  // alternait entre +3,142 et −3,142 à chaque lecture du code (TECH-002) : les deux clés ont pu servir.
+  legacySignatureText(flipPi = false) {
+    const parts = this.tiles
+      .map((t) => `${t.t}:${t.x}:${t.z}:${t.l}:${t.r}:${t.s}:${t.p}:${t.v}${t.nb}${t.tn}${t.mv ? 'm' + t.mv : ''}${tileExtras(t)}`)
+      .sort()
+      .join('|');
+    const roll = (v) => (flipPi && v === 3.142 ? -v : v);
+    const d = this.decos.map((o) => `${o.k}:${o.x.toFixed(1)}:${o.z.toFixed(1)}:${o.s}${isObstacle(o.k) ? `:${o.y.toFixed(1)}:${o.ry.toFixed(2)}:${o.ph || 0}${o.rz ? ':z' + roll(o.rz).toFixed(2) : ''}` : isSolid(o.k) ? `:${o.y.toFixed(1)}:${o.ry.toFixed(2)}` : ''}`).join('|');
+    const rules = RULES.map((r) => r.sig(this[r.key])).join('');
+    return this.decor + '#' + parts + '#' + d + (this.laps > 1 ? '#L' + this.laps : '') + rules + this._logicSig(true);
   }
 
   setLogic(lg) { this.lg = sanitizeLogic(lg); this.version++; }
@@ -361,6 +386,19 @@ export class Track {
   // Clé de classement d'un circuit de joueur : stable si on renomme le circuit.
   get userKey() {
     return 'u-' + this.signature();
+  }
+
+  // Où chercher un record local de ce circuit, la clé actuelle d'abord : la clé actuelle, celles d'avant la phase 7 (legacyUserKeys) et la toute première (empreinte du code, avant la signature).
+  userRecordKeys() { return [this.userKey, ...this.legacyUserKeys(), 'u-' + hashString(this.encode())]; }
+
+  // Les clés u-… que CE circuit avait avant la phase 7 (signature « legacy »), sans la clé actuelle : [] pour un circuit sans obstacle, solide ni groupe de logique (sa clé n'a pas
+  // bougé). Un circuit avec un obstacle roulé de π en a deux (TECH-002 : l'ancien code alternait entre +3,142 et −3,142). Voir js/keyAlias.js (records locaux retrouvés sous la nouvelle clé).
+  legacyUserKeys() {
+    const cur = this.userKey, out = [];
+    const add = (flip) => { const k = 'u-' + hashString(this.legacySignatureText(flip)); if (k !== cur && !out.includes(k)) out.push(k); };
+    add(false);
+    if (this.decos.some((o) => isObstacle(o.k) && o.rz === 3.142)) add(true);
+    return out;
   }
 
   get verified() {
@@ -512,7 +550,8 @@ export class Track {
         const k = DECO_ORDER[o[0]];
         if (!k) { lost.decos++; continue; }
         const u = typeof o[7] === 'string' && /^https?:\/\//i.test(o[7]) ? o[7] : '';
-        tr.addDeco({ k, x: o[1], y: o[2], z: o[3], ry: o[4], s: o[5], c: o[6], u, ph: +o[8] || 0, cc: typeof o[9] === 'string' && o[9] ? '#' + o[9] : '', cp: k === 'custom' ? unpackDecoParts(o[10]) : undefined, g: o[11] | 0, rx: +o[12] || 0, rz: +o[13] || 0 });
+        // (TECH-060 : une décoration que addDeco refuse — position illisible, pièce perso vide ou en trop — est PERDUE, comme une décoration inconnue : elle est comptée)
+        if (!tr.addDeco({ k, x: o[1], y: o[2], z: o[3], ry: o[4], s: o[5], c: o[6], u, ph: +o[8] || 0, cc: typeof o[9] === 'string' && o[9] ? '#' + o[9] : '', cp: k === 'custom' ? unpackDecoParts(o[10]) : undefined, g: o[11] | 0, rx: +o[12] || 0, rz: +o[13] || 0 })) lost.decos++;
       }
     }
     tr.laps = Math.max(1, Math.min(9, data.lp | 0 || 1));
@@ -543,19 +582,30 @@ function tileExtras(t) {
   return e;
 }
 
-// Phrase qui dit ce que la lecture d'un code n'a pas pu garder (voir Track.decode, `lost`), '' si rien n'a été perdu. `blocking` : vrai quand ENREGISTRER ce circuit effacerait de
-// l'information qu'une version plus récente du jeu saurait lire (pièces inconnues, options inconnues) : l'importeur refuse alors plutôt que de réécrire un circuit tronqué.
-export function lossText(track) {
+// Ce que la lecture d'un code n'a pas pu garder (voir Track.decode, `lost`), en données : [[catégorie, nombre], …] dans l'ordre d'affichage ; [] si rien n'a été perdu.
+// Catégories : unknown (pièces d'une version plus récente), options (options de pièce inconnues), overlap (pièces qui en recouvrent une autre), decos (décorations inconnues,
+// en trop, ou refusées à la lecture). Le texte, lui, se fabrique de ce côté (lossText, en français) ou dans la langue du joueur (js/lossMessage.js : le noyau n'importe pas i18n).
+export function lossParts(track) {
   const l = track && track.lost;
-  if (!l) return '';
-  const parts = [];
-  if (l.unknown) parts.push(`${l.unknown} pièce(s) d'une version plus récente du jeu`);
-  if (l.options) parts.push(`${l.options} option(s) de pièce inconnues de cette version`);
-  if (l.overlap) parts.push(`${l.overlap} pièce(s) qui en recouvrent une autre`);
-  if (l.decos) parts.push(`${l.decos} décoration(s)`);
+  if (!l) return [];
+  return [['unknown', l.unknown], ['options', l.options], ['overlap', l.overlap], ['decos', l.decos]].filter(([, n]) => n);
+}
+
+// Phrase qui dit ce que la lecture d'un code n'a pas pu garder (voir Track.decode, `lost`), '' si rien n'a été perdu. `blocking` : vrai quand ENREGISTRER ce circuit effacerait de
+// l'information qu'une version plus récente du jeu saurait lire (pièces, options ou décorations inconnues) : l'importeur refuse alors plutôt que de réécrire un circuit tronqué.
+const LOSS_FR = {
+  unknown: (n) => `${n} pièce(s) d'une version plus récente du jeu`,
+  options: (n) => `${n} option(s) de pièce inconnues de cette version`,
+  overlap: (n) => `${n} pièce(s) qui en recouvrent une autre`,
+  decos: (n) => `${n} décoration(s)`,
+};
+export function lossText(track) {
+  const parts = lossParts(track).map(([k, n]) => LOSS_FR[k](n));
   return parts.length ? 'Ce code contient ' + parts.join(', ') + ' que ce jeu ne peut pas lire.' : '';
 }
-export const lossBlocking = (track) => !!(track && track.lost && (track.lost.unknown || track.lost.options));
+// (TECH-060 : les décorations perdues bloquent comme les pièces et les options : avant, éditer puis enregistrer le code d'une version plus récente les effaçait sans avertissement.
+// Un circuit qui ne perd que des pièces qui en recouvrent une autre (overlap) ne bloque pas : rien d'une version plus récente n'est perdu.)
+export const lossBlocking = (track) => !!(track && track.lost && (track.lost.unknown || track.lost.options || track.lost.decos));
 
 export function b64encode(str) {
   const bytes = new TextEncoder().encode(str);

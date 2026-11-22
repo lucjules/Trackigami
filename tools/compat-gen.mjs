@@ -63,6 +63,19 @@ function richTrack() {
   return tr;
 }
 
+// TECH-002 (phase 7) : un obstacle roulé de π (posé au plafond) et une décoration visuelle inclinée de π, sur un circuit VÉRIFIÉ. Avant la phase 7 le roulis passait de 3,142 à −3,142 à
+// chaque lecture du code : la signature, la clé u-… et la marque « vérifié » alternaient. Le corpus garde la signature relue de ce code réécrit (tools/test-compat.mjs).
+function rollTrack() {
+  const tr = asUser('eclats');
+  tr.name = 'Corpus — obstacle roulé de π';
+  tr.author = 'Compat';
+  tr.addDeco({ k: 'spikes', x: 300, y: 0, z: -60, ry: 0, s: 1, rz: Math.PI });
+  tr.addDeco({ k: 'pendulum', x: 320, y: 0, z: -60, ry: 0.5, s: 1, ph: 0.25, rz: Math.PI / 2 });
+  tr.addDeco({ k: 'cone', x: 40, y: 0, z: -20, ry: 0, s: 1, rx: Math.PI, rz: -Math.PI });
+  tr.vt = 21.5; tr.vh = tr.signature();
+  return tr;
+}
+
 // Gravité inversée au départ (règle v4 seule : force le format 4 sans aucun champ de pièce).
 function flipTrack() {
   const tr = asUser('eclats');
@@ -73,7 +86,8 @@ function flipTrack() {
 
 function trackEntry(label, code) {
   const tr = Track.decode(code);
-  return { label, code, reencoded: tr.encode(), signature: tr.signature(), userKey: tr.userKey, tiles: tr.tiles.length, decos: tr.decos.length, laps: tr.laps, verified: !!tr.verified };
+  // legacyKeys : les clés u-… d'AVANT la phase 7 (signature « legacy » : Track.legacyUserKeys), [] si la clé n'a pas changé ; elles épinglent l'ancien algorithme (js/keyAlias.js en dépend).
+  return { label, code, reencoded: tr.encode(), signature: tr.signature(), userKey: tr.userKey, legacyKeys: tr.legacyUserKeys(), tiles: tr.tiles.length, decos: tr.decos.length, laps: tr.laps, verified: !!tr.verified };
 }
 
 // ---- Courses enregistrées ----------------------------------------------------------------------------------------------------------
@@ -144,6 +158,7 @@ export function generate() {
     trackEntry('SHW3 v3 (pièces mobiles et obstacles)', asUser('grandatelier').encode()),
     trackEntry('SHW3 v4 (tout)', richTrack().encode()),
     trackEntry('SHW3 v4 (gravité inversée au départ)', flipTrack().encode()),
+    trackEntry('SHW3 v4 (obstacle roulé de π, circuit vérifié)', rollTrack().encode()),
     trackEntry('Lien de partage', 'https://exemple.test/#t=' + encodeURIComponent(asUser('spirale').encode())),
   ];
   const eclats = buildBuiltin(BUILTIN_TRACKS.find((d) => d.id === 'eclats'));

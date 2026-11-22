@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { test, finish } from './harness.mjs';
 import { Track, RULES, TILE_FIELDS, tileToRow, rowToTile } from '../js/track.js';
+import { normalizeAngle, normalizeRoll } from '../js/track/shared.js';
 import { PIECES, OPTION_CONFLICTS, flagAllowed, armOption, clearConflicts } from '../js/pieces.js';
 import { VEHICLES } from '../js/constants.js';
 
@@ -152,6 +153,58 @@ test('clearConflicts remet à zéro les réglages d\'un mouvement retiré, sans 
   const o = clearConflicts({ mv: 2 }, 'tb');
   assert.equal(o.mv, 0); assert.equal('ms' in o, false);
   assert.ok(PIECES.straight);
+});
+
+console.log('Angles de décoration : normalisation idempotente (TECH-002)');
+// Les valeurs essayées : des angles tirés au hasard (graine fixe), tous les multiples de π/4 de −20π à +20π, et leurs voisins de ±0,0004 rad (l'erreur de l'arrondi au millième), les
+// valeurs que l'ancienne normalisation faisait alterner (±3,142, ±π), et les valeurs non finies.
+const ANGLES = (() => {
+  const r = lcg(2024), xs = [];
+  for (let i = 0; i < 20000; i++) xs.push((r() - 0.5) * 400);
+  for (let k = -80; k <= 80; k++) for (const e of [0, 4e-4, -4e-4, 1e-9, -1e-9]) xs.push((k * Math.PI) / 4 + e);
+  xs.push(3.142, -3.142, 3.141, -3.141, Math.PI, -Math.PI, 3.1415, -3.1415, 3.1416, 3.14209, 3.1421, 0, -0, 1e-4, 5e-4, 1e9, -1e9);
+  return xs;
+})();
+test('normalizeAngle et normalizeRoll sont idempotentes : normalize(normalize(x)) === normalize(x), jamais −0, jamais hors de [−3,141 ; 3,142]', () => {
+  for (const f of [normalizeAngle, normalizeRoll]) for (const x of ANGLES) {
+    const y = f(x);
+    assert.equal(f(y), y, `${f.name}(${x}) = ${y}, puis ${f(y)}`);
+    assert.ok(!Object.is(y, -0), `${f.name}(${x}) : −0`);
+    assert.ok(y >= -3.141 && y <= 3.142, `${f.name}(${x}) = ${y} hors du domaine`);
+  }
+  for (const f of [normalizeAngle, normalizeRoll]) for (const x of [NaN, Infinity, -Infinity, undefined]) assert.equal(f(x), 0, `${f.name}(${x})`);
+});
+test('normalizeRoll : seuls les multiples de π/4 sortent (au millième), ±π donne +3,142 quelle que soit la façon de l\'écrire ; les huit valeurs se relisent en elles-mêmes', () => {
+  const OUT = [0, 0.785, 1.571, 2.356, 3.142, -2.356, -1.571, -0.785];
+  const seen = new Set();
+  for (const x of ANGLES) seen.add(normalizeRoll(x));
+  assert.deepEqual([...seen].sort((a, b) => a - b), [...OUT].sort((a, b) => a - b));
+  for (const v of [Math.PI, -Math.PI, 3.142, -3.142, 3.141, -3.141, 3 * Math.PI, -5 * Math.PI]) assert.equal(normalizeRoll(v), 3.142, `±π : ${v}`);
+  for (const v of OUT) assert.equal(normalizeRoll(v), v);
+});
+test('normalizeAngle : ramené dans ]−π, π] puis arrondi au millième ; π reste +3,142 ; une valeur déjà normalisée ne bouge pas (le test de propriété ci-dessus tient aussi pour des angles libres)', () => {
+  assert.equal(normalizeAngle(Math.PI), 3.142);
+  assert.equal(normalizeAngle(-Math.PI / 2), -1.571);
+  assert.equal(normalizeAngle(2 * Math.PI + 0.5), 0.5);
+  assert.equal(normalizeAngle(0.0004), 0);
+  assert.equal(normalizeAngle(-0.0004), 0);
+  assert.equal(normalizeAngle(0.6544984694978735), 0.654);       // 37,5° saisi à l'inspecteur : arrondi au millième comme le code (TECH-035 reste un défaut de l'éditeur, phase 8)
+});
+test('addDeco : tout roulis ou inclinaison écrit est une valeur normalisée ; le circuit relu du code est identique, signature comprise, après 1, 2 et 5 lectures', () => {
+  const r = lcg(77);
+  for (let i = 0; i < 200; i++) {
+    const t = new Track('d');
+    t.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 });
+    t.add({ t: 'finish', x: 0, z: -1, l: 0, r: 0 });
+    const a = (r() - 0.5) * 30, b = ((Math.floor(r() * 17) - 8) * Math.PI) / 4;
+    t.addDeco({ k: 'spikes', x: 300, y: 0, z: -60, ry: 0, s: 1, rz: i % 2 ? a : b });
+    t.addDeco({ k: 'cone', x: 40, y: 0, z: -20, ry: 0, s: 1, rx: b, rz: a });
+    t.addDeco({ k: 'pillar', x: 80, y: 0, z: -20, ry: 0, s: 1, rx: a, rz: b });
+    for (const d of t.decos) for (const f of ['rx', 'rz']) if (d[f] !== undefined) assert.equal(d[f], f === 'rz' && d.k === 'spikes' ? normalizeRoll(d[f]) : normalizeAngle(d[f]), `${d.k}.${f}`);
+    const c0 = t.encode(), s0 = t.signature();
+    let u = t;
+    for (let n = 1; n <= 5; n++) { u = Track.decode(u.encode()); if (n === 1 || n === 2 || n === 5) { assert.equal(u.encode(), c0, `lecture ${n}`); assert.equal(u.signature(), s0, `signature, lecture ${n}`); } }
+  }
 });
 
 await finish('Tous les tests du modèle de circuit passent.');

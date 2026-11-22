@@ -6533,6 +6533,21 @@ var COLOR_KEYS = [
   "rail"
 ];
 var HEX3 = /^#[0-9a-f]{6}$/i;
+var TAU2 = Math.PI * 2;
+var QUARTER = Math.PI / 4;
+var HALF_MILLI = 5e-4;
+var milli = (v) => +v.toFixed(3) || 0;
+function normalizeAngle(v) {
+  if (!Number.isFinite(v)) return 0;
+  let w = (v % TAU2 + TAU2) % TAU2;
+  if (w > Math.PI + HALF_MILLI) w -= TAU2;
+  return milli(w);
+}
+function normalizeRoll(v) {
+  if (!Number.isFinite(v)) return 0;
+  const k = (Math.round(v / QUARTER) % 8 + 8) % 8;
+  return milli((k > 4 ? k - 8 : k) * QUARTER);
+}
 function cleanColors(c) {
   if (!c || typeof c !== "object") return null;
   const out = {};
@@ -6746,7 +6761,6 @@ var surfaceMethods = {
 };
 
 // js/track/edit.js
-var TAU2 = Math.PI * 2;
 var editMethods = {
   // Revêtement (avec paramètre en %). Renvoie true si quelque chose a changé.
   setSurface(tile, s, p = 0) {
@@ -6904,23 +6918,15 @@ var editMethods = {
       if (!Number.isFinite(deco.x) || !Number.isFinite(deco.y) || !Number.isFinite(deco.z) || !Number.isFinite(deco.ry)) return null;
     }
     if (isObstacle(deco.k)) {
-      let v = +d.rz;
-      if (Number.isFinite(v) && v) {
-        v = (v % TAU2 + TAU2) % TAU2;
-        if (v > Math.PI + 1e-6) v -= TAU2;
-        v = Math.round(v / (Math.PI / 4)) * (Math.PI / 4);
-        if (Math.abs(v) > 1e-4) deco.rz = +v.toFixed(3);
-      }
+      const r = normalizeRoll(+d.rz);
+      if (r) deco.rz = r;
     } else if (!solid) {
       for (const a of [
         "rx",
         "rz"
       ]) {
-        let v = +d[a];
-        if (!Number.isFinite(v) || !v) continue;
-        v = (v % TAU2 + TAU2) % TAU2;
-        if (v > Math.PI) v -= TAU2;
-        if (Math.abs(v) > 1e-4) deco[a] = +v.toFixed(3);
+        const r = normalizeAngle(+d[a]);
+        if (r) deco[a] = r;
       }
     }
     if (typeof d.cc === "string" && HEX3.test(d.cc)) deco.cc = d.cc.toLowerCase();
@@ -7182,8 +7188,10 @@ function createLogic(track, phys, race) {
     zone: 0,
     veh: "",
     started: false,
-    ver: 0
+    ver: 0,
+    tDone: 0
   };
+  let catchUp = false;
   const fx = [];
   const log = [];
   let debug = false;
@@ -7263,6 +7271,19 @@ function createLogic(track, phys, race) {
       if (r.on[0] === kind && test(r.on)) run(r, i);
     });
   };
+  const fireTime = () => {
+    if (!catchUp) {
+      fire("time", (on) => on[1] === race.steps);
+      return;
+    }
+    catchUp = false;
+    const from = st.tDone, due = [];
+    L4.rules.forEach((r, i) => {
+      if (r.on[0] === "time" && r.on[1] > from && r.on[1] <= race.steps) due.push(i);
+    });
+    due.sort((a, b) => L4.rules[a].on[1] - L4.rules[b].on[1] || a - b);
+    for (const i of due) run(L4.rules[i], i);
+  };
   return {
     logic: L4,
     state: st,
@@ -7280,8 +7301,10 @@ function createLogic(track, phys, race) {
       st.zone = 0;
       st.veh = "";
       st.started = false;
+      st.tDone = 0;
       fx.length = 0;
       log.length = 0;
+      catchUp = false;
       apply();
     },
     snapshot() {
@@ -7297,7 +7320,8 @@ function createLogic(track, phys, race) {
         ],
         zone: st.zone,
         veh: st.veh,
-        started: st.started
+        started: st.started,
+        tDone: st.tDone
       };
     },
     restore(s) {
@@ -7307,7 +7331,14 @@ function createLogic(track, phys, race) {
       st.zone = s.zone;
       st.veh = s.veh;
       st.started = s.started;
+      st.tDone = s.tDone | 0;
+      catchUp = false;
       apply();
+    },
+    // Retour au checkpoint avec chrono conservé (Simulation.rewind, keepClock), juste après restore : au prochain pas, les règles « temps » dont l'échéance
+    // est tombée depuis l'instantané sont rejouées (voir l'en-tête). Sans effet en solo (le chrono revient avec l'instantané : rien n'est jamais appelé).
+    catchUp() {
+      catchUp = true;
     },
     // Après les règles de course d'un pas (Simulation.score) : ev = l'évènement de course de ce pas (checkpoint, tour, arrivée) ou null.
     onStep(ev) {
@@ -7319,7 +7350,8 @@ function createLogic(track, phys, race) {
       }
       if (ev && ev.type === "checkpoint") fire("cp", (on) => on[1] === 0 || on[1] === ev.index);
       if (ev && ev.type === "lap") fire("lap", (on) => on[1] === race.lap);
-      fire("time", (on) => on[1] === race.steps);
+      fireTime();
+      st.tDone = race.steps;
       const zt = phys.rib ? phys.rib.tile : phys.surfTile;
       const z = zt && zt.g ? zt.g : 0;
       if (z !== st.zone) {
@@ -8079,19 +8111,38 @@ var Track = class _Track {
   }
   // Le texte dont signature() prend l'empreinte (32 bits, FNV-1a : pratique pour une clé, mais on peut FABRIQUER un autre circuit de même clé). Le serveur en
   // prend une empreinte forte (SHA-256) pour lier une clé de classement u-… à UN seul circuit (supabase/etape15-backend.sql, track_binds).
+  // Phase 7 (0.16.6, TECH-039) : obstacles et solides sont hachés AU PAS DU CODE (Track.encode : x, y, z, s au centième, cap et roulis au millième) : avant, 0,1 m et 0,01 rad
+  // (le roulis au centième) alors que la physique lit les valeurs du code : deux circuits physiquement différents (une poutre d'échelle 8 décalée de 4 cm et tournée de 4 mrad : son
+  // extrémité bouge de 0,26 m) avaient la même clé de classement. Les décorations purement visuelles gardent leur texte d'avant (0,1 m) : leur clé ne change pas.
+  // Décorations visuelles : même texte qu'avant (dixième de mètre), mais calculé APRÈS l'arrondi du code (centième, puis dixième) : pour un circuit relu d'un code les valeurs sont déjà au
+  // centième, le texte est donc exactement l'ancien (aucune clé ne change) ; pour un circuit en mémoire aux coordonnées libres, il est celui du code relu (avant : un arrondi direct au
+  // dixième pouvait différer de l'arrondi en deux temps aux frontières, ≈ 5 % par coordonnée : la clé en mémoire n'était pas celle du code).
+  // L'ancien texte reste calculable (legacySignatureText) : il sert à retrouver les records locaux d'avant (js/keyAlias.js).
   signatureText() {
     const parts = this.tiles.map((t) => `${t.t}:${t.x}:${t.z}:${t.l}:${t.r}:${t.s}:${t.p}:${t.v}${t.nb}${t.tn}${t.mv ? "m" + t.mv : ""}${tileExtras(t)}`).sort().join("|");
-    const d = this.decos.map((o) => `${o.k}:${o.x.toFixed(1)}:${o.z.toFixed(1)}:${o.s}${isObstacle(o.k) ? `:${o.y.toFixed(1)}:${o.ry.toFixed(2)}:${o.ph || 0}${o.rz ? ":z" + o.rz.toFixed(2) : ""}` : isSolid(o.k) ? `:${o.y.toFixed(1)}:${o.ry.toFixed(2)}` : ""}`).join("|");
+    const d = this.decos.map((o) => isObstacle(o.k) ? `${o.k}:${o.x.toFixed(2)}:${o.z.toFixed(2)}:${o.s.toFixed(2)}:${o.y.toFixed(2)}:${o.ry.toFixed(3)}:${o.ph || 0}${o.rz ? ":z" + o.rz.toFixed(3) : ""}` : isSolid(o.k) ? `${o.k}:${o.x.toFixed(2)}:${o.z.toFixed(2)}:${o.s.toFixed(2)}:${o.y.toFixed(2)}:${o.ry.toFixed(3)}` : `${o.k}:${(+o.x.toFixed(2)).toFixed(1)}:${(+o.z.toFixed(2)).toFixed(1)}:${+o.s.toFixed(2)}`).join("|");
     const rules = RULES.map((r) => r.sig(this[r.key])).join("");
     return this.decor + "#" + parts + "#" + d + (this.laps > 1 ? "#L" + this.laps : "") + rules + this._logicSig();
   }
   // Logique du circuit : elle change la course, donc la signature ; avec elle, l'appartenance des pièces et décorations aux groupes aussi (une
   // règle « cache le groupe 2 » n'a pas le même effet selon ce qu'il contient). Sans logique : rien (les signatures d'avant ne bougent pas).
-  _logicSig() {
+  // Phase 7 (TECH-039) : une pièce est repérée par son TYPE autant que par sa case : un anneau et la route sur laquelle il est posé occupent la même case (x:z:l) ; déplacer un groupe
+  // de l'un à l'autre changeait la physique, pas la signature.
+  _logicSig(legacy = false) {
     const L4 = logicSig(this.lg);
     if (!L4) return "";
-    const m = this.tiles.filter((t) => t.g).map((t) => `${t.x}:${t.z}:${t.l}:${t.g}`).sort().join(",") + "/" + this.decos.map((o, i) => o.g ? `${i}:${o.g}` : "").filter(Boolean).join(",");
+    const m = this.tiles.filter((t) => t.g).map((t) => `${legacy ? "" : t.t + ":"}${t.x}:${t.z}:${t.l}:${t.g}`).sort().join(",") + "/" + this.decos.map((o, i) => o.g ? `${i}:${o.g}` : "").filter(Boolean).join(",");
     return "#LG" + hashString(L4 + "|" + m);
+  }
+  // L'ancien texte de signature, FIGÉ (algorithme d'avant la phase 7 : obstacles et solides à 0,1 m et 0,01 rad, roulis au centième, groupes repérés par x:z:l). NE PLUS LE MODIFIER :
+  // les records, courses et fantômes locaux d'avant la 0.16.6 sont rangés sous la clé u-… qu'il donne (js/keyAlias.js les retrouve). flipPi : l'ancienne normalisation du roulis de π
+  // alternait entre +3,142 et −3,142 à chaque lecture du code (TECH-002) : les deux clés ont pu servir.
+  legacySignatureText(flipPi = false) {
+    const parts = this.tiles.map((t) => `${t.t}:${t.x}:${t.z}:${t.l}:${t.r}:${t.s}:${t.p}:${t.v}${t.nb}${t.tn}${t.mv ? "m" + t.mv : ""}${tileExtras(t)}`).sort().join("|");
+    const roll = (v) => flipPi && v === 3.142 ? -v : v;
+    const d = this.decos.map((o) => `${o.k}:${o.x.toFixed(1)}:${o.z.toFixed(1)}:${o.s}${isObstacle(o.k) ? `:${o.y.toFixed(1)}:${o.ry.toFixed(2)}:${o.ph || 0}${o.rz ? ":z" + roll(o.rz).toFixed(2) : ""}` : isSolid(o.k) ? `:${o.y.toFixed(1)}:${o.ry.toFixed(2)}` : ""}`).join("|");
+    const rules = RULES.map((r) => r.sig(this[r.key])).join("");
+    return this.decor + "#" + parts + "#" + d + (this.laps > 1 ? "#L" + this.laps : "") + rules + this._logicSig(true);
   }
   setLogic(lg) {
     this.lg = sanitizeLogic(lg);
@@ -8100,6 +8151,26 @@ var Track = class _Track {
   // Clé de classement d'un circuit de joueur : stable si on renomme le circuit.
   get userKey() {
     return "u-" + this.signature();
+  }
+  // Où chercher un record local de ce circuit, la clé actuelle d'abord : la clé actuelle, celles d'avant la phase 7 (legacyUserKeys) et la toute première (empreinte du code, avant la signature).
+  userRecordKeys() {
+    return [
+      this.userKey,
+      ...this.legacyUserKeys(),
+      "u-" + hashString(this.encode())
+    ];
+  }
+  // Les clés u-… que CE circuit avait avant la phase 7 (signature « legacy »), sans la clé actuelle : [] pour un circuit sans obstacle, solide ni groupe de logique (sa clé n'a pas
+  // bougé). Un circuit avec un obstacle roulé de π en a deux (TECH-002 : l'ancien code alternait entre +3,142 et −3,142). Voir js/keyAlias.js (records locaux retrouvés sous la nouvelle clé).
+  legacyUserKeys() {
+    const cur = this.userKey, out = [];
+    const add = (flip) => {
+      const k = "u-" + hashString(this.legacySignatureText(flip));
+      if (k !== cur && !out.includes(k)) out.push(k);
+    };
+    add(false);
+    if (this.decos.some((o) => isObstacle(o.k) && o.rz === 3.142)) add(true);
+    return out;
   }
   get verified() {
     return this.vt > 0 && this.vh === this.signature();
@@ -8340,7 +8411,7 @@ var Track = class _Track {
           continue;
         }
         const u = typeof o[7] === "string" && /^https?:\/\//i.test(o[7]) ? o[7] : "";
-        tr.addDeco({
+        if (!tr.addDeco({
           k,
           x: o[1],
           y: o[2],
@@ -8355,7 +8426,7 @@ var Track = class _Track {
           g: o[11] | 0,
           rx: +o[12] || 0,
           rz: +o[13] || 0
-        });
+        })) lost.decos++;
       }
     }
     tr.laps = Math.max(1, Math.min(9, data.lp | 0 || 1));
@@ -9460,7 +9531,7 @@ function forkPath(tile, branch, reverse) {
 // js/version.js
 var GAME_NAME = "Trackigami";
 var FILE_PREFIX = GAME_NAME.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-var PHYS_VER = 38;
+var PHYS_VER = 39;
 
 // js/tracks.js
 var BUILTIN_TRACKS = [
@@ -16381,6 +16452,17 @@ var BASIS = {
 var LAND = {
   dl: 0
 };
+var LAND_CONVERGED = 0.01;
+var LAND_ALONG_MARGIN = 2;
+var LAND_STEP = 2;
+var LAND_TURN = Math.PI / 24;
+var LAND_MIN = 32;
+var LAND_MAX = 1024;
+var LAND_ITERS = 24;
+var LAND_EPS = 1e-5;
+var samplesCache = /* @__PURE__ */ new WeakMap();
+var LP = {};
+var LF = {};
 var MATCH_OFF = [
   0,
   1.5
@@ -16578,6 +16660,46 @@ var ribbonMethods = {
     }
     return false;
   },
+  // Recherche fine du point du ruban le plus proche de p (GAME-004) : n échantillons, n proportionnel à la longueur du ruban ET à sa rotation totale (calculé une fois
+  // par ruban), puis affinage par projection sur la tangente, borné à l'intervalle des deux échantillons voisins (il ne saute pas d'une spire à l'autre), jusqu'à
+  // convergence ou LAND_ITERS itérations. Déterministe : mêmes opérations, dans le même ordre, sur tous les moteurs.
+  _closestRibbonU(tile, rib, p) {
+    let n = samplesCache.get(rib);
+    if (n === void 0) {
+      let turn = 0, tx = 0, ty = 0, tz = 0;
+      for (let i = 0; i <= 256; i++) {
+        frameLocal(rib, i / 256, LF);
+        if (i > 0) turn += dacos(clamp(tx * LF.tx + ty * LF.ty + tz * LF.tz, -1, 1));
+        tx = LF.tx;
+        ty = LF.ty;
+        tz = LF.tz;
+      }
+      n = Math.min(LAND_MAX, Math.max(LAND_MIN, Math.ceil((rib.len || 0) / LAND_STEP), Math.ceil(turn / LAND_TURN)));
+      samplesCache.set(rib, n);
+    }
+    const c = tileCenter(tile, CC), r = tile.r;
+    let bi = 0, bd = Infinity;
+    for (let i = 0; i <= n; i++) {
+      rib.pos(i / n, LP);
+      rotVec(r, LP.x, LP.z, TMP);
+      const dx = p.x - (TMP.x + c.x), dy = p.y - LP.y, dz = p.z - (TMP.z + c.z);
+      const d = dx * dx + dy * dy + dz * dz;
+      if (d < bd) {
+        bd = d;
+        bi = i;
+      }
+    }
+    const lo = Math.max(0, bi - 1) / n, hi = Math.min(n, bi + 1) / n;
+    let u = bi / n;
+    for (let it = 0; it < LAND_ITERS; it++) {
+      const F = frameWorld(tile, rib, u, this.F);
+      const dt = (p.x - F.px) * F.tx + (p.y - F.py) * F.ty + (p.z - F.pz) * F.tz;
+      const nu = clamp(u + dt / F.ds, lo, hi);
+      if (Math.abs(dt) < LAND_EPS || nu === u) break;
+      u = nu;
+    }
+    return u;
+  },
   // Atterrissage en plein milieu d'un ruban (retombée sur le haut d'un L, au fond d'un looping...).
   _tryLandRibbon() {
     const p = this.pos, q = this.prev, v = this.vel;
@@ -16601,8 +16723,15 @@ var ribbonMethods = {
         const dt = (p.x - F2.px) * F2.tx + (p.y - F2.py) * F2.ty + (p.z - F2.pz) * F2.tz;
         u = clamp(u + dt / F2.ds, 0, 1);
       }
+      let F = frameWorld(tile, rib, u, this.F);
+      let along = (p.x - F.px) * F.tx + (p.y - F.py) * F.ty + (p.z - F.pz) * F.tz;
+      if (Math.abs(along) > LAND_CONVERGED) {
+        u = this._closestRibbonU(tile, rib, p);
+        F = frameWorld(tile, rib, u, this.F);
+        along = (p.x - F.px) * F.tx + (p.y - F.py) * F.ty + (p.z - F.pz) * F.tz;
+      }
       if (u <= 2e-3 || u >= 0.998) continue;
-      const F = frameWorld(tile, rib, u, this.F);
+      if (Math.abs(along) > this.speed * DT + LAND_ALONG_MARGIN) continue;
       const dl = (p.x - F.px) * F.rx + (p.y - F.py) * F.ry + (p.z - F.pz) * F.rz;
       if (F.kc > 1e-4) {
         LAND.dl = dl;
@@ -17208,7 +17337,9 @@ var CarPhysics = class {
     this.bz0 = b.minZ - m;
     this.bz1 = b.maxZ + m;
   }
-  place(x, y, z, yaw, gs = 1) {
+  // (Re)pose la voiture à l'arrêt en (x, y, z), cap yaw, sens de gravité gs, avec le véhicule `vehicle` (départ : celui du circuit ; retour au
+  // checkpoint : celui du point de retour). Le véhicule est posé ICI, avant la lecture du sol, parce que la plaque sous la voiture en dépend (voir plus bas).
+  place(x, y, z, yaw, gs = 1, vehicle = "car") {
     this.pos.x = x;
     this.pos.y = y;
     this.pos.z = z;
@@ -17268,7 +17399,7 @@ var CarPhysics = class {
     }
     this.rib = null;
     this.gravMul = 1;
-    this.vehicle = "car";
+    this.vehicle = vehicle;
     this.gSign = gs < 0 ? -1 : 1;
     this.lost = false;
     this._flipNow = false;
@@ -17298,6 +17429,7 @@ var CarPhysics = class {
     this.prev.y = s.h;
     this.grounded = true;
     this._setGround(s, false);
+    if (PLATES[this.surfMod] && PLATES[this.surfMod] === this.vehicle) this.plateLock = this.surfMod;
     this.glassSafe = null;
     this._updateFwd();
   }
@@ -18135,11 +18267,8 @@ var RaceLogic = class {
     this.finished = false;
     this.steps = 0;
     this.lap = 1;
-    const T = this.track;
     this.respawn = {
-      ...this.spawnPoint(),
-      vehicle: T.veh0 || "car",
-      grav: (T.g0 || 100) / 100,
+      ...startState(this.track, this.spawnPoint()),
       snap: this._snap()
     };
     this.inFinish = false;
@@ -18164,6 +18293,18 @@ var RaceLogic = class {
   // reviennent, eux, à l'état du checkpoint.
   rewind({ keepClock = false } = {}) {
     const s = this.respawn.snap;
+    const r = this.respawn;
+    this.lastGround = s && s.steps > 0 ? {
+      x: r.x,
+      y: r.y,
+      z: r.z,
+      yaw: r.yaw,
+      gs: r.gs || 1,
+      vehicle: r.vehicle || "car",
+      vel: r.vel,
+      fwd: r.fwd,
+      steps: s.steps
+    } : null;
     if (s) {
       if (!keepClock) this.steps = s.steps;
       this.splits.length = Math.min(this.splits.length, s.splits);
@@ -18173,10 +18314,14 @@ var RaceLogic = class {
     }
     this.finished = false;
     this.inFinish = false;
-    return this.respawn;
+    return r;
   }
   // Point de réapparition d'un checkpoint aérien : la dernière route roulable traversée
   // (mémorisée par la course), sinon l'anneau lui-même au niveau de sa base.
+  // Le point de retour est l'état d'UN instant (TECH-001) : la position du dernier sol, le véhicule ET la vitesse qu'avait la voiture à ce moment-là, avec le
+  // chrono de ce moment (snap.steps, voir update). Avant, le véhicule était celui de l'anneau (une plaque entre les deux l'annulait aussitôt : retour en voiture,
+  // chute… sans fin) et la voiture repartait à l'arrêt, souvent à quelques mètres du vide qu'elle venait de sauter : saut impossible, chute, retour… sans fin,
+  // en voiture comme en deltaplane. Le reste de l'état est celui de tout (re)départ (place : rotation, glisse, turbo à zéro).
   _ringRespawn(tile, phys) {
     if (this.lastGround) {
       const g = this.lastGround;
@@ -18185,7 +18330,10 @@ var RaceLogic = class {
         y: g.y,
         z: g.z,
         yaw: g.yaw,
-        gs: g.gs || 1
+        gs: g.gs || 1,
+        vehicle: g.vehicle,
+        vel: g.vel,
+        fwd: g.fwd
       };
     }
     const c = tileCenter(tile), gs = tile.v ? -1 : 1, y = baseY(tile);
@@ -18198,7 +18346,8 @@ var RaceLogic = class {
       y,
       z: c.z,
       yaw: phys.yaw,
-      gs
+      gs,
+      vehicle: phys.vehicle
     };
   }
   get time() {
@@ -18216,6 +18365,13 @@ var RaceLogic = class {
         z: p.z,
         yaw: phys.yaw,
         gs: phys.gSign,
+        vehicle: phys.vehicle,
+        vel: [
+          phys.vel.x,
+          phys.vel.y,
+          phys.vel.z
+        ],
+        fwd: phys.fwdSpeed,
         steps: this.steps
       };
     }
@@ -18245,20 +18401,12 @@ var RaceLogic = class {
         const rr = this._ringRespawn(tile, phys);
         this.collected.add(tile);
         this.splits.push(this.steps);
-        const old = this.respawn;
         this.respawn = rr ? {
           ...rr,
-          vehicle: phys.vehicle,
           grav: phys.gravMul,
           snap
         } : {
-          x: old.x,
-          y: old.y,
-          z: old.z,
-          yaw: old.yaw,
-          gs: old.gs,
-          vehicle: old.vehicle,
-          grav: old.grav,
+          ...this.respawn,
           snap
         };
         event = {
@@ -18358,24 +18506,40 @@ var RaceLogic = class {
     return event;
   }
 };
-function placeAtStart(phys, logic, sp = logic.spawnPoint()) {
-  const T = logic.track;
-  phys.place(sp.x, sp.y, sp.z, sp.yaw, sp.gs || 1);
-  phys.vehicle = T.veh0 || "car";
-  phys.gravMul = (T.g0 || 100) / 100;
-  const v0 = (T.v0 || 0) / 3.6;
+function startState(track, sp) {
+  const st = {
+    ...sp,
+    vehicle: track.veh0 || "car",
+    grav: (track.g0 || 100) / 100
+  };
+  const v0 = (track.v0 || 0) / 3.6;
   if (v0 > 0) {
-    phys.vel.x = -dsin(sp.yaw) * v0;
-    phys.vel.z = -dcos(sp.yaw) * v0;
-    phys.fwdSpeed = v0;
+    st.vel = [
+      -dsin(sp.yaw) * v0,
+      0,
+      -dcos(sp.yaw) * v0
+    ];
+    st.fwd = v0;
   }
+  return st;
+}
+function placeState(phys, r) {
+  phys.place(r.x, r.y, r.z, r.yaw, r.gs || 1, r.vehicle || "car");
+  phys.gravMul = r.grav || 1;
+  if (r.vel) {
+    phys.vel.x = r.vel[0];
+    phys.vel.y = r.vel[1];
+    phys.vel.z = r.vel[2];
+    phys.fwdSpeed = r.fwd || 0;
+  }
+}
+function placeAtStart(phys, logic, sp = logic.spawnPoint()) {
+  placeState(phys, startState(logic.track, sp));
 }
 
 // js/simulation.js
 function placeAtRespawn(phys, r) {
-  phys.place(r.x, r.y, r.z, r.yaw, r.gs || 1);
-  phys.vehicle = r.vehicle || "car";
-  phys.gravMul = r.grav || 1;
+  placeState(phys, r);
   phys.glassSafe = phys.surfMod === "glass" && phys.surfTile ? phys.surfTile : null;
 }
 var Simulation = class {
@@ -18400,11 +18564,7 @@ var Simulation = class {
     const T = this.track;
     this.logic.reset();
     const sp = spawn || this.logic.spawnPoint();
-    if (spawn) this.logic.respawn = {
-      ...sp,
-      vehicle: T.veh0 || "car",
-      grav: (T.g0 || 100) / 100
-    };
+    if (spawn) this.logic.respawn = startState(T, sp);
     placeAtStart(this.phys, this.logic, sp);
     this.groundT = 0;
     this.idle = 0;
@@ -18418,6 +18578,7 @@ var Simulation = class {
       keepClock
     });
     placeAtRespawn(this.phys, r);
+    if (keepClock && this.lgc && r.snap && r.snap.ext) this.lgc.catchUp();
     this.groundT = 0;
     this.sank = false;
     this.lost = "";
@@ -20187,4 +20348,4 @@ Deno.serve(createHandler({
   serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   allowedOrigin: Deno.env.get("ALLOWED_ORIGIN") ?? "*"
 }));
-globalThis.__COPYTRACK_BUILD__ = "d6a1f5cf7990bcfd";
+globalThis.__COPYTRACK_BUILD__ = "3dcf1d72c5fb42e0";

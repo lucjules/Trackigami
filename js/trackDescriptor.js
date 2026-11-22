@@ -11,7 +11,6 @@
 import { CELL } from './constants.js';
 import { PIECES } from './pieces.js';
 import { centerlineWorld } from './ribbons.js';
-import { hashString } from './track.js';
 import { medalFor } from './medals.js';
 import { medalTime } from './storage.js';
 import { goalFor, nextBuiltinIndex, chapterUnlocked, prerequisiteOf, CHAPTER_SIZE, UNLOCK_MEDALS } from './career.js';
@@ -90,7 +89,7 @@ export function describeUser(track, entry = null) {
   d.entryId = entry ? entry.id : null;
   d.medals = track.derivedMedals;
   d.stars = estimateDifficulty(track).stars;
-  d.recordKeys = [track.userKey, 'u-' + hashString(track.encode())];        // ancienne clé (avant la signature) : « Mes circuits » la lisait déjà
+  d.recordKeys = track.userRecordKeys();        // la clé actuelle, celles d'avant la phase 7 (signature au pas du code : TECH-039, voir keyAlias.js) et la toute première (avant la signature)
   d.launch = { trackKey: track.userKey, userEntry: entry ? entry.id : null, seed: track.name, userMap: true, medals: track.derivedMedals, difficulty: 2 };
   return d;
 }

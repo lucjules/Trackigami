@@ -6,9 +6,8 @@ import { isObstacle } from '../obstacles.js';
 import { isSolid, SOLID_SCALE } from '../solids.js';
 import { DECO_ORDER } from '../decoData.js';
 import { sanitizeDecoParts, MAX_CUSTOM_DECOS } from '../customDeco.js';
-import { HEX, cleanColors } from './shared.js';
+import { HEX, cleanColors, normalizeAngle, normalizeRoll } from './shared.js';
 import { Track } from '../track.js';
-const TAU2 = Math.PI * 2;
 export const editMethods = {
   // Revêtement (avec paramètre en %). Renvoie true si quelque chose a changé.
   setSurface(tile, s, p = 0) {
@@ -140,22 +139,17 @@ export const editMethods = {
       if (!Number.isFinite(deco.x) || !Number.isFinite(deco.y) || !Number.isFinite(deco.z) || !Number.isFinite(deco.ry)) return null;
     }
     // Inclinaison (rx : nez vers le bas / le haut) et roulis (rz) : purement VISUELS pour une décoration ; pour un obstacle seul le roulis rz compte (physique), par pas de 45°.
-    // Ramenés dans [-π, π] ; absents (0) quand la décoration est droite, pour que les codes existants ne changent pas.
+    // Ramenés dans ]−π, π] puis arrondis au millième, de façon IDEMPOTENTE (track/shared.js) ; absents (0) quand la décoration est droite, pour que les codes existants ne changent pas.
     if (isObstacle(deco.k)) {
       // Phase 3 : un obstacle peut être ROULÉ autour de son axe z (posé sur un mur, un plan incliné ou au plafond : son haut est la normale de la route). Multiples de 45° seulement
       // (la forme de contact tourne avec lui, voir obstacles.js : toLocalObs) ; l'inclinaison rx reste refusée.
-      let v = +d.rz;
-      if (Number.isFinite(v) && v) {
-        v = ((v % TAU2) + TAU2) % TAU2; if (v > Math.PI + 1e-6) v -= TAU2;
-        v = Math.round(v / (Math.PI / 4)) * (Math.PI / 4);
-        if (Math.abs(v) > 1e-4) deco.rz = +v.toFixed(3);
-      }
+      // (TECH-002 : normalizeRoll est idempotente : π reste π à chaque lecture du code ; voir track/shared.js)
+      const r = normalizeRoll(+d.rz);
+      if (r) deco.rz = r;
     } else if (!solid) {
       for (const a of ['rx', 'rz']) {
-        let v = +d[a];
-        if (!Number.isFinite(v) || !v) continue;
-        v = ((v % TAU2) + TAU2) % TAU2; if (v > Math.PI) v -= TAU2;
-        if (Math.abs(v) > 1e-4) deco[a] = +v.toFixed(3);
+        const r = normalizeAngle(+d[a]);
+        if (r) deco[a] = r;
       }
     }
     // Couleur personnalisée (#rrggbb) : prend le pas sur l'index de couleur c.

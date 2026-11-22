@@ -8,15 +8,15 @@
 //   3. score()     : règles de course (checkpoints, arrivée), puis hors piste / noyade → réapparition automatique demandée
 // step(inp) fait 2 + 3 d'un seul appel ; la course en direct les sépare pour intercaler les effets (sons, particules, caméra).
 import { CarPhysics } from './physics.js';
-import { RaceLogic, placeAtStart } from './raceLogic.js';
+import { RaceLogic, placeAtStart, placeState, startState } from './raceLogic.js';
 import { DT, OFF_TRACK_RESPAWN_S } from './constants.js';
 import { createLogic } from './sim/logic.js';
 
-// Replace la voiture au point de réapparition r (retour au checkpoint) : position, véhicule et gravité de ce moment-là.
+// Replace la voiture au point de réapparition r (retour au checkpoint) : l'état de ce moment-là, posé par le même code que le départ (raceLogic.js :
+// placeState) : position, véhicule, gravité, et vitesse s'il en a une (point de retour initial : la vitesse de départ, TECH-013 ; checkpoint aérien : celle
+// du dernier sol, TECH-001). Un checkpoint au sol rend la voiture à l'arrêt.
 export function placeAtRespawn(phys, r) {
-  phys.place(r.x, r.y, r.z, r.yaw, r.gs || 1);
-  phys.vehicle = r.vehicle || 'car';
-  phys.gravMul = r.grav || 1;
+  placeState(phys, r);
   // Verre sous le point de réapparition : il ne cède pas tant que la voiture ne l'a pas quitté (sinon un checkpoint posé sur du verre ramenait
   // la voiture sur une dalle qui cède, puis dans le vide, puis au checkpoint... sans fin tant que le joueur attend). Le départ, lui, n'est pas concerné.
   phys.glassSafe = phys.surfMod === 'glass' && phys.surfTile ? phys.surfTile : null;
@@ -44,7 +44,7 @@ export class Simulation {
     const T = this.track;
     this.logic.reset();
     const sp = spawn || this.logic.spawnPoint();
-    if (spawn) this.logic.respawn = { ...sp, vehicle: T.veh0 || 'car', grav: (T.g0 || 100) / 100 };
+    if (spawn) this.logic.respawn = startState(T, sp);      // (même état que le départ, vitesse de départ comprise : grille d'un championnat, essai depuis le curseur)
     placeAtStart(this.phys, this.logic, sp);
     this.groundT = 0;
     this.idle = 0;
@@ -57,6 +57,9 @@ export class Simulation {
   rewind({ keepClock = false } = {}) {
     const r = this.logic.rewind({ keepClock });
     placeAtRespawn(this.phys, r);
+    // Chrono conservé : la logique du circuit est revenue à l'instantané, pas le chrono ; ses règles « temps » passées depuis seront rejouées au pas suivant
+    // (sim/logic.js : catchUp, TECH-014). En solo, rien : le chrono revient avec l'instantané.
+    if (keepClock && this.lgc && r.snap && r.snap.ext) this.lgc.catchUp();
     this.groundT = 0;
     this.sank = false;
     this.lost = '';

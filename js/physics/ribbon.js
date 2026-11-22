@@ -8,13 +8,25 @@ import { CAR, SIDE_AERO, SIDE_DROP, SIDE_MIN_SPEED, SIDE_GRACE, surfaceCoeffs } 
 import { wallBounce, wallFriction, wallHardLoss, wallSpinOf, wallStunOf } from './contact.js';
 import { solidSide } from '../solids.js';
 import { clamp } from '../mathutil.js';
-import { dasin, datan2, dcos, dsin, hypot2, hypot3 } from '../dmath.js';
+import { dacos, dasin, datan2, dcos, dsin, hypot2, hypot3 } from '../dmath.js';
 
 const FL = {};
 const CC = { x: 0, z: 0 };
 const TMP = { x: 0, z: 0 };
 const BASIS = { e1x: 0, e1y: 0, e1z: 0, e2x: 0, e2y: 0, e2z: 0 };
 const LAND = { dl: 0 };                      // tampon de _tryLandRibbon (évite un objet par pas en vol près d'un ruban)
+// Réception sur ruban (GAME-004, phase 6) : la voiture ne se pose qu'AU DROIT du point retenu. Les réceptions légitimes mesurées (pilote automatique et pilote perturbé
+// sur les 72 circuits, défis du jour, balayage boucles / vrilles / tubes / murs : tools/test-receptions.mjs) ont un écart le long de la route d'au plus 1 mm après
+// l'affinage ; une téléportation observée sur « Épave » en avait 52 à 70 m (affinage non convergé sur le double looping, 265 m de ruban).
+const LAND_CONVERGED = 0.01;                 // écart (m) au-delà duquel l'affinage historique n'a pas convergé : recherche fine (_closestRibbonU)
+const LAND_ALONG_MARGIN = 2;                 // écart le long de la route accepté au-delà du mouvement du pas (vitesse × DT), en mètres
+const LAND_STEP = 2;                         // recherche fine : un échantillon au moins tous les 2 m de ruban…
+const LAND_TURN = Math.PI / 24;              // … et tous les 7,5° de rotation de la route (courbure)
+const LAND_MIN = 32, LAND_MAX = 1024;        // bornes du nombre d'échantillons
+const LAND_ITERS = 24;                       // borne déterministe de l'affinage fin
+const LAND_EPS = 1e-5;                       // convergence de l'affinage fin (m)
+const samplesCache = new WeakMap();          // ruban -> nombre d'échantillons de la recherche fine (fonction de sa géométrie seule)
+const LP = {}, LF = {};
 const MATCH_OFF = [0, 1.5], MATCH_D = [-0.6, 0, 0.6];      // sondes de _matchRibbon (constantes : aucun tableau créé par appel)
 const MATCH_X = [], MATCH_Z = [];            // cases à examiner, dans l'ordre de première apparition
 
@@ -152,6 +164,42 @@ export const ribbonMethods = {
     return false;
   },
 
+  // Recherche fine du point du ruban le plus proche de p (GAME-004) : n échantillons, n proportionnel à la longueur du ruban ET à sa rotation totale (calculé une fois
+  // par ruban), puis affinage par projection sur la tangente, borné à l'intervalle des deux échantillons voisins (il ne saute pas d'une spire à l'autre), jusqu'à
+  // convergence ou LAND_ITERS itérations. Déterministe : mêmes opérations, dans le même ordre, sur tous les moteurs.
+  _closestRibbonU(tile, rib, p) {
+    let n = samplesCache.get(rib);
+    if (n === undefined) {
+      let turn = 0, tx = 0, ty = 0, tz = 0;
+      for (let i = 0; i <= 256; i++) {
+        frameLocal(rib, i / 256, LF);
+        if (i > 0) turn += dacos(clamp(tx * LF.tx + ty * LF.ty + tz * LF.tz, -1, 1));
+        tx = LF.tx; ty = LF.ty; tz = LF.tz;
+      }
+      n = Math.min(LAND_MAX, Math.max(LAND_MIN, Math.ceil((rib.len || 0) / LAND_STEP), Math.ceil(turn / LAND_TURN)));
+      samplesCache.set(rib, n);
+    }
+    const c = tileCenter(tile, CC), r = tile.r;
+    let bi = 0, bd = Infinity;
+    for (let i = 0; i <= n; i++) {
+      rib.pos(i / n, LP);
+      rotVec(r, LP.x, LP.z, TMP);
+      const dx = p.x - (TMP.x + c.x), dy = p.y - LP.y, dz = p.z - (TMP.z + c.z);
+      const d = dx * dx + dy * dy + dz * dz;
+      if (d < bd) { bd = d; bi = i; }
+    }
+    const lo = Math.max(0, bi - 1) / n, hi = Math.min(n, bi + 1) / n;
+    let u = bi / n;
+    for (let it = 0; it < LAND_ITERS; it++) {
+      const F = frameWorld(tile, rib, u, this.F);
+      const dt = (p.x - F.px) * F.tx + (p.y - F.py) * F.ty + (p.z - F.pz) * F.tz;
+      const nu = clamp(u + dt / F.ds, lo, hi);
+      if (Math.abs(dt) < LAND_EPS || nu === u) break;
+      u = nu;
+    }
+    return u;
+  },
+
   // Atterrissage en plein milieu d'un ruban (retombée sur le haut d'un L, au fond d'un looping...).
   _tryLandRibbon() {
     const p = this.pos, q = this.prev, v = this.vel;
@@ -173,8 +221,18 @@ export const ribbonMethods = {
         const dt = (p.x - F.px) * F.tx + (p.y - F.py) * F.ty + (p.z - F.pz) * F.tz;
         u = clamp(u + dt / F.ds, 0, 1);
       }
+      // GAME-004 : la voiture doit être AU DROIT du point retenu (écart le long de la route). Si l'affinage n'a pas convergé (ruban long et très courbe : le point
+      // retenu pouvait être à 55 m de la voiture, qui y était « posée » en un pas), recherche fine ; puis, quel que soit le point, la réception n'est acceptée
+      // que si cet écart reste dans le mouvement du pas (vitesse × DT) plus une marge : sinon la voiture continue de tomber.
+      let F = frameWorld(tile, rib, u, this.F);
+      let along = (p.x - F.px) * F.tx + (p.y - F.py) * F.ty + (p.z - F.pz) * F.tz;
+      if (Math.abs(along) > LAND_CONVERGED) {
+        u = this._closestRibbonU(tile, rib, p);
+        F = frameWorld(tile, rib, u, this.F);
+        along = (p.x - F.px) * F.tx + (p.y - F.py) * F.ty + (p.z - F.pz) * F.tz;
+      }
       if (u <= 0.002 || u >= 0.998) continue;          // les extrémités passent par _tryEnterRibbon
-      const F = frameWorld(tile, rib, u, this.F);
+      if (Math.abs(along) > this.speed * DT + LAND_ALONG_MARGIN) continue;
       const dl = (p.x - F.px) * F.rx + (p.y - F.py) * F.ry + (p.z - F.pz) * F.rz;
       if (F.kc > 1e-4) { LAND.dl = dl; this._cross(LAND, F); } else { F.qx = F.px; F.qy = F.py; F.qz = F.pz; }
       if (F.ny * this.gSign < 0.2) continue;            // on ne se pose que sur une route face à la gravité

@@ -1,6 +1,6 @@
 {
- "version": 38,
- "combined": "a8ea997dcdfa6904",
+ "version": 39,
+ "combined": "e6b94d0edef05744",
  "scenarios": {
   "bot:eclats": "904d51b19f7f814f",
   "noise:eclats": "49477e3fdfa9a1c9",
@@ -194,6 +194,19 @@
   "v2:moto:noise": "b981d7d9c13e99a1",
   "v2:boat:bot": "40f46a080fff8d6a",
   "v2:glider:bot": "fe7ea2350c7985c9",
-  "v2:all-sim:noise": "15868e5bcb32803d"
+  "v2:all-sim:noise": "15868e5bcb32803d",
+  "respawn:on-plate:moto": "01e8f34e3bcb10d6",
+  "respawn:on-plate:boat": "fadc3074373e9d90",
+  "respawn:on-plate:glider": "7dfa806e1576321c",
+  "respawn:after-plate:moto": "08a49a5332930c99",
+  "respawn:after-plate:boat": "b2fe741547ca1de7",
+  "respawn:after-plate:glider": "d15c615bc4aff113",
+  "respawn:ring-jump:car": "a49c86a5b06b8a69",
+  "respawn:start-plate:moto": "c1ed48b5b1d6eb27",
+  "respawn:v0-200": "8db77761e1781af9",
+  "respawn:v0-100:noise": "a76079ffa6caa377",
+  "respawn:keepclock:logic": "22c35b7b0adf5d0d",
+  "game004:epave:349198": "8d09338b6941ffe1",
+  "game004:epave:349322": "c4a5a102ac666594"
  }
 }

@@ -247,6 +247,7 @@ export default {
   'Importer un circuit': 'Import a track',
   'Partager le circuit': 'Share the track',
   '✔ Vérifier d’abord': '✔ Verify first',
+  'Ce circuit avait été vérifié, mais il a changé depuis (ou le jeu a changé la façon de calculer sa clé de classement) : une course de vérification suffit pour le revérifier.': 'This track had been verified, but it has changed since (or the game changed how its leaderboard key is computed): one verification run is enough to verify it again.',
   '🌐 Publier dans la communauté': '🌐 Publish to the community',
   'Publier dans la communauté': 'Publish to the community',
   '✔ Vérifié ({t}) : médailles déduites de ton temps. Copie le code ou le lien de « {name} ».': '✔ Verified ({t}): medals derived from your time. Copy the code or link of “{name}”.',

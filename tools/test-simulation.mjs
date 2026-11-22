@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test, finish } from './harness.mjs';
 import { Simulation, placeAtRespawn } from '../js/simulation.js';
-import { GhostRunner, newGhostPose } from '../js/replay.js';
+import { GhostRunner, newGhostPose, InputRecorder, quantSteer } from '../js/replay.js';
 import { BUILTIN_TRACKS, buildBuiltin } from '../js/tracks.js';
 import { Autopilot } from '../js/autopilot.js';
 import { scriptTrack } from '../js/track.js';
@@ -164,6 +164,77 @@ test('fantôme enregistré : le véhicule suit les changements enregistrés (mot
   const ch = [[0, 1], [10, 2], [25, 0]];
   assert.deepEqual([0, 9, 10, 24, 25, 99].map((f) => ghostVehicleAt(ch, f)), ['moto', 'moto', 'boat', 'boat', 'car', 'car']);
   assert.equal(ghostVehicleAt([], 50), 'car');
+});
+
+console.log('Retour au checkpoint : sur / après les plaques de transformation, course et rejeu du serveur (TECH-001, TRANS-04)');
+// Une course « en direct » (Simulation, comme RaceSession) avec des retours au checkpoint (touche R) aux pas donnés après le premier checkpoint, enregistrée comme
+// en course (InputRecorder : le drapeau « retour » est écrit avec la commande du pas où le retour est fait), puis rejouée par GhostRunner (vérification serveur).
+// Le pilote : gaz au sol ; en deltaplane en l'air, incidence neutre (les gaz le font piquer).
+const PILOT = (P) => ({ steer: 0, throttle: P.grounded || P.vehicle !== 'glider', brake: false, drift: false });
+function liveThenReplay(track, rAfterCp = [1], rAt = []) {
+  const sim = new Simulation(track), rec = new InputRecorder();
+  sim.start();
+  let cp = -1, fin = null, auto = 0;
+  const vehAfterR = [];
+  for (let i = 0; i < 120 * 90 && fin === null; i++) {
+    const inp = PILOT(sim.phys);
+    inp.steer = quantSteer(inp.steer);
+    const r = (cp >= 0 && rAfterCp.includes(i - cp)) || rAt.includes(i);
+    if (r) { sim.rewind(); vehAfterR.push(sim.phys.vehicle); }
+    rec.push(inp, r);
+    const ev = sim.step(inp);
+    if (ev && ev.type === 'checkpoint' && cp < 0) cp = i;
+    if (sim.lost) { auto++; sim.rewind(); }
+    if (ev && ev.type === 'finish') fin = sim.logic.steps;
+  }
+  const g = new GhostRunner(track.clone ? track.clone() : track, { inputs: rec.encode() });
+  while (!g.done) g.step();
+  return { fin, auto, vehAfterR, cp, replay: g.logic.finished ? g.logic.steps : null, same: Object.is(g.phys.pos.x, sim.phys.pos.x) && Object.is(g.phys.pos.z, sim.phys.pos.z) };
+}
+const onPlate = (code, surf) => { const tr = scriptTrack('p', `start S2 S.${code} S3 finish`); tr.tiles.find((t) => t.s === surf).cp = 1; return tr; };
+for (const [label, code, veh] of [['moto', 'o', 'moto'], ['bateau', 'n', 'boat'], ['deltaplane', 'e', 'glider']]) {
+  test(`checkpoint SUR la plaque ${label} : deux retours (R), le véhicule rendu est ${veh}, l'arrivée est atteinte, le rejeu du serveur trouve le même temps`, () => {
+    const o = liveThenReplay(onPlate(code, veh), [1, 40]);
+    assert.ok(o.cp > 0, 'checkpoint pris');
+    assert.deepEqual(o.vehAfterR, [veh, veh]);
+    assert.ok(o.fin !== null && o.auto === 0, `arrivée ${o.fin}, ${o.auto} retours automatiques`);
+    assert.equal(o.replay, o.fin, 'rejeu : même chrono au pas près');
+  });
+}
+// Checkpoint aérien après chaque plaque, sur un parcours que ce véhicule sait finir : deltaplane au-dessus d'un vrai vide (niveau 4), moto par un tremplin,
+// bateau sur l'eau (anneau-checkpoint au-dessus d'un bassin). (Sans tremplin, ni la moto ni le bateau ne franchissent un vide, même sans retour.)
+const AFTER = {
+  moto: () => scriptTrack('a', 'start S2 S.o S UU GC2 S3 finish'),
+  boat: () => { const tr = scriptTrack('a', 'start S2 S.n S4.a finish'); tr.tiles.filter((t) => t.s === 'water')[2].cp = 2; return tr; },
+  glider: () => scriptTrack('a', 'V4 start S2 S.e GC2 S3 finish'),
+};
+for (const [label, veh] of [['moto', 'moto'], ['bateau', 'boat'], ['deltaplane', 'glider']]) {
+  test(`checkpoint aérien APRÈS la plaque ${label} : retour → ${veh} avec la vitesse du dernier sol, pas de chute, arrivée ; rejeu du serveur identique`, () => {
+    const o = liveThenReplay(AFTER[veh](), [1]);
+    assert.ok(o.cp > 0, 'anneau franchi');
+    assert.deepEqual(o.vehAfterR, [veh]);
+    assert.ok(o.fin !== null && o.auto === 0, `arrivée ${o.fin}, ${o.auto} retours automatiques`);
+    assert.equal(o.replay, o.fin, 'rejeu : même chrono au pas près');
+    assert.ok(o.same, 'rejeu : même position finale au bit près');
+  });
+}
+test('saut en voiture (tremplin, anneau au-dessus d\'un vide) : retour après l\'anneau, la voiture repart avec la vitesse du dernier sol et arrive ; rejeu identique', () => {
+  const o = liveThenReplay(scriptTrack('j', 'start S3 UU GC2 S3 finish'), [1]);
+  assert.ok(o.cp > 0 && o.fin !== null && o.auto === 0, `checkpoint ${o.cp}, arrivée ${o.fin}, ${o.auto} retours automatiques`);
+  assert.equal(o.replay, o.fin);
+  assert.ok(o.same);
+});
+
+test('vitesse de départ (v0 = 200) : retour avant le premier checkpoint (R au pas 30 et 200), la voiture repart lancée ; course et rejeu du serveur identiques (TECH-013)', () => {
+  const tr = scriptTrack('v', 'start S3 C S3 finish'); tr.v0 = 200;
+  const sim = new Simulation(tr); sim.start();
+  for (let i = 0; i < 30; i++) sim.step(GAS);
+  sim.rewind();
+  assert.ok(Math.abs(Math.hypot(sim.phys.vel.x, sim.phys.vel.z) - 200 / 3.6) < 1e-9, 'repart à 200 km/h');
+  const o = liveThenReplay(tr, [], [30, 200]);
+  assert.ok(o.fin !== null && o.auto === 0, `arrivée ${o.fin}`);
+  assert.equal(o.replay, o.fin, 'rejeu : même chrono au pas près');
+  assert.ok(o.same, 'rejeu : même position finale au bit près');
 });
 
 finish('Tous les tests de la simulation passent.');

@@ -13,7 +13,9 @@ import { UI } from './ui.js';
 import { $, esc } from './dom.js';
 import { RaceSession } from './race.js';
 import { BUILTIN_TRACKS, buildBuiltin, authorLabel } from './tracks.js';
-import { Track, hashString, lossText, lossBlocking } from './track.js';
+import { Track, hashString, lossBlocking } from './track.js';
+import { lossMessage, lossNote } from './lossMessage.js';
+import { adoptLegacyKeys } from './keyAlias.js';
 import { VERSION, PHYS_VER, GAME_NAME } from './version.js';
 import { online, versionMismatchText } from './online.js';
 import { account } from './account.js';
@@ -267,6 +269,7 @@ class App {
     let track;
     try { track = Track.decode(code); } catch { this.ui.flash('Code de circuit invalide.'); return; }
     // Circuits de joueurs : médailles déduites du temps de l'auteur, seulement s'il l'a fini (trackDescriptor.js).
+    adoptLegacyKeys(track);      // (records et courses rangés sous l'ancienne clé : TECH-039, js/keyAlias.js)
     this.launchDesc(describeUser(track, entryId ? { id: entryId } : null));
   }
 
@@ -478,10 +481,10 @@ class App {
         const track = Track.decode(hash);
         history.replaceState(null, '', location.pathname + location.search);
         // Phase 4 : un lien qui perdrait des pièces à la lecture (version plus récente du jeu) peut se jouer (pour voir) mais pas s'enregistrer ni s'ouvrir dans l'éditeur.
-        const loss = lossText(track), blocked = lossBlocking(track);
+        const loss = lossMessage(track), blocked = lossBlocking(track);
         this.ui.modal({
           title: 'Circuit partagé',
-          body: `<p>« ${esc(track.name)} » · ${track.tiles.length} pièces${track.author ? ' · par ' + esc(authorLabel(track.author)) : ''}</p>${loss ? `<p class="mp-err" role="alert">${esc(loss)}${blocked ? ' Mets le jeu à jour pour l’enregistrer ou l’éditer.' : ''}</p>` : ''}`,
+          body: `<p>« ${esc(track.name)} » · ${track.tiles.length} pièces${track.author ? ' · par ' + esc(authorLabel(track.author)) : ''}</p>${loss ? `<p class="mp-err" role="alert">${esc(loss)}${blocked ? ' ' + esc(lossNote.updateToEdit()) : ''}</p>` : ''}`,
           actions: [
             { label: 'Jouer', primary: true, onClick: () => this.playCode(track.encode()) },
             ...(blocked ? [] : [{ label: 'Ouvrir dans l’éditeur', onClick: () => {

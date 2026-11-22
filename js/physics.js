@@ -114,7 +114,9 @@ export class CarPhysics {
     this.bz0 = b.minZ - m; this.bz1 = b.maxZ + m;
   }
 
-  place(x, y, z, yaw, gs = 1) {
+  // (Re)pose la voiture à l'arrêt en (x, y, z), cap yaw, sens de gravité gs, avec le véhicule `vehicle` (départ : celui du circuit ; retour au
+  // checkpoint : celui du point de retour). Le véhicule est posé ICI, avant la lecture du sol, parce que la plaque sous la voiture en dépend (voir plus bas).
+  place(x, y, z, yaw, gs = 1, vehicle = 'car') {
     this.pos.x = x; this.pos.y = y; this.pos.z = z;
     this.prev.x = x; this.prev.y = y; this.prev.z = z;
     this.vel.x = 0; this.vel.y = 0; this.vel.z = 0;
@@ -127,7 +129,7 @@ export class CarPhysics {
     if (this.v2) { this.lean = 0; this.mAx = 0; this.heave = 0; this.v2F = 1; this.v2R = 1; }
     this.rib = null;
     this.gravMul = 1;
-    this.vehicle = 'car';
+    this.vehicle = vehicle;
     this.gSign = gs < 0 ? -1 : 1;   // sens de la gravité : 1 normal, -1 inversée (vers le haut)
     this.lost = false;
     this._flipNow = false;
@@ -150,6 +152,11 @@ export class CarPhysics {
     this.prev.y = s.h;
     this.grounded = true;
     this._setGround(s, false);
+    // Posée SUR une plaque de transformation (TECH-001) : si le véhicule rendu est celui de cette plaque, c'est qu'il en vient (checkpoint pris sur la
+    // plaque, départ en moto sur une plaque moto…). La plaque est donc verrouillée comme si on venait de la prendre : pas de bascule tant qu'on ne l'a
+    // pas quittée (sinon son premier contact ramenait la voiture : retour en voiture, chute, nouveau retour… sans fin). Une fois quittée, la repasser
+    // ramène la voiture, comme avant. Un autre véhicule (la plaque n'a pas encore été prise) : plateLock reste vide, la plaque agit au premier contact.
+    if (PLATES[this.surfMod] && PLATES[this.surfMod] === this.vehicle) this.plateLock = this.surfMod;
     this.glassSafe = null;
     this._updateFwd();
   }

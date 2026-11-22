@@ -1,10 +1,12 @@
-// Défauts CONNUS du modèle de circuit (phase « filet de sécurité », audit docs/audit/AUDIT_COMPLET.md) : node tools/test-modele-defauts.mjs   (npm test)
+// Défauts du MODÈLE de circuit relevés par l'audit (docs/audit/AUDIT_COMPLET.md) : node tools/test-modele-defauts.mjs   (npm test)
 // Même principe que tools/test-noyau-defauts.mjs : `bugConnu(id, …)` réussit tant que le défaut existe et échoue dès qu'il est corrigé ; les tests ordinaires à côté prouvent que la
-// mise en scène est bonne. Rien n'est corrigé ici.
-//   TECH-002  obstacle roulé de 180° (au plafond) : le signe du roulis s'inverse à chaque lecture du code ; signature, clé de classement et vérification instables
+// mise en scène est bonne.
+//   TECH-002  obstacle roulé de 180° (au plafond) : le signe du roulis s'inversait à chaque lecture du code ; signature, clé de classement et vérification instables
+//             — CORRIGÉ en phase 7 (0.16.6, normalisation idempotente : js/track/shared.js) : ses reproductions sont devenues des tests ordinaires, ci-dessous
 //   TECH-034  décoration aux coordonnées non arrondies : l'état relu depuis le code diffère de l'état en mémoire (l'éditeur jette alors historique, presse-papiers, calques au retour d'un essai)
 //   TECH-035  écritures directes de l'inspecteur / du gizmo sans normalisation : rétablir perdu après annuler, solides inclinés dans l'éditeur puis redressés
-// Corriger TECH-002 change des clés de circuits existantes (voir TRANS-12 de l'audit) ; TECH-034 et 035 ne touchent pas la physique.
+//             (TECH-034 et 035 sont des défauts de l'ÉDITEUR, lot de la phase 8 : ils restent connus ; la phase 7 ne touche pas à ce que addDeco arrondit en mémoire)
+// Corriger TECH-034 et 035 ne touche pas la physique.
 import assert from 'node:assert/strict';
 import { test, finish, bugConnu, precondition } from './harness.mjs';
 import { Track, scriptTrack } from '../js/track.js';
@@ -34,13 +36,28 @@ test('TECH-002 contrôle : un obstacle roulé de π/2 (sur un mur) ou de −π/2
 test('TECH-002 mise en scène : un obstacle posé avec rz = π est bien gardé tel quel à la pose (la normalisation de addDeco l\'arrondit à 3,142)', () => {
   assert.equal(spikesTrack(Math.PI).decos[0].rz, 3.142);
 });
-bugConnu('TECH-002', () => {
+test('TECH-002 (corrigé) : addDeco({ k: \'spikes\', rz: π }) puis Track.decode(t.encode()) répété : roulis, signature et code restent stables', () => {
   let t = spikesTrack(Math.PI);
-  const sigs = [t.signature()], rolls = [t.decos[0].rz];
-  for (let i = 0; i < 4; i++) { t = reread(t); sigs.push(t.signature()); rolls.push(t.decos[0].rz); }
+  const sigs = [t.signature()], rolls = [t.decos[0].rz], codes = [t.encode()];
+  for (let i = 0; i < 6; i++) { t = reread(t); sigs.push(t.signature()); rolls.push(t.decos[0].rz); codes.push(t.encode()); }
   assert.equal(new Set(rolls).size, 1, `le roulis change à chaque lecture du code : ${rolls.join(' / ')}`);
   assert.equal(new Set(sigs).size, 1, `la signature (donc la clé de classement u-…) change à chaque lecture : ${sigs.join(' / ')}`);
-}, 'addDeco({ k: \'spikes\', rz: π }) puis Track.decode(t.encode()) répété : roulis et signature restent stables');
+  assert.equal(new Set(codes).size, 1, 'le code change à chaque lecture');
+  assert.equal(rolls[0], 3.142, 'valeur canonique de ±π : +3,142 (celle que l\'ancien code écrivait déjà à la première sauvegarde : les codes déjà enregistrés gardent leur clé)');
+});
+test('TECH-002 (corrigé) : un code qui contient −3,142 (deuxième génération de l\'ancien code) se relit en +3,142, de façon stable ; la signature est celle de +3,142', () => {
+  const ref = spikesTrack(Math.PI);
+  const code = ref.encode();
+  const old = code.replace(/^SHW3:/, '');
+  const data = JSON.parse(Buffer.from(old.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+  precondition(data.o[0][13] === 3.142, 'le roulis est le 14e champ de la décoration');
+  data.o[0][13] = -3.142;
+  const neg = 'SHW3:' + Buffer.from(JSON.stringify(data)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const t = Track.decode(neg);
+  assert.equal(t.decos[0].rz, 3.142);
+  assert.equal(t.signature(), ref.signature());
+  assert.equal(reread(t, 3).encode(), t.encode());
+});
 
 // Une vraie course de vérification (pilote automatique) sur ce circuit, puis la marque « vérifié » comme le fait le jeu (setVerified), puis les deux contrôles du serveur.
 function verifiedTrack() {
@@ -72,21 +89,21 @@ test('TECH-002 contrôle : sans roulis de π, la même chaîne (vérifier → co
   const run = verifyRun({ trackKey: t.userKey, code: t.encode(), inputs, time, physVer: PHYS_VER });
   assert.equal(run.ok, true, run.error);
 });
-bugConnu('TECH-002', () => {
+test('TECH-002 (corrigé) : verifyPublish accepte le code d\'un circuit vérifié contenant un obstacle roulé de π', () => {
   const { t, inputs, time } = verifiedTrack();
   precondition(t.verified, 'le circuit est vérifié en mémoire');
   const r = verifyPublish({ code: t.encode(), inputs, time, physVer: PHYS_VER });
   assert.equal(r.ok, true, 'verifyPublish devrait accepter le code d\'un circuit vérifié : ' + r.error);
-}, 'verifyPublish accepte le code d\'un circuit vérifié contenant un obstacle roulé de π (aujourd\'hui : « Circuit non vérifié »)');
-bugConnu('TECH-002', () => {
+});
+test('TECH-002 (corrigé) : verifyRun accepte un temps envoyé avec la clé calculée en course (obstacle roulé de π)', () => {
   const { t, inputs, time } = verifiedTrack();
   const r = verifyRun({ trackKey: t.userKey, code: t.encode(), inputs, time, physVer: PHYS_VER });
   assert.equal(r.ok, true, 'le serveur devrait accepter le temps (la clé calculée en course doit être celle du code relu) : ' + r.error);
-}, 'verifyRun accepte un temps envoyé avec la clé calculée en course (aujourd\'hui : « Le code du circuit ne correspond pas »)');
-bugConnu('TECH-002', () => {
+});
+test('TECH-002 (corrigé) : un circuit vérifié reste vérifié après lecture de son code, plusieurs fois (retour de la vérification dans l\'éditeur)', () => {
   const { t } = verifiedTrack();
-  assert.equal(reread(t).verified, true, 'le circuit vérifié reste « vérifié » quand l\'éditeur le relit depuis son code (« Retour à l\'éditeur »)');
-}, 'un circuit vérifié reste vérifié après lecture de son code (retour de la vérification dans l\'éditeur)');
+  for (let i = 1; i <= 4; i++) assert.equal(reread(t, i).verified, true, `après ${i} lecture(s) : le circuit vérifié reste « vérifié »`);
+});
 
 // ---------------------------------------------------------------------------------------------------------------------------------- TECH-034 / 035
 console.log('TECH-034 / 035 : décorations aux coordonnées non arrondies, écritures directes');
@@ -172,4 +189,4 @@ bugConnu('TECH-035', () => {
   assert.deepEqual([relu.rx || 0, relu.rz || 0], [d.rx, d.rz], 'le solide incliné en mémoire est relu droit : l\'éditeur montrait une inclinaison que la course ne verra jamais');
 }, 'solide incliné par écriture directe : l\'état relu égale l\'état en mémoire (aujourd\'hui : le solide redevient droit)');
 
-await finish('Les défauts connus du modèle sont tous reproduits (ou corrigés : voir les échecs ci-dessus).');
+await finish('Modèle de circuit : TECH-002 corrigé (tests de régression) ; TECH-034 et TECH-035 (éditeur) restent reproduits.');

@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import assert from 'node:assert/strict';
+import { verifyPublish } from '../js/verify.js';
+import { PHYS_VER } from '../js/version.js';
 
 const require = createRequire(import.meta.url);
 const REQUIRED = !!(process.env.CI || process.env.REQUIRE_BROWSER);
@@ -198,6 +200,99 @@ try {
     await page.waitForFunction(() => window.copytrack.mode === 'menu', null, { timeout: 8000 });
     const saved = await page.evaluate(async () => (await import('/js/storage.js')).listMyTracks().map((t) => t.name));
     assert.ok(saved.includes('Essai'), 'le circuit modifié est dans « Mes circuits » : ' + saved.join(', '));
+    await ctx.close();
+  });
+  // GAME-009 / TECH-002 (phase 7) : piques roulées de 180° (posées au plafond), « Vérifier », « Retour à l'éditeur » : le circuit reste vérifié (avant : signature passée de `1j9bsfk` en
+  // course à `x1o7or` dans l'éditeur, « Vérifier et publier » de nouveau proposé, publication et envoi de temps refusés). La route est droite : la vérification n'a besoin que des gaz.
+  await test('GAME-009 : piques roulées de π, « Vérifier » puis « Retour à l\'éditeur » : le circuit reste vérifié (signature identique), et le serveur accepte le code (verifyPublish)', async () => {
+    const { ctx, page } = await open(1280, 720);
+    const before = await page.evaluate(async () => {
+      const { scriptTrack } = await import('/js/track.js');
+      const t = scriptTrack('Plafond', 'start S4 finish');
+      t.addDeco({ k: 'spikes', x: 300, y: 0, z: -60, ry: 0, s: 1, rz: Math.PI });
+      await window.copytrack.openEditor({ code: t.encode(), name: 'Plafond' });
+      return { sig: t.signature(), rz: t.decos[0].rz };
+    });
+    await page.waitForFunction(() => window.copytrack.session && window.copytrack.session.kind === 'editor' && window.copytrack.session.track.name === 'Plafond', null, { timeout: 30000, polling: 100 });
+    await page.evaluate(() => { const A = window.copytrack; A.ui.closeModal(); });
+    const sigEd = await ed(page, () => window.copytrack.session.track.signature());
+    assert.equal(sigEd, before.sig, 'la signature du circuit rouvert dans l\'éditeur est celle du circuit posé');
+    await page.evaluate(() => { const A = window.copytrack; A.input.drive = () => ({ steer: 0, throttle: true, brake: false, drift: false }); A.session.test(true); });
+    await page.waitForFunction(() => { const m = document.getElementById('modal'); return m && !m.classList.contains('hidden') && /Circuit vérifié/.test(m.textContent); }, null, { timeout: 150000, polling: 200 });
+    const run = await page.evaluate(() => {
+      const A = window.copytrack, S = A.session, lr = S.lastRun;
+      return { code: A.editorState.code, inputs: lr && lr.inputs, time: lr && lr.time, sigRace: S.track.signature(), verifiedRace: S.track.verified };
+    });
+    assert.equal(run.verifiedRace, true, 'vérifié en course');
+    assert.equal(run.sigRace, before.sig, 'la signature en course est celle du circuit posé (avant : elle changeait)');
+    await page.evaluate(() => { [...document.querySelectorAll('#modal button')].find((b) => /Retour à l.éditeur/.test(b.textContent)).click(); });
+    await page.waitForFunction(() => window.copytrack.session && window.copytrack.session.kind === 'editor', null, { timeout: 30000, polling: 100 });
+    await page.waitForTimeout(400);
+    const back = await page.evaluate(() => { const T = window.copytrack.session.track; return { verified: T.verified, sig: T.signature(), vt: T.vt, rz: T.decos[0].rz }; });
+    assert.equal(back.verified, true, 'le circuit reste « vérifié » au retour dans l\'éditeur (avant : il ne l\'était plus, « Vérifier et publier » était de nouveau proposé)');
+    assert.equal(back.sig, before.sig, 'même signature (donc même clé de classement u-…)');
+    assert.equal(back.rz, 3.142, 'le roulis garde sa valeur canonique');
+    const pub = verifyPublish({ code: run.code, inputs: run.inputs, time: run.time, physVer: PHYS_VER });
+    assert.equal(pub.ok, true, 'verifyPublish devrait accepter le code : ' + pub.error);
+    await ctx.close();
+  });
+  // TECH-060 (phase 7) : un code d'une version plus récente (décoration inconnue) ouvert dans l'éditeur : le circuit d'origine n'est jamais réécrit (l'éditeur s'en détache : un nouvel
+  // enregistrement crée une copie) ET le joueur est prévenu. Avant : lossBlocking ne regardait que les pièces et les options, rien n'était dit et la décoration disparaissait à l'enregistrement.
+  await test('TECH-060 : un code avec une décoration inconnue ouvert dans l\'éditeur : avertissement explicite, détaché de l\'entrée d\'origine, le reste du circuit est gardé', async () => {
+    const { ctx, page } = await open(1280, 720);
+    await page.evaluate(async () => {
+      const { scriptTrack } = await import('/js/track.js');
+      const t = scriptTrack('Futur', 'start S4 finish');
+      for (let i = 0; i < 3; i++) t.addDeco({ k: 'cone', x: 40 + i * 5, y: 0, z: -20, ry: 0, s: 1 });
+      const data = JSON.parse(atob(t.encode().slice(5).replace(/-/g, '+').replace(/_/g, '/')));
+      data.o[1][0] = 9999;
+      const code = 'SHW3:' + btoa(JSON.stringify(data)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      await window.copytrack.openEditor({ code, entryId: 'entree-d-origine', name: 'Futur' });
+    });
+    await page.waitForFunction(() => window.copytrack.session && window.copytrack.session.kind === 'editor' && window.copytrack.session.track.name === 'Futur', null, { timeout: 30000, polling: 100 });
+    const st = await page.evaluate(() => { const E = window.copytrack.session; return { issue: E.loadIssue, entry: E.entryId, decos: E.track.decos.length, lost: E.track.lost }; });
+    assert.equal(st.issue, 'Ce code contient 1 décoration(s) que ce jeu ne peut pas lire.');
+    assert.equal(st.entry, null, 'détaché de l\'entrée d\'origine : ce que le joueur enregistre en fait une copie');
+    assert.equal(st.decos, 2, 'les décorations lisibles sont gardées');
+    await page.waitForFunction(() => { const t = document.getElementById('toast'); return t.classList.contains('on') && /décoration/.test(t.textContent); }, null, { timeout: 8000, polling: 100 });
+    const toast = await page.evaluate(() => document.getElementById('toast').textContent);
+    assert.match(toast, /Ce code contient 1 décoration\(s\) que ce jeu ne peut pas lire\. Le circuit d'origine reste intact dans « Mes circuits » ; ce que tu enregistres ici en fait une copie\./);
+    await ctx.close();
+  });
+  // TECH-039 (phase 7, 0.16.6) : la clé d'un circuit avec solides ou obstacles a changé ; un circuit vérifié avant (vt / vh de l'ancienne signature) n'est plus « vérifié » : l'auteur
+  // doit en connaître la raison, et ses records locaux doivent le suivre sous la nouvelle clé.
+  await test('TECH-039 : un circuit vérifié avec l\'ancienne signature : la fenêtre de partage et le refus de publier disent pourquoi (une course de vérification suffit) ; un record d\'avant est retrouvé à l\'ouverture de la fiche', async () => {
+    const { ctx, page } = await open(1280, 720);
+    const r = await page.evaluate(async () => {
+      const A = window.copytrack;
+      const { Track, scriptTrack, hashString } = await import('/js/track.js');
+      const t = scriptTrack('Ancien', 'start S4 finish');
+      t.addDeco({ k: 'pillar', x: 80.123, y: 0, z: -60, ry: 0.5, s: 1 });             // un solide : sa clé a changé (signature au pas du code)
+      const data = JSON.parse(atob(t.encode().slice(5).replace(/-/g, '+').replace(/_/g, '/')));
+      data.vt = 12.5; data.vh = hashString(t.legacySignatureText());                  // ce que l'éditeur de la 0.16.5 avait écrit à la vérification
+      const code = 'SHW3:' + btoa(JSON.stringify(data)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      const track = Track.decode(code);
+      const legacy = track.legacyUserKeys()[0], key = track.userKey;
+      localStorage.setItem('shardway.rec3.' + legacy, JSON.stringify({ time: 12.5, pv: 38, date: 1000 }));      // un record d'avant, sous l'ancienne clé
+      A.shareModal(code, 'Ancien', track);
+      const share = document.getElementById('modal').textContent;
+      A.ui.closeModal();
+      const pub = await A.publishTrack(track);
+      const toast = document.getElementById('toast').textContent;
+      const before = localStorage.getItem('shardway.rec3.' + key);
+      A.openUserHub({ id: 'm1', name: 'Ancien', code }, 'mytracks');
+      await new Promise((res) => setTimeout(res, 600));
+      return { verified: track.verified, vt: track.vt, share, pub, toast, legacy, key, before, after: JSON.parse(localStorage.getItem('shardway.rec3.' + key) || 'null'), kept: !!localStorage.getItem('shardway.rec3.' + legacy) };
+    });
+    assert.equal(r.verified, false); assert.equal(r.vt, 12.5);
+    assert.notEqual(r.legacy, r.key);
+    assert.match(r.share, /Non vérifié/);
+    assert.match(r.share, /Ce circuit avait été vérifié, mais il a changé depuis \(ou le jeu a changé la façon de calculer sa clé de classement\) : une course de vérification suffit pour le revérifier\./);
+    assert.equal(r.pub, false);
+    assert.match(r.toast, /Vérifie d’abord ton circuit.*Ce circuit avait été vérifié, mais il a changé depuis/);
+    assert.equal(r.before, null, 'avant l\'ouverture de la fiche : rien sous la nouvelle clé');
+    assert.ok(r.after && r.after.time === 12.5, 'la fiche rapatrie le record d\'avant sous la nouvelle clé : ' + JSON.stringify(r.after));
+    assert.ok(r.kept, 'l\'ancien record reste en place');
     await ctx.close();
   });
   await test('rangement 0.12 sur téléphone (844 × 390) : le panneau est un tiroir, il se referme après un choix ; la vue reste dégagée', async () => {
