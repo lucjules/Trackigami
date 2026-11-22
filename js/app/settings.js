@@ -153,6 +153,7 @@ export const settingsMethods = {
     keys[id][slot] = code;
     this.settings.keys = { ...keys };
     this.saveSettings();
+    this.refreshKeyHints();
     return moved;
   },
 

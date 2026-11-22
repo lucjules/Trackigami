@@ -561,17 +561,18 @@ export const communityMethods = {
   },
 
   helpModal() {
+    const K = (a) => esc(this._keysOf(a));      // les touches LIÉES du joueur (Paramètres › Commandes), pas celles par défaut (TECH-020) ; esc : une touche peut s'afficher « < »
     this.ui.modal({
       title: 'Commandes',
       body: `<div class="help-grid">
-        <b>↑ / Z / W</b><span>Accélérer</span>
-        <b>↓ / S</b><span>Freiner, marche arrière</span>
-        <b>← → / Q D / A D</b><span>Tourner</span>
+        <b>${K('accelerate')}</b><span>Accélérer</span>
+        <b>${K('brake')}</b><span>Freiner, marche arrière</span>
+        <b>${K('left')} / ${K('right')}</b><span>Tourner</span>
         <b>Frein en virage</b><span>Dérapage (l'arrière décroche ; garde le volant pour prolonger la glisse)</span>
-        <b>R</b><span>Revenir au dernier checkpoint (le chrono revient au temps du checkpoint)</span>
-        <b>T / Entrée</b><span>Recommencer le niveau</span>
-        <b>C</b><span>Changer de caméra</span>
-        <b>Échap</b><span>Pause</span>
+        <b>${K('respawn')}</b><span>Revenir au dernier checkpoint (le chrono revient au temps du checkpoint)</span>
+        <b>${K('restart')}</b><span>Recommencer le niveau</span>
+        <b>${K('camera')}</b><span>Changer de caméra</span>
+        <b>${K('pause')}</b><span>Pause</span>
         <b>Manette</b><span>Gâchettes : gaz / frein · stick : direction · freiner en virage : dérapage · Y : checkpoint</span>
       </div>
       <p style="margin-top:14px">Passe les checkpoints ◆ puis l’arrivée. Bleu : boost · verglas : glisse · tremplin : saut · plaque rose ⇅ : gravité inversée. Attention aux piques et aux obstacles mobiles.</p>`,

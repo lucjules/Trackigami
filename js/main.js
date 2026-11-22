@@ -412,6 +412,7 @@ class App {
   // ------------------------------------------------------------ Boucle
   start() {
     const hash = location.hash;
+    this.refreshKeyHints();
     this.showMenu('menu');
     this._startBench();
     this.telemetry.scheduleFlush(15000);

@@ -1517,6 +1517,48 @@ try {
     await waitApp(() => window.copytrack.mode === 'menu');
   });
 
+  await test('entrées (TECH-020) : les boutons tactiles déclenchent l\'action même réassignée ; les textes d\'aide suivent les liaisons', async () => {
+    const ctxT = await browser.newContext({ locale: 'fr-FR', viewport: { width: 844, height: 390 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true, serviceWorkers: 'block' });
+    const pt = await ctxT.newPage();
+    pt.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+    pt.on('console', (m) => { if (m.type() === 'error' && !OFFLINE.test(m.text() + (m.location().url || ''))) errors.push('console: ' + m.text()); });
+    await pt.route(/fonts\.(googleapis|gstatic)\.com|supabase\.co/, (r) => r.abort());
+    const wait = (fn, arg, timeout = 30000) => pt.waitForFunction(fn, arg, { timeout });
+    const q0 = await app(() => window.copytrack.scenery.quality);
+    await app(() => window.copytrack.quality.apply('ultrapotato'));
+    try {
+      await pt.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'load' });
+      await pt.locator('#wl-name').fill('Pouce2');
+      await pt.locator('#wl-submit').tap();
+      await wait(() => window.copytrack && window.copytrack.mode === 'menu');
+      await pt.evaluate(() => { const A = window.copytrack; A.settings.telemetry = false; A.settings.tutorialDone = true; A.saveSettings(); A.quality.apply('ultrapotato'); });
+      for (let k = 0; k < 6; k++) { await pt.waitForTimeout(400); await pt.evaluate(() => window.copytrack.ui.closeModal()); }
+      // Retour au checkpoint réassigné à Q, caméra à R, pause à P seule, recommencer à Y.
+      await pt.evaluate(() => { const A = window.copytrack; A.input.setBindings({ ...A.input.bindings, respawn: ['KeyQ', ''], camera: ['KeyR', ''], pause: ['KeyP', ''], restart: ['KeyY', ''] }, A.input.pad); A.playBuiltin(0); });
+      await wait(() => window.copytrack.session && window.copytrack.session.state === 'racing', null, 40000);
+      await wait(() => window.copytrack.session.logic.steps > 40, null, 20000);
+      await pt.evaluate(() => { const s = window.copytrack.session; window.__n = { respawn: 0, camera: 0 }; const r = s.respawn.bind(s), c = s.cycleCamera.bind(s); s.respawn = (...a) => { window.__n.respawn++; return r(...a); }; s.cycleCamera = (...a) => { window.__n.camera++; return c(...a); }; });
+      const tapT = async (k) => { await pt.locator(`#touch [data-t="${k}"]`).dispatchEvent('pointerdown'); await pt.locator(`#touch [data-t="${k}"]`).dispatchEvent('pointerup'); await pt.evaluate(() => new Promise((res) => { let i = 0; const f = () => { if (++i >= 6) res(); else requestAnimationFrame(f); }; requestAnimationFrame(f); })); };
+      await tapT('respawn');
+      assert.deepEqual(await pt.evaluate(() => window.__n), { respawn: 1, camera: 0 }, '« ⟲ » fait un retour au checkpoint (et ne change pas de caméra)');
+      await tapT('pause');
+      assert.equal(await pt.evaluate(() => window.copytrack.session.state), 'paused', 'le bouton de pause met en pause même si « Échap » n\'est plus lié');
+      await pt.evaluate(() => window.copytrack.session.resume());
+      await wait(() => window.copytrack.session.state === 'racing');
+      await tapT('restart');
+      assert.equal(await pt.evaluate(() => window.copytrack.session.state), 'countdown', 'le bouton ↺ recommence même si « Entrée » n\'est plus liée à rien');
+      // Textes d'aide : ils suivent les liaisons.
+      const hints = await pt.evaluate(() => ({
+        resp: document.querySelector('#pause [data-action="pause-respawn"] kbd').textContent,
+        fin: document.querySelector('#finish [data-action="restart"] kbd').textContent,
+        replay: document.querySelector('#replay-bar .rh').textContent,
+      }));
+      assert.equal(hints.resp, 'Q', 'pause : « Retour au checkpoint » affiche la touche liée');
+      assert.equal(hints.fin, 'Y', 'arrivée : « Rejouer » affiche la touche liée');
+      assert.match(hints.replay, /Y : recommencer/, 'barre du replay : touche de « recommencer »');
+    } finally { await ctxT.close(); await app((q) => window.copytrack.quality.apply(q), q0); }
+  });
+
   await test('fantôme rival (haut d\'un classement) : affiché sur la piste, suit son enregistrement, étiquette au nom du rival', async () => {
     await app(() => window.copytrack.playBuiltin(0));
     await waitApp(() => window.copytrack.session && window.copytrack.session.state, null, 40000);

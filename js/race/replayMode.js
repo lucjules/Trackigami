@@ -85,6 +85,6 @@ export const replayMethods = {
   },
 
   _replayEnded() {
-    this.app.ui.hud.message('Replay terminé · Entrée : revoir', 3);
+    this.app.ui.hud.message(`Replay terminé · ${this.app.hintKey('restart') || '—'} : revoir`, 3);      // (la touche liée à « recommencer », pas toujours Entrée)
   },
 };

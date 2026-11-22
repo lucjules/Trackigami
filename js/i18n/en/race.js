@@ -18,7 +18,8 @@ export default {
   'Moteur coupé': 'Engine cut',
   'Réception ratée': 'Bad landing',
   'Chrono maintenu': 'Clock kept running',
-  'Bloqué ? R : retour au checkpoint': 'Stuck? R: back to the checkpoint',
+  'Bloqué ? {k:t} : retour au checkpoint': 'Stuck? {k}: back to the checkpoint',      // (0.16.1) la touche suit les liaisons du joueur (ou le bouton tactile)
+  'Bloqué ? Pause › Retour au checkpoint': 'Stuck? Pause › Back to checkpoint',
   'Caméra : {name:t}': 'Camera: {name:t}',
   'Poursuite': 'Chase',
   'Proche': 'Close',
@@ -121,8 +122,9 @@ export default {
   '🎬 Vidéo enregistrée : {name} ({n:w} Mo)': '🎬 Video saved: {name} ({n} MB)',
   'Enregistrement annulé.': 'Recording cancelled.',
   'L\'enregistrement vidéo n\'est pas disponible dans ce navigateur.': 'Video recording is not available in this browser.',
-  'Replay terminé · Entrée : revoir': 'Replay over · Enter: watch again',
+  'Replay terminé · {k:t} : revoir': 'Replay over · {k}: watch again',      // (0.16.1) la touche liée à « recommencer »
   'Espace : pause · ← → : vitesse · C : caméra · Entrée : recommencer · Échap : quitter': 'Space: pause · ← →: speed · C: camera · Enter: restart · Esc: quit',
+  'Espace : pause · ← → : vitesse · {c:t} : caméra · {r:t} : recommencer · {p:t} : quitter': 'Space: pause · ← →: speed · {c}: camera · {r}: restart · {p}: quit',      // (0.16.1) touches liées
   '👻 Partager mon fantôme': '👻 Share my ghost',
   'Lien de fantôme invalide.': 'Invalid ghost link.',
   'Ce n\'est pas un code de fantôme.': 'This is not a ghost code.',

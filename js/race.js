@@ -310,7 +310,7 @@ export class RaceSession {
     // Voiture immobile alors que le joueur accélère depuis 3 s (elle est prise au piège : ralentisseur, bateau au sec, rebond sur place, nez dans une paroi…) : on lui rappelle
     // le retour au checkpoint. Simple message : aucun effet sur la course ni sur son enregistrement (une fois par blocage ; réarmé quand la voiture a repris de la vitesse).
     if (this.state === 'racing' && !this.demo && !this.replay) {
-      if (inp.throttle && this.phys.speed < 1) { this._stuckT = (this._stuckT || 0) + DT; if (this._stuckT > 3 && !this._stuckSaid) { this._stuckSaid = true; this._say(MSG.stuck); } }
+      if (inp.throttle && this.phys.speed < 1) { this._stuckT = (this._stuckT || 0) + DT; if (this._stuckT > 3 && !this._stuckSaid) { this._stuckSaid = true; this._say(MSG.stuck(this.app.hintKey('respawn'))); } }
       else { this._stuckT = 0; if (this.phys.speed > 4) this._stuckSaid = false; }
     }
     if (ev.boostHit) app.audio.boost();      // (0.13.1 : plus de secousse de caméra sur un accélérateur, ce n'est pas un choc ; le coup de champ de vision reste)

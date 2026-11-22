@@ -199,6 +199,20 @@ test('messages de course, objectifs, médailles : les textes produits par le cod
   assert.equal(I.translate(GOALS.vehicle.label('glider')), 'Cross the finish by glider');
 });
 
+// (0.16.1, TECH-020) Les aides qui citent des touches suivent les liaisons du joueur : le texte change avec elles, sa traduction aussi.
+test('aides qui citent une touche liée (message « bloqué », fin de replay, barre du replay, boutons de la pause et de l\'arrivée) : traduites quelles que soient les touches', async () => {
+  const { MSG } = await import('../js/hudMessages.js');
+  assert.equal(MSG.stuck('Q')[0], 'Bloqué ? Q : retour au checkpoint');
+  assert.equal(MSG.stuck('')[0], 'Bloqué ? Pause › Retour au checkpoint', 'sans touche liée : on renvoie à la pause');
+  assert.equal(I.translate(MSG.stuck('T / Entrée')[0]), 'Stuck? T / Enter: back to the checkpoint');
+  assert.equal(I.translate(MSG.stuck('')[0]), 'Stuck? Pause › Back to checkpoint');
+  assert.equal(I.translate('Replay terminé · T / Entrée : revoir'), 'Replay over · T / Enter: watch again');
+  assert.equal(I.translate('Espace : pause · ← → : vitesse · R : caméra · T / Entrée : recommencer · Échap / P : quitter'), 'Space: pause · ← →: speed · R: camera · T / Enter: restart · Esc / P: quit');
+  assert.equal(I.translate('Rejouer <kbd>Y / Entrée</kbd>'), 'Play again <kbd>Y / Enter</kbd>');
+  assert.equal(I.translate('Retour au checkpoint <kbd>Q</kbd>'), 'Back to checkpoint <kbd>Q</kbd>');
+  assert.equal(I.translate('Retour au checkpoint <kbd>R</kbd>'), 'Back to checkpoint <kbd>R</kbd>', 'texte par défaut inchangé');
+});
+
 test('rendus fréquents : infobulles « Nom (touche) : description », touches, pluriels', () => {
   assert.equal(I.translate('Sélection (Q) : Zone : copier, déplacer, supprimer'), 'Selection (Q): Area: copy, move, delete');
   assert.equal(I.translate('W / ↑ S / ↓ A / ← D / → · frein en virage : dérapage · R : dernier checkpoint · T / Entrée : recommencer · C : caméra · H : klaxon · Échap / P : pause'),

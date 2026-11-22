@@ -186,6 +186,7 @@ export const wiringMethods = {
         this.settings.pad = defaultPad();
         this.saveSettings();
         this._renderControls();
+        this.refreshKeyHints();
         this.ui.flash('Commandes par défaut rétablies.');
         break;
       case 'help': this.helpModal(); break;
@@ -271,6 +272,27 @@ export const wiringMethods = {
     }
   },
 
+  // Libellé de la touche (ou des touches) liée à une action : « R », « T / Entrée »… ; sur un appareil tactile, le bouton à l'écran. '' si aucune touche.
+  hintKey(action) {
+    if (document.body.classList.contains('touch')) return { respawn: '⟲', restart: '↺', pause: '❚❚' }[action] || '';
+    const k = this._keysOf(action);
+    return k === '—' ? '' : k;
+  },
+
+  // Textes d'aide qui citent des touches (bouton « Retour au checkpoint » de la pause, « Rejouer » de l'arrivée, barre du replay) : ils suivent les
+  // liaisons du joueur au lieu des touches par défaut (TECH-020). Appelé au démarrage et à chaque changement de liaison.
+  refreshKeyHints() {
+    for (const [sel, action] of [['#pause [data-action="pause-respawn"] kbd', 'respawn'], ['#finish [data-action="restart"] kbd', 'restart']]) {
+      const el = document.querySelector(sel);
+      if (el) el.textContent = this._keysOf(action);
+    }
+    const rh = document.querySelector('#replay-bar .rh');
+    if (rh) {
+      const K = (a) => this._keysOf(a);
+      rh.textContent = `Espace : pause · ← → : vitesse · ${K('camera')} : caméra · ${K('restart')} : recommencer · ${K('pause')} : quitter`;
+    }
+  },
+
   _wireTouch() {
     const t = this.input.touch;
     const zone = $('t-zone');
@@ -286,9 +308,7 @@ export const wiringMethods = {
         e.preventDefault();
         b.classList.add('on');
         if (k in t) t[k] = true;
-        else if (k === 'respawn') this.input.pressed.add('KeyR');
-        else if (k === 'pause') this.input.pressed.add('Escape');
-        else if (k === 'restart') this.input.pressed.add('Enter');
+        else this.input.post(k);      // respawn, pause, restart : l'ACTION est déclenchée, quelle que soit la touche qui lui est liée (TECH-020)
         this.audio.unlock();
       };
       const off = (e) => {
