@@ -121,6 +121,7 @@ La vue d'ensemble (principes, déterminisme, flux d'une course) est dans [ARCHIT
 | `verify.js` | Vérification d'une course (classements en ligne). Module sans rendu ni navigateur : il est utilisé par la fonction serveur Supabase (supabase/functions/submit-score), qui le charge depuis le site du jeu. La physique étant déterministe, rejouer les commandes enregistrées redonne exactement la même course et le même temps. |
 | `version.js` | Numéros de version du jeu (une seule source), et son nom. |
 | `videoExport.js` | Export d'un replay en vidéo : le canvas 3D est enregistré (MediaRecorder) pendant que le replay se joue, puis proposé en téléchargement (WebM). |
+| `wallet.js` | Portefeuille de pièces ◆ : modèle ADDITIF, fusionnable entre appareils sans rien perdre ni rien créer (TECH-029, 0.16.10). Module pur (aucun stockage, aucun réseau). |
 | `weather.js` | Météo décorative (lot 12) : pluie, neige, braises, poussière, pétales. Un nuage de points qui suit la caméra ; aucun effet sur la course. |
 | `welcome.js` | Écran d'accueil : le menu principal ne s'ouvre qu'une fois le pseudo défini. |
 

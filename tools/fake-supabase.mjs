@@ -1,5 +1,5 @@
 // Faux navigateur (un « appareil » = un localStorage + un sessionStorage) et faux Supabase (Auth + REST) en mémoire, pour les tests du client (comptes, cloud).
-// Extrait de test-account.mjs : refreshStatus simule une panne du serveur (500, 429) au renouvellement de session.
+// Extrait de test-account.mjs : refreshStatus simule une panne du serveur (500, 429) au renouvellement de session ; delay, une sauvegarde lente.
 
 // ---- Faux navigateur : un « appareil » = un localStorage + un sessionStorage ------------------------------------
 class Store {
@@ -21,12 +21,20 @@ export function device(name) {
 device('A');
 
 // ---- Faux Supabase ----------------------------------------------------------------------------------------------
-export const srv = { users: new Map(), tokens: new Map(), refresh: new Map(), saves: new Map(), accounts: new Map(), players: new Map(), calls: [], refreshFails: false, refreshStatus: 0, offline: false, beforeNextPatch: null, n: 0 };
+// Options (toutes inactives par défaut : les suites existantes voient le serveur d'avant) :
+//   singleUse       jetons de renouvellement à USAGE UNIQUE (comme GoTrue avec la rotation) : un jeton déjà utilisé est refusé (400) ;
+//   reuseRevokes    … et sa réutilisation révoque toute la FAMILLE de jetons de la session (détection de réutilisation de GoTrue) ;
+//   convertSupport  la base crée la ligne `accounts` quand un utilisateur anonyme est converti (PUT /auth/v1/user) ; sans elle, la conversion réussit côté Auth seulement ;
+//                   la fonction rpc/account_conversion_ready répond vrai (ou srv.convertReady, pour simuler un projet mal réglé) ; absente sinon (PGRST202) ;
+//   autoconfirm     /auth/v1/settings : « Confirm email » désactivé (vrai par défaut, comme le demande supabase/COMPTES.md).
+// Données en ligne simulées : scores (clé circuit:joueur), circuits publiés (par code), j'aime (joueur:circuit), via la fonction submit-score et les RPC.
+export const srv = { users: new Map(), tokens: new Map(), refresh: new Map(), saves: new Map(), accounts: new Map(), players: new Map(), calls: [], refreshFails: false, refreshStatus: 0, offline: false, beforeNextPatch: null, n: 0, delay: {},
+  singleUse: false, reuseRevokes: false, convertSupport: false, autoconfirm: true, scores: new Map(), tracks: new Map(), likes: new Set(), revoked: new Set() };
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-export function session(user) {
+export function session(user, family = 'f' + ++srv.n) {
   const at = 'at' + ++srv.n, rt = 'rt' + ++srv.n;
-  srv.tokens.set(at, user); srv.refresh.set(rt, user);
-  return { access_token: at, refresh_token: rt, expires_in: 3600, user: { id: user.id } };
+  srv.tokens.set(at, user); srv.refresh.set(rt, { user, family, used: false });
+  return { access_token: at, refresh_token: rt, expires_in: 3600, user: { id: user.id, is_anonymous: !!user.anon, email: user.email } };
 }
 globalThis.fetch = async (url, init = {}) => {
   if (srv.offline) throw new TypeError('network down');
@@ -35,6 +43,8 @@ globalThis.fetch = async (url, init = {}) => {
   const auth = (init.headers || {}).Authorization;
   const user = auth ? srv.tokens.get(auth.replace('Bearer ', '')) : null;
   srv.calls.push({ method, path, body });
+  // Latence simulée par méthode sur la sauvegarde (srv.delay = { GET: ms, PATCH: ms }) : avec un temps virtuel, une « synchronisation de 6 s » sans attendre.
+  if (path === '/rest/v1/cloud_saves' && srv.delay[method]) await new Promise((r) => setTimeout(r, srv.delay[method]));
   if (path === '/auth/v1/signup') {
     if (body.email) {
       if (srv.users.has(body.email)) return json(422, { error_code: 'user_already_exists', msg: 'User already registered' });
@@ -52,14 +62,47 @@ globalThis.fetch = async (url, init = {}) => {
       return json(200, session(user));
     }
     if (srv.refreshStatus) return json(srv.refreshStatus, { message: 'indisponible' });
-    if (srv.refreshFails || !srv.refresh.has(body.refresh_token)) return json(400, { error_code: 'refresh_token_not_found', msg: 'Invalid Refresh Token' });
-    return json(200, session(srv.refresh.get(body.refresh_token)));
+    const r = srv.refresh.get(body.refresh_token);
+    if (srv.refreshFails || !r || srv.revoked.has(r.family)) return json(400, { error_code: 'refresh_token_not_found', msg: 'Invalid Refresh Token' });
+    if (r.used && srv.singleUse) {
+      if (srv.reuseRevokes) srv.revoked.add(r.family);          // réutilisation : toute la famille est révoquée (les jetons des autres onglets aussi)
+      srv.reuseCount = (srv.reuseCount || 0) + 1;
+      return json(400, { error_code: 'refresh_token_already_used', msg: 'Invalid Refresh Token: Already Used' });
+    }
+    r.used = true;
+    return json(200, session(r.user, r.family));
+  }
+  if (path === '/auth/v1/settings') return json(200, { external: { anonymous_users: true, email: true }, mailer_autoconfirm: srv.autoconfirm, disable_signup: false });
+  if (path === '/auth/v1/user' && method === 'PUT') {
+    // Conversion d'un utilisateur anonyme (même identifiant) : adresse + mot de passe + pseudo. Sans « Confirm email » désactivé, l'adresse reste en attente.
+    if (!user) return json(401, { message: 'JWT expired' });
+    if (body.email && [...srv.users.values()].some((x) => x.email === body.email && x !== user)) return json(422, { error_code: 'email_exists', msg: 'A user with this email address has already been registered' });
+    if (!srv.autoconfirm) { user.new_email = body.email; return json(200, { id: user.id, email: null, new_email: body.email, is_anonymous: true }); }
+    if (body.email) { user.email = body.email; user.anon = false; srv.users.set(body.email, user); }
+    if (body.password) user.pw = body.password;
+    if (body.data && body.data.username) user.username = body.data.username;
+    if (srv.convertSupport && !user.anon && user.username) srv.accounts.set(user.id, user.username);
+    return json(200, { id: user.id, email: user.email, is_anonymous: !!user.anon, user_metadata: { username: user.username } });
+  }
+  if (path === '/rest/v1/rpc/account_conversion_ready') {
+    const ready = srv.convertReady != null ? srv.convertReady : srv.convertSupport;
+    return ready ? json(200, true) : json(404, { code: 'PGRST202', message: 'Could not find the function public.account_conversion_ready without parameters in the schema cache' });
   }
   if (path === '/rest/v1/rpc/username_available') return json(200, ![...srv.accounts.values()].some((n) => n.toLowerCase() === body.n.toLowerCase()));
   if (path === '/rest/v1/rpc/delete_account') { srv.users.delete(user.email); srv.saves.delete(user.id); srv.accounts.delete(user.id); return json(200, null); }
   if (!user) return json(401, { message: 'JWT expired' });
   if (path === '/rest/v1/accounts') return json(200, srv.accounts.has(user.id) ? [{ username: srv.accounts.get(user.id) }] : []);
   if (path === '/rest/v1/players') { srv.players.set(body.id, body.name); return new Response('', { status: 201 }); }
+  if (path === '/functions/v1/submit-score') {
+    if (body.action === 'publish-track') {
+      const t = srv.tracks.get(body.code);
+      if (t && t.author !== user.id) return json(409, { error: 'Ce circuit est déjà publié par un autre pilote.', taken: true });
+      const row = t || { id: '00000000-0000-4000-8000-' + String(++srv.n).padStart(12, '0'), code: body.code, author: user.id, name: body.name };
+      srv.tracks.set(body.code, row); return json(200, { id: row.id, author_time: body.time });
+    }
+    srv.scores.set(body.trackKey + ':' + user.id, { player: user.id, time: body.time }); return json(200, { ok: true, time: body.time });
+  }
+  if (path === '/rest/v1/rpc/toggle_like') { const k = user.id + ':' + body.t; if (srv.likes.has(k)) srv.likes.delete(k); else srv.likes.add(k); return json(200, srv.likes.has(k)); }
   if (path === '/rest/v1/cloud_saves') {
     if (method === 'GET') { const r = srv.saves.get(user.id); return json(200, r ? [{ data: r.data, rev: r.rev }] : []); }
     if (method === 'POST') {

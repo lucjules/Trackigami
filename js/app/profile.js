@@ -221,9 +221,11 @@ export const profileMethods = {
         <button class="btn" data-a="sync">Synchroniser maintenant</button>
         <button class="btn" data-a="out">Se déconnecter</button>
         <button class="btn danger" data-a="del">Supprimer le compte</button>
-      </div>`;
-    const st = box.querySelector('#acct-st');
-    const paint = () => { st.textContent = label(); };
+      </div>
+      <div class="meta" id="acct-note"></div>`;
+    const st = box.querySelector('#acct-st'), note = box.querySelector('#acct-note');
+    // (la note : copie locale allégée faute de place, TECH-007 ; en erreur, le message d'erreur dit déjà tout)
+    const paint = () => { st.textContent = label(); note.textContent = account.status === 'ok' ? account.note : ''; };
     paint();
     box.querySelector('[data-a="sync"]').onclick = () => {
       paint(); st.textContent = 'synchronisation…';
@@ -272,11 +274,21 @@ export const profileMethods = {
       title: 'Restaurer cette sauvegarde ?',
       body: `<p>Joueur <b>${esc(obj.id || '?')}</b>, du ${esc(when)}.</p><p><b>Fusionner</b> : meilleurs records, circuits réunis. <b>Remplacer</b> : efface tes données.</p>`,
       actions: [
-        { label: 'Fusionner', primary: true, onClick: () => { applySave(obj, 'merge'); this._afterImport(); } },
-        { label: 'Remplacer', danger: true, onClick: () => { applySave(obj, 'replace'); this._afterImport(); } },
+        { label: 'Fusionner', primary: true, onClick: () => this._applyImport(obj, 'merge') },
+        { label: 'Remplacer', danger: true, onClick: () => this._applyImport(obj, 'replace') },
         { label: 'Annuler' },
       ],
     });
+  },
+
+  // Restaure le code joueur ; si l'appareil n'a pas la place de l'écrire (stockage plein), l'échec est ANNONCÉ et rien n'a changé : jamais « Sauvegarde restaurée ! » à tort (TECH-075).
+  _applyImport(obj, mode) {
+    try { applySave(obj, mode); } catch (e) {
+      if (!e || e.code !== 'storage-full') throw e;
+      this.ui.flash('Stockage plein : la sauvegarde n’a pas été restaurée, rien n’a été modifié. Libère de la place sur l’appareil, puis réessaie.', 6);
+      return;
+    }
+    this._afterImport();
   },
 
   _afterImport() {

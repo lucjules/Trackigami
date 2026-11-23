@@ -1,7 +1,7 @@
 // Récompenses (0.9.18) : titres affichés au classement, éléments EXCLUSIFS du garage (qui ne s'achètent pas), collections à thème. Données et règles pures : le contexte (médailles, défis, leçons…) est
 // rassemblé par app/rewards.js, ici on décide seulement ce qui est mérité. Rien ne touche à la physique ni aux temps : tout est visuel.
 import { CATALOG } from './cosmetics.js';
-import { profile, saveProfile, addCoins, owns } from './profile.js';
+import { profile, saveProfile, addCoins, owns, grantGift } from './profile.js';
 import { streakOf } from './mutations.js';
 import { LEVEL_REWARDS } from './progression.js';
 
@@ -68,7 +68,7 @@ export function grantRewards(ctx) {
   const out = { exclusives: [], collections: [], titles: [] };
   for (const e of EXCLUSIVES) {
     if (!e.test(ctx) || p.owned[e.cat + ':' + e.id]) continue;
-    p.owned[e.cat + ':' + e.id] = 1;
+    grantGift(e.cat, e.id);
     out.exclusives.push({ cat: e.cat, id: e.id, label: ((CATALOG[e.cat] || []).find((x) => x.id === e.id) || {}).label || e.id });
   }
   for (const col of COLLECTIONS) {
@@ -80,7 +80,7 @@ export function grantRewards(ctx) {
   const seen = new Set(Array.isArray(p.titlesSeen) ? p.titlesSeen : []);
   for (const id of earnedTitles({ ...ctx, collections: Object.keys(p.collections).length })) if (!seen.has(id)) { out.titles.push(id); seen.add(id); }
   p.titlesSeen = [...seen];
-  if (!earnedTitles({ ...ctx, collections: Object.keys(p.collections).length }).includes(p.title)) p.title = '';       // un titre qui n'est (plus) mérité ne reste pas affiché
+  if (p.title && !earnedTitles({ ...ctx, collections: Object.keys(p.collections).length }).includes(p.title)) { p.title = ''; p.titleAt = Date.now(); }       // un titre qui n'est (plus) mérité ne reste pas affiché (daté : la fusion garde le dernier choix)
   saveProfile();
   return out;
 }
@@ -118,6 +118,7 @@ export function chooseTitle(id, ctx) {
   const ok = !id || earnedTitles({ ...ctx, collections: Object.keys(p.collections || {}).length }).includes(id);
   if (!ok) return false;
   p.title = id || '';
+  p.titleAt = Date.now();          // (fusion entre appareils : le dernier titre choisi l'emporte, cloudsave.mergeProfile)
   saveProfile();
   return true;
 }

@@ -149,7 +149,7 @@ await test('création de compte : pseudo pris, puis succès, session et portée 
   await assert.rejects(() => account.signUp('Player', 'motdepasse1'), /réservés/);
   await assert.rejects(() => account.signUp('Alice', 'court'), /8 caractères/);
   const r = await account.signUp('Alice', 'motdepasse1', { keepGuest: true });
-  assert.deepEqual(r, { kind: 'account', username: 'Alice' });
+  assert.deepEqual({ kind: r.kind, username: r.username, migration: r.migration }, { kind: 'account', username: 'Alice', migration: 'done' }, 'compte créé, progression reprise (TECH-024 : le résultat le dit)');
   const uid = account.uid;
   assert.equal(storage.getScope(), uid, 'les données lues et écrites sont celles du compte');
   assert.equal(storage.listMyTracks().length, 1, 'progression invitée reprise');

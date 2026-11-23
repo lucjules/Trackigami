@@ -9,15 +9,32 @@
 // au lieu d'écraser : aucune progression perdue si deux appareils ont joué.
 import { online, OnlineError } from './online.js';
 import {
-  getGlobal, setGlobal, setScope, getSessionFlag, setSessionFlag, dumpAll, restoreAll, onWrite, loadSettings, saveSettings, removeKeys,
+  getGlobal, setGlobal, setScope, getScope, getSessionFlag, setSessionFlag, dumpAll, restoreAll, restoreFitting, restoreAllOrThrow, getRaw, onWrite, loadSettings, saveSettings, removeKeys,
+  isTrialName, StorageFullError,
 } from './storage.js';
-import { toCloud, fromCloud, mergeSaves, sameData, pickSynced, withoutGhosts, isSyncKey } from './cloudsave.js';
+import { toCloud, fromCloud, mergeSaves, sameData, pickSynced, fitCloud, isSyncKey } from './cloudsave.js';
 import { reloadProfile } from './profile.js';
+import { CONFIG } from './config.js';
 
 // Domaine technique des adresses (doit être le même que dans supabase/etape4-comptes.sql).
 const ACCOUNT_EMAIL_DOMAIN = 'accounts.copytrack.invalid';
 const FORBIDDEN_NAMES = ['player', 'pilote'];
-const MAX_CLOUD_BYTES = 6_000_000;     // au-delà, les fantômes enregistrés ne partent pas dans le cloud
+const MAX_CLOUD_BYTES = 6_000_000;     // au-delà, les fantômes enregistrés (puis les commandes des plus anciens records) ne partent pas dans le cloud (cloudsave.fitCloud)
+
+// Messages quand la copie locale du compte ne tient pas dans le stockage de l'appareil (le cloud, lui, garde tout).
+const FIT_FAILED = 'Espace insuffisant sur cet appareil : la sauvegarde du compte n’a pas pu y être écrite (le cloud la garde). Libère de la place sur l’appareil, puis « Synchroniser maintenant ».';
+// « Garder ma progression » (TECH-024) : ce qui passe de l'invité au compte : TOUTE la progression et les bibliothèques (circuits, records, profil, prefabs, pièces perso, modes,
+// brouillon, preuves de vérification…). Restent à l'appareil : ses réglages, l'identité en ligne de l'invité, les statistiques et erreurs en attente, les essais de l'éditeur (jetables).
+const STAY_ON_DEVICE = new Set(['settings', 'online.session', 'online.player', 'telemetry.state', 'telemetry.queue', 'errors.queue']);
+// Modèle d'identité (TECH-025, schéma en tête de js/online.js) : messages des cas où l'invité ne devient pas le compte, toujours dits au joueur.
+export const GUEST_KEPT = 'Compte créé. Ton identité d’invité (temps et circuits publiés) reste séparée de ce compte : tu la retrouves en te déconnectant.';
+const CONVERSION_UNSUPPORTED = 'Le serveur n’a pas enregistré le compte (conversion des invités mal installée, voir supabase/COMPTES.md) : tu restes invité, rien n’est perdu.';
+const CONFIRM_REQUIRED = 'Le serveur exige une confirmation d’adresse (« Confirm email ») : impossible de créer le compte depuis l’invité (voir supabase/COMPTES.md). Rien n’a changé.';
+const STORAGE_FULL_KEEP = 'Pas assez de place sur cet appareil pour reprendre ta progression dans le compte : rien n’a changé, elle reste en mode invité. Libère de la place, ou crée le compte sans la reprendre.';
+export const MIGRATION_FAILED = 'Compte créé, mais ta progression d’invité n’a pas pu y être reprise (stockage plein) : elle reste, intacte, en mode invité sur cet appareil. Pour la reprendre : en mode invité, Profil › Sauvegardes › Exporter le code joueur, puis importe-le dans le compte.';
+const fitNote = (fit) => (fit.level === 'partial'
+  ? `Espace insuffisant sur cet appareil : ${fit.dropped} records du compte n’y sont pas écrits (le cloud les garde en entier).`
+  : `Espace insuffisant sur cet appareil : copie du compte allégée (${fit.lightened} records sans fantôme ni commandes ; le cloud les garde en entier).`);
 
 export const accountEmail = (name) => String(name).trim().toLowerCase() + '@' + ACCOUNT_EMAIL_DOMAIN;
 
@@ -49,11 +66,22 @@ class Account {
     this.status = 'idle';         // idle | syncing | ok | offline | error
     this.lastSync = 0;
     this.lastError = '';
+    this.note = '';               // information (pas une erreur) sur la dernière synchronisation : copie locale allégée faute de place (TECH-007)
+    this._onNotice = null;        // (message) => … : l'application le montre au joueur (espace de l'appareil, reprise de la progression…) ; avant qu'elle soit prête, c'est gardé
+    this._pending = [];
+    this.convertAnonymous = CONFIG.accounts.convertAnonymous;      // 'auto' | false (js/config.js)
+    this._lastNotice = '';
+    this._storageFull = false;
     this._timer = null;
     this._running = null;
     this._dirty = false;
+    this._gen = 0;
     this._wired = false;
   }
+
+  get onNotice() { return this._onNotice; }
+  set onNotice(fn) { this._onNotice = fn; if (fn) for (const m of this._pending.splice(0)) this._say(m); }
+  _say(msg) { if (!this._onNotice) { this._pending.push(msg); return; } try { this._onNotice(msg); } catch { /* l'affichage ne casse rien */ } }
 
   get isAccount() { return !!this.state; }
   get username() { return this.state ? this.state.username : ''; }
@@ -83,11 +111,13 @@ class Account {
     online.onAccountSession = (session) => { if (this.state) { this.state.session = session; setGlobal('account', this.state); } };
   }
 
+  // Retour à l'invité (déconnexion, suppression, session expirée). D'abord la portée de l'invité : useGuest() y REPREND l'identité d'invité de cet appareil, jamais effacée
+  // (TECH-025). Un compte né d'une conversion EST l'ancien invité : sa session d'invité a été retirée à la conversion, l'invité qui revient est donc neuf (rien d'orphelin).
   _forget() {
     this.state = null;
     setGlobal('account', null);
     online.onAccountSession = null;
-    setScope('');          // d'abord la portée invité : useGuest() efface la session anonyme de l'INVITÉ, pas celle du compte
+    setScope('');
     online.useGuest();
   }
 
@@ -135,23 +165,106 @@ class Account {
     }
   }
 
+  // Inscription. keepGuest : la progression de l'invité de cet appareil est DÉPLACÉE dans le compte (TECH-024) : copiée, vérifiée, et seulement ensuite effacée de l'invité ;
+  // si elle ne tient pas, l'invité garde tout et le joueur le sait. Renvoie { kind, username, migration: 'none' | 'done' | 'failed' }.
   async signUp(rawName, password, { keepGuest = false } = {}) {
     const c = checkPseudo(rawName, { account: true });
     if (!c.ok) throw new OnlineError(c.error, 'invalid');
     const p = checkPassword(password, c.name);
     if (!p.ok) throw new OnlineError(p.error, 'invalid');
     // La progression de l'invité est lue AVANT de changer de portée.
-    const guestDump = keepGuest ? pickSynced(dumpAll()) : null;
+    const guestData = keepGuest ? this._guestData() : null;
     const tutorialDone = !!loadSettings().tutorialDone;
     if (!(await this.usernameAvailable(c.name))) throw new OnlineError('Ce pseudo est déjà pris.', 'name-taken');
+    // L'invité de cet appareil a une identité en ligne (session anonyme) : elle DEVIENT le compte si le serveur sait le faire (TECH-025). Sinon (projet sans la conversion,
+    // ou réglage du déploiement), un nouvel utilisateur est créé, l'identité d'invité reste intacte sur l'appareil, et le joueur le sait.
+    const guest = online.kind === 'guest' && online.session && online.session.user && online.session.user.id ? online.session.user.id : '';
+    if (guest && this.convertAnonymous !== false && (await this._conversionReady())) return this._convert(c.name, password, guestData, tutorialDone);
     const d = await online.rest('/auth/v1/signup', { method: 'POST', auth: false, body: { email: accountEmail(c.name), password, data: { username: c.name } } });
     if (!d || !d.access_token) throw new OnlineError('Compte créé, mais le serveur exige une confirmation par e-mail (voir COMPTES.md).', 'server-config');
     this._begin(d, c.name);
-    if (guestDump) restoreAll(guestDump, true);
-    const s = loadSettings(); s.playerName = c.name; s.tutorialDone = tutorialDone; saveSettings(s);
-    reloadProfile();
+    let migration = keepGuest ? 'done' : 'none';
+    if (guestData) {
+      try {
+        this._copyTo(this.state.uid, guestData);                  // 1. copie vérifiée dans le compte (rien n'est écrit si tout ne tient pas)
+        this._dropFrom('', Object.keys(guestData));               // 2. seulement alors, l'invité n'en garde pas de double
+      } catch (e) {
+        if (!(e && e.code === 'storage-full')) throw e;
+        migration = 'failed';
+        this._say(MIGRATION_FAILED);
+      }
+    }
+    if (guest) this._say(GUEST_KEPT);
+    this._finishSignUp(c.name, tutorialDone);
     try { await online.ensurePlayer(c.name); await this.sync(); } catch { /* le compte existe ; la synchronisation reprendra */ }
-    return { kind: 'account', username: c.name };
+    return { kind: 'account', username: c.name, migration, guestIdentity: guest ? 'kept' : 'none' };
+  }
+
+  _finishSignUp(name, tutorialDone) {
+    const s = loadSettings(); s.playerName = name; s.tutorialDone = tutorialDone; saveSettings(s);
+    reloadProfile();
+  }
+
+  // Le serveur sait-il convertir un invité (sa base crée la ligne `accounts` quand un utilisateur anonyme reçoit une adresse : voir supabase/COMPTES.md) ? Sans la fonction
+  // account_conversion_ready (projet d'avant), la réponse est non : rien n'est tenté.
+  async _conversionReady() {
+    try { return (await online.rest('/rest/v1/rpc/account_conversion_ready', { method: 'POST', auth: false, body: {} })) === true; }
+    catch (e) { if (e.code === 'offline') throw e; return false; }
+  }
+
+  // CONVERSION de l'invité en compte : même utilisateur, même identifiant ; il reçoit l'adresse technique, le mot de passe et le pseudo (API d'Auth prévue pour cela :
+  // PUT /auth/v1/user sur la session anonyme). Aucune étape destructive avant la réussite des précédentes :
+  //   1. réglage du projet : « Confirm email » doit être désactivé (sinon l'adresse resterait en attente et le compte serait inutilisable) ;
+  //   2. progression copiée et vérifiée dans la portée du compte (même identifiant), si demandé ; stockage plein : rien n'a changé, on le dit ;
+  //   3. conversion ; 4. la base a-t-elle créé le compte ? Non : échec explicite, le joueur reste l'invité ;
+  //   5. nouveau jeton (plus « anonyme ») ; 6. seulement alors : les jetons quittent la portée de l'invité, la copie de l'invité est effacée, le compte prend la main.
+  async _convert(name, password, guestData, tutorialDone) {
+    let set = null;
+    try { set = await online.rest('/auth/v1/settings', { auth: false }); } catch (e) { if (e.code === 'offline') throw e; }
+    if (set && set.mailer_autoconfirm === false) throw new OnlineError(CONFIRM_REQUIRED, 'server-config');
+    await online.ensureSession();
+    const uid = online.uid;
+    if (guestData) {
+      try { this._copyTo(uid, guestData); } catch (e) { if (e && e.code === 'storage-full') throw new OnlineError(STORAGE_FULL_KEEP, 'storage-full'); throw e; }
+    }
+    const undo = () => { if (guestData) this._dropFrom(uid, Object.keys(guestData)); };
+    const email = accountEmail(name);
+    let user, rows;
+    try {
+      user = await online.rest('/auth/v1/user', { method: 'PUT', body: { email, password, data: { username: name } } });
+      if (!user || user.is_anonymous !== false || String(user.email || '').toLowerCase() !== email) throw new OnlineError(CONFIRM_REQUIRED, 'server-config');
+      rows = await online.rest('/rest/v1/accounts?select=username&user_id=eq.' + encodeURIComponent(uid));
+      if (!Array.isArray(rows) || !rows[0]) throw new OnlineError(CONVERSION_UNSUPPORTED, 'conversion-unsupported');
+    } catch (e) { undo(); throw e; }
+    let session = online.session;
+    try { session = await online.refreshNow(); } catch { /* le jeton actuel reste valable jusqu'à son expiration */ }
+    online.forgetGuestSession();                                  // l'identité de l'invité EST celle du compte : ses jetons ne restent pas chez l'invité
+    if (guestData) this._dropFrom('', Object.keys(guestData));    // et sa progression n'y laisse pas de double
+    const username = rows[0].username || name;
+    this._begin(session, username);
+    this._finishSignUp(username, tutorialDone);
+    try { await online.ensurePlayer(username); await this.sync(); } catch { /* le compte existe ; la synchronisation reprendra */ }
+    return { kind: 'account', username, migration: guestData ? 'done' : 'none', guestIdentity: 'converted' };
+  }
+
+  // La progression et les bibliothèques de l'invité (portée courante : celle de l'invité), sans ce qui reste à l'appareil (STAY_ON_DEVICE) ni les essais jetables.
+  _guestData() {
+    return Object.fromEntries(Object.entries(dumpAll()).filter(([k, v]) => typeof v === 'string' && !STAY_ON_DEVICE.has(k) && !isTrialName(k)));
+  }
+  // Copie VÉRIFIÉE de `data` dans la portée `uid` : atomique (storage.restoreAllOrThrow : rien n'est écrit si tout ne tient pas), puis relue clé par clé. Lève StorageFullError
+  // (code « storage-full ») ; la portée courante est rendue telle qu'elle était.
+  _copyTo(uid, data) {
+    const back = getScope();
+    setScope(uid);
+    try {
+      restoreAllOrThrow(data, true);
+      if (Object.keys(data).some((k) => getRaw(k) !== data[k])) { removeKeys(Object.keys(data)); throw new StorageFullError(); }
+    } finally { setScope(back); }
+  }
+  _dropFrom(scopeId, keys) {
+    const back = getScope();
+    setScope(scopeId);
+    try { removeKeys(keys); } finally { setScope(back); }
   }
 
   async signIn(rawName, password) {
@@ -212,6 +325,7 @@ class Account {
   scheduleSync(delay = 4000) {
     if (!this.state) return;
     this._dirty = true;
+    this._gen++;                 // génération des écritures : une synchronisation sait si quelque chose a été écrit PENDANT qu'elle tournait (TECH-023)
     clearTimeout(this._timer);
     this._timer = setTimeout(() => { this.sync().catch(() => {}); }, delay);
   }
@@ -222,42 +336,70 @@ class Account {
     if (this._running) return this._running;
     clearTimeout(this._timer);
     this.status = 'syncing';
+    // Une écriture faite PENDANT la synchronisation (après sa lecture du stockage local) n'en fait pas partie : avant (TECH-023), sa minuterie rappelait sync(), qui renvoyait la
+    // promesse en cours, puis _dirty repassait à faux : la modification n'atteignait le cloud qu'à la prochaine écriture. Si la génération a bougé, on relance tout de suite, une fois.
+    const gen = this._gen;
     this._running = this._doSync()
-      .then((r) => { this.status = 'ok'; this.lastSync = Date.now(); this.lastError = ''; this._dirty = false; return r; })
+      .then((r) => { this.status = 'ok'; this.lastSync = Date.now(); this.lastError = ''; if (this._gen === gen) this._dirty = false; return r; })
       .catch((e) => { this.status = e.code === 'offline' ? 'offline' : 'error'; this.lastError = e.message; throw e; })
-      .finally(() => { this._running = null; });
+      .finally(() => {
+        this._running = null; this._notify();
+        if (this.state && this._gen !== gen && this.status === 'ok') { clearTimeout(this._timer); this.sync().catch(() => {}); }
+      });
     return this._running;
+  }
+
+  // Ce qui touche à l'ESPACE de l'appareil se dit au joueur, une fois par message (le bloc « compte » du profil l'affiche en permanence).
+  _notify() {
+    const msg = this.status === 'error' && this._storageFull ? this.lastError : this.status === 'ok' ? this.note : '';
+    if (!msg) { this._lastNotice = ''; return; }
+    if (msg === this._lastNotice) return;
+    this._lastNotice = msg;
+    if (this._onNotice) { try { this._onNotice(msg); } catch { /* l'affichage ne doit jamais casser la synchronisation */ } }
   }
 
   async _doSync() {
     const uid = this.state.uid;
+    this._storageFull = false;
     for (let attempt = 0; attempt < 4; attempt++) {
       const rows = await online.rest(`/rest/v1/cloud_saves?select=data,rev&user_id=eq.${encodeURIComponent(uid)}`);
       const row = rows && rows[0];
       const local = toCloud(dumpAll());
       const merged = row ? mergeSaves(local, row.data) : local;
-      // Le résultat fusionné devient aussi la version locale (sans déclencher de nouvelle synchronisation).
+      // Le résultat fusionné devient aussi la version locale (sans déclencher de nouvelle synchronisation). Si l'appareil n'a pas la place (TECH-007), on écrit une version ALLÉGÉE
+      // (storage.restoreFitting : sans fantômes, puis sans commandes…) ; si même cela ne tient pas, rien n'est écrit, la synchronisation finit en ERREUR visible, jamais en « à jour ».
+      let fit = null;
       if (!sameData(merged, local)) {
-        restoreAll(fromCloud(merged), true);
         // Ce que la fusion a ÉCARTÉ doit aussi quitter cet appareil : les records d'avant un « Effacer les records » fait ailleurs. Avant 0.9.59 ils restaient sur le
-        // disque (restoreAll ajoute et remplace, ne retire rien) : effacés sur un appareil, toujours affichés sur l'autre, pour toujours.
+        // disque (restoreAll ajoute et remplace, ne retire rien) : effacés sur un appareil, toujours affichés sur l'autre, pour toujours. (Avant l'écriture : cela libère de la place.)
         const dropped = Object.keys(local).filter((k) => !(k in merged));
         if (dropped.length) removeKeys(dropped);
-        reloadProfile();
+        fit = restoreFitting(fromCloud(merged));
+        if (fit.ok) reloadProfile();
       }
-      if (row && sameData(merged, row.data)) return 'à jour';
-      let data = merged;
-      if (JSON.stringify(data).length > MAX_CLOUD_BYTES) data = withoutGhosts(data);
+      const finish = (result) => {
+        this.note = '';
+        if (fit && !fit.ok) {
+          this._storageFull = true; this._dirty = false;      // (rien à relancer tout seul : la place ne reviendra pas d'elle-même ; « Synchroniser maintenant » ou une nouvelle écriture réessaie)
+          throw new OnlineError(FIT_FAILED, 'storage-full');
+        }
+        if (fit && fit.level !== 'full') this.note = fitNote(fit);
+        return result;
+      };
+      // Ce qui PARTIRAIT (la fusion, allégée si elle dépasse la limite) se compare à la copie du cloud : avant (TECH-074), on comparait la fusion complète, qui garde les fantômes locaux,
+      // à une copie du cloud qui n'en a plus : jamais égales, donc ≈ 6 Mo renvoyés et `rev` incrémenté à CHAQUE synchronisation (et des conflits avec les autres appareils).
+      const data = fitCloud(merged, MAX_CLOUD_BYTES);
+      if (row && sameData(data, row.data)) return finish('à jour');
       if (!row) {
         try {
           await online.rest('/rest/v1/cloud_saves', { method: 'POST', body: { user_id: uid, data }, headers: { Prefer: 'return=minimal' } });
-          return 'envoyé';
+          return finish('envoyé');
         } catch (e) { if (e.code === 'duplicate' || /23505|duplicate/i.test(e.message)) continue; throw e; }
       }
       const done = await online.rest(`/rest/v1/cloud_saves?user_id=eq.${encodeURIComponent(uid)}&rev=eq.${row.rev}`, {
         method: 'PATCH', body: { data }, headers: { Prefer: 'return=representation' },
       });
-      if (Array.isArray(done) && done.length) return 'envoyé';
+      if (Array.isArray(done) && done.length) return finish('envoyé');
       // Un autre appareil a écrit entre-temps : on relit et on refusionne.
     }
     throw new OnlineError('Synchronisation interrompue (conflit répété) : réessaie dans un instant.', 'conflict');

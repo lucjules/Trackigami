@@ -261,7 +261,7 @@ test('record en mémoire d\'une ancienne physique : un record plus récent (autr
   assert.equal(storage.getRecord('k-mem').time, 57);
   storage.setScope('');
 });
-await test('invité → compte : la progression de l\'invité (records, circuits, médailles, pièces) est reprise par le compte ; l\'invité d\'avant n\'est pas modifié ; un autre appareil retrouve tout', async () => {
+await test('invité → compte : la progression de l\'invité (records, circuits, médailles, pièces) est DÉPLACÉE dans le compte (TECH-024 : vérifiée, l\'invité n\'en garde pas de double) ; un autre appareil retrouve tout', async () => {
   srv.users.clear(); srv.saves.clear(); srv.accounts.clear(); srv.refreshStatus = 0; srv.offline = false;
   boot('G1');
   storage.saveRecord('b-eclats-x', { time: 41.5, pv: PHYS_VER, date: 5, inputs: null, ghost: null });
@@ -272,7 +272,8 @@ await test('invité → compte : la progression de l\'invité (records, circuits
   assert.equal(profile().coins, 90); assert.deepEqual(profile().medals, { 'b-eclats-x': 1 });
   assert.equal(storage.getJSON('tracks', []).length, 1);
   storage.setScope('');
-  assert.equal(storage.getRecord('b-eclats-x').time, 41.5, 'la portée invité n\'a pas été effacée');
+  assert.equal(storage.getRecord('b-eclats-x'), null, 'déplacée : la portée invité n\'en garde pas de double (avant 0.16.11 : copiée)');
+  assert.equal(storage.getJSON('tracks', []).length, 0);
   // autre appareil : connexion → tout revient
   boot('G2'); await account.signIn('Zoe_1', 'motdepasse1');
   assert.equal(storage.getRecord('b-eclats-x').time, 41.5); assert.equal(profile().coins, 90); assert.equal(storage.getJSON('tracks', []).length, 1);

@@ -26,7 +26,7 @@ export const legalMethods = {
     const uid = online.session && online.session.access_token ? online.uid : null;
     const data = await buildExport({
       meta: { game: GAME_NAME, version: VERSION, physVer: PHYS_VER, identity: { kind: this.identity.kind, username: this.identity.username } },
-      local: dumpAll({ shareable: true }), uid, get: (path) => online.rest(path),
+      local: dumpAll({ portability: true }), uid, get: (path) => online.rest(path),
     });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));

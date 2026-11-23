@@ -7,7 +7,7 @@ import { Particles } from './particles.js';
 import { Input } from './input.js';
 import { GarageSession } from './garage.js';
 import { CATEGORIES, CATEGORY_GROUPS } from './cosmetics.js';
-import { profile } from './profile.js';
+import { profile, onProfileChange } from './profile.js';
 import { GameAudio } from './audio.js';
 import { UI } from './ui.js';
 import { $, esc } from './dom.js';
@@ -22,7 +22,7 @@ import { account } from './account.js';
 import { runWelcome } from './welcome.js';
 import { initI18n } from './i18n/boot.js';
 import { describeBuiltin, describeUser } from './trackDescriptor.js';
-import { loadSettings, saveSettings, getRecord, saveRecord, saveMyTrack, newId, formatTime, purgeOldRecords, getJSON, setJSON } from './storage.js';
+import { loadSettings, saveSettings, getRecord, saveRecord, saveMyTrack, newId, formatTime, purgeOldRecords, purgeEditorTrials, getJSON, setJSON } from './storage.js';
 import { dayKey } from './daily.js';
 import { Telemetry } from './telemetry.js';
 import { ErrorReport } from './errorReport.js';
@@ -84,6 +84,7 @@ class App {
     this.input.setBindings(this.settings.keys, this.settings.pad);
     this.input.setPadConfig({ deadzone: this.settings.padDeadzone, sens: this.settings.padSens, rumble: this.settings.haptics });
     purgeOldRecords();
+    purgeEditorTrials();      // les essais de l'éditeur d'avant ne servent plus (TECH-022) : 21 à 43 Ko chacun
     profile();
     $('menu-foot').textContent = `${GAME_NAME} ${VERSION} · un jeu de course original · propulsé par three.js`;
     this.audio = new GameAudio();
@@ -578,6 +579,9 @@ const NO_WEBGL = 'Ce navigateur n’a pas pu démarrer la 3D (WebGL 2). Active l
     const app = new App(identity);
     window.copytrack = app;      // accès de débogage et des tests navigateur (tools/test-browser.mjs)
     app.start();
+    account.onNotice = (msg) => app.ui.flash(msg, 6);      // l'espace de l'appareil ne suffit pas à la sauvegarde du compte (TECH-007) : le joueur le sait
+    online.onNotice = (msg) => app.ui.flash(msg, 6);      // une nouvelle identité d'invité n'est jamais créée en silence (TECH-026)
+    onProfileChange(() => app.ui.updateCoins());          // un autre onglet a écrit le profil (TECH-027) : les pièces affichées suivent
     if (identity.kind === 'account') account.sync().catch(() => { /* hors ligne : reprise plus tard */ });
   } catch (err) {
     console.error(err);

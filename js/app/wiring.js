@@ -2,7 +2,7 @@
 // Ces méthodes s'ajoutent au prototype de App (voir main.js) : `this` est l'instance.
 import { defaultKeys, defaultPad } from '../input.js';
 import { GarageSession } from '../garage.js';
-import { profile, saveProfile, addCoins } from '../profile.js';
+import { profile, saveProfile, addCoins, grantGift } from '../profile.js';
 import { $ } from '../dom.js';
 import { checkPseudo } from '../account.js';
 import { clearRecords } from '../storage.js';
@@ -330,7 +330,7 @@ export const wiringMethods = {
         ki = 0;
         const p = profile();
         if (!p.eggs.konami) {
-          p.eggs.konami = 1; p.owned['led:rainbow'] = 1; addCoins(100);
+          p.eggs.konami = 1; grantGift('led', 'rainbow'); addCoins(100);      // (offerte : jamais déduite des pièces à la fusion)
           saveProfile(); this.ui.updateCoins();
           this.ui.flash('↑↑↓↓←→←→BA : LED arc-en-ciel débloquée et +100 ◆ !', 4);
         } else this.ui.flash('Tu connais déjà ce code 😉');

@@ -416,6 +416,7 @@ export default {
   'Pas de connexion internet.': 'No internet connection.',
   'Serveur injoignable (connexion internet ?).': 'Server unreachable (internet connection?).',
   'Session expirée : reconnecte-toi.': 'Session expired: sign in again.',
+  'Ta session d’invité n’est plus reconnue par le serveur : une nouvelle identité en ligne a été créée (tes anciens temps et circuits publiés restent sous l’ancienne).': 'Your guest session is no longer recognised by the server: a new online identity was created (your previous times and published tracks stay with the old one).',
   'Connexion refusée par le serveur.': 'Connection refused by the server.',
   'Choisis d’abord un pseudo.': 'Pick a username first.',
   'Circuit trop gros ({a:w} / {b:w} caractères).': 'Track too large ({a} / {b} characters).',

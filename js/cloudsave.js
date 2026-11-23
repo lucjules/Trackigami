@@ -4,20 +4,22 @@
 // et sur leur forme cloud {clé: valeur JSON} (jsonb côté base). La fusion ne perd jamais de progression :
 //  - records : le meilleur temps gagne (à version de physique égale) ;
 //  - circuits : union par identifiant, le plus récent gagne ; les pierres tombales effacent les circuits supprimés ;
-//  - profil : médailles et objets réunis, statistiques au maximum, pièces sans jamais en inventer ; favoris réunis (pierres tombales) ;
+//  - profil : médailles et objets réunis, statistiques au maximum, pièces additives (js/wallet.js : rien de perdu, rien d'inventé) ; favoris réunis (pierres tombales) ;
 //    exercices de l'Académie : meilleur niveau et meilleure mesure ; mutations du jour réunies, meilleure série au maximum ;
-//    expérience au maximum, licences réunies (date la plus ancienne), défis de maîtrise réunis ;
+//    expérience au maximum, licences réunies (date la plus ancienne), défis de maîtrise réunis ; objectifs bonus réunis ; titre : le dernier choisi ;
+//    premières arrivées du jour : le jour le plus récent (circuits réunis) ;
 //  - dernières courses (runs.*) : réunies, les plus récentes gardées.
-import { itemCost } from './cosmetics.js';
+import { mergeWallets, balance } from './wallet.js';
 import { mergeFavorites } from './favorites.js';
-import { cleanRuns, validRecord, validTrackEntry } from './storage.js';
+import { cleanRuns, validRecord, validTrackEntry, isTrialName } from './storage.js';
 import { mergeDrills } from './skills.js';
 import { mergeProgress } from './progression.js';
 
 // Ce qui suit un compte d'un appareil à l'autre : progression, circuits créés, records. Les réglages
 // (volume, touches, qualité...) restent propres à chaque appareil, le brouillon de l'éditeur aussi.
+// Les essais de l'éditeur (rec3.e-…, storage.js : isTrialName) sont JETABLES et ne partent jamais (TECH-022) : ni envoyés, ni reçus ; la prochaine écriture du cloud en retire ceux d'avant.
 export const isSyncKey = (k) =>
-  k === 'profile' || k === 'tracks' || k === 'tracksDel' || k === 'recReset' || /^(rec3|daily|ghostImp|runs)\./.test(k);
+  k === 'profile' || k === 'tracks' || k === 'tracksDel' || k === 'recReset' || (/^(rec3|daily|ghostImp|runs)\./.test(k) && !isTrialName(k));
 
 export const pickSynced = (dump) => Object.fromEntries(Object.entries(dump || {}).filter(([k, v]) => isSyncKey(k) && typeof v === 'string'));
 
@@ -39,6 +41,7 @@ export function fromCloud(data) {
 
 const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : {});
 const num = (x) => (Number.isFinite(+x) ? +x : 0);
+const validTier = (t) => typeof t === 'number' && Number.isInteger(t) && t >= 0 && t <= 3;      // niveau de médaille : 0 cristal, 1 or, 2 argent, 3 bronze
 
 function mergeRecord(a, b) {
   if (!a) return b;
@@ -48,7 +51,10 @@ function mergeRecord(a, b) {
   if (!va || !vb) return va ? a : vb ? b : a;
   // Une physique plus récente remplace l'ancienne (les temps ne sont plus comparables) ; sinon le meilleur temps.
   const pa = num(a.pv), pb = num(b.pv);
-  const pick = pa !== pb ? (pb > pa ? b : a) : (num(b.time) < num(a.time) ? b : a);
+  // À temps ET physique égaux (le même record, vu des deux côtés), celui qui a gardé le plus (fantôme, commandes) l'emporte : une copie allégée faute de place (storage.restoreFitting,
+  // TECH-007) ou une sauvegarde sans fantômes (withoutGhosts, TECH-074) ne doit pas écraser dans le cloud, ni ailleurs, le même record complet.
+  const weight = (r) => (r.ghost ? String(r.ghost).length : 0) + (r.inputs ? String(r.inputs).length : 0);
+  const pick = pa !== pb ? (pb > pa ? b : a) : num(b.time) !== num(a.time) ? (num(b.time) < num(a.time) ? b : a) : (weight(b) > weight(a) ? b : a);
   // Le meilleur temps de toutes les physiques (bt, voir storage.medalTime) ne se perd jamais : médailles et déblocages en dépendent.
   const best = (r) => (num(r.bt) > 0 ? Math.min(num(r.bt), num(r.time) || Infinity) : num(r.time) || Infinity);
   const bt = Math.min(best(a), best(b));
@@ -68,21 +74,18 @@ function mergeTracks(a, b, gone) {
   return [...map.values()].filter((t) => !(gone[t.id] != null && num(gone[t.id]) >= num(t.updated)));
 }
 
-// Pièces : chaque côté a pu acheter des objets que l'autre n'a pas. On réunit les objets, puis on retire au côté
-// le prix de ceux qu'il n'avait pas, et on garde le plus favorable des deux. Jamais plus que ce qu'un côté avait.
-function mergeCoins(a, b, owned) {
-  const lacking = (side) => Object.keys(owned).filter((k) => !(k in obj(side.owned)))
-    .reduce((sum, k) => { const [cat, ...id] = k.split(':'); return sum + num(itemCost(cat, id.join(':'))); }, 0);
-  return Math.max(0, num(a.coins) - lacking(a), num(b.coins) - lacking(b));
-}
-
 export function mergeProfile(local, remote) {
   const a = obj(local), b = obj(remote);
   if (!Object.keys(a).length) return { ...b };
   if (!Object.keys(b).length) return { ...a };
   const owned = { ...obj(a.owned), ...obj(b.owned) };
-  const medals = { ...obj(b.medals) };
-  for (const [k, tier] of Object.entries(obj(a.medals))) medals[k] = k in medals ? Math.min(num(tier), num(medals[k])) : tier;   // 0 = cristal : le plus petit est le meilleur
+  // Médailles : le meilleur niveau (0 = cristal : le plus petit). Une valeur invalide (abîmée, d'un autre format) est IGNORÉE (TECH-077) : avant, num() en faisait 0, c'est-à-dire cristal.
+  const ma = obj(a.medals), mb = obj(b.medals);
+  const medals = {};
+  for (const k of new Set([...Object.keys(ma), ...Object.keys(mb)])) {
+    const t = [ma[k], mb[k]].filter(validTier);
+    if (t.length) medals[k] = Math.min(...t);
+  }
   const eggs = { ...obj(b.eggs), ...obj(a.eggs) };
   const shards = { ...obj(b.shards), ...obj(a.shards) };
   const stats = { ...obj(b.stats), ...obj(a.stats), races: Math.max(num(a.stats && a.stats.races), num(b.stats && b.stats.races)), earned: Math.max(num(a.stats && a.stats.earned), num(b.stats && b.stats.earned)) };
@@ -90,18 +93,34 @@ export function mergeProfile(local, remote) {
   const collections = { ...obj(b.collections), ...obj(a.collections) };      // collections récompensées : on réunit
   const dailyDays = [...new Set([...(Array.isArray(a.dailyDays) ? a.dailyDays : []), ...(Array.isArray(b.dailyDays) ? b.dailyDays : [])])].filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().slice(-400);
   const mutDays = [...new Set([...(Array.isArray(a.mutDays) ? a.mutDays : []), ...(Array.isArray(b.mutDays) ? b.mutDays : [])])].filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().slice(-400);   // mutations du jour terminées (E13)
-  const titlesSeen = [...new Set([...(Array.isArray(a.titlesSeen) ? a.titlesSeen : []), ...(Array.isArray(b.titlesSeen) ? b.titlesSeen : [])])].slice(0, 40);
+  const titlesSeen = [...new Set([...(Array.isArray(a.titlesSeen) ? a.titlesSeen : []), ...(Array.isArray(b.titlesSeen) ? b.titlesSeen : [])])].filter((t) => typeof t === 'string').sort().slice(0, 40);   // (trié : même résultat quel que soit l'ordre)
+  // Objectifs bonus de la carrière (TECH-028) : réunis ; un objectif réussi sur un appareil l'est partout (il ne se repaie pas).
+  const goals = Object.fromEntries([...new Set([...Object.keys(obj(a.goals)), ...Object.keys(obj(b.goals))])].filter((k) => obj(a.goals)[k] || obj(b.goals)[k]).sort().map((k) => [k, 1]));
+  // Titre affiché : le DERNIER choisi (ou retiré) l'emporte (titleAt : date du choix, rewards.chooseTitle) ; à date égale (profils d'avant), le plus grand identifiant, pour converger.
+  const ta = num(a.titleAt), tb = num(b.titleAt), sa = typeof a.title === 'string' ? a.title : '', sb = typeof b.title === 'string' ? b.title : '';
+  const title = a.title !== undefined || b.title !== undefined || ta || tb ? { title: ta !== tb ? (ta > tb ? sa : sb) : (sa >= sb ? sa : sb), ...(ta || tb ? { titleAt: Math.max(ta, tb) } : {}) } : {};
+  // Premières arrivées du jour (xpDay, progression.awardRace) : le jour le plus récent ; le même jour, les circuits des deux côtés (triés) : le bonus n'est pas repayé ailleurs.
+  const xd = (x) => (x && typeof x === 'object' && /^\d{4}-\d{2}-\d{2}$/.test(x.day) && Array.isArray(x.keys) ? x : null);
+  const xa = xd(a.xpDay), xb = xd(b.xpDay);
+  const day = xa && xb ? (xa.day > xb.day ? xa.day : xb.day) : (xa || xb || {}).day;
+  const dayKeys = [xa, xb].filter((x) => x && x.day === day).flatMap((x) => x.keys);
+  const xpDay = xa || xb ? { xpDay: { day, keys: [...new Set(dayKeys)].filter((k) => typeof k === 'string').sort().slice(0, 300) } } : {};
   stats.turbos = Math.max(num(a.stats && a.stats.turbos), num(b.stats && b.stats.turbos));
   const daily2 = a.mutDays || b.mutDays || a.dailyBest || b.dailyBest ? { mutDays, dailyBest: Math.max(num(a.dailyBest), num(b.dailyBest)) } : {};   // meilleure série : au maximum
   const presets = Array.isArray(a.presets) && a.presets.some(Boolean) ? a.presets : (Array.isArray(b.presets) ? b.presets : a.presets);
   const fav = (a.favorites || b.favorites || a.favDel || b.favDel) ? mergeFavorites(a, b) : {};      // favoris du Race Hub (favorites.js)
   const drills = a.drills || b.drills ? { drills: mergeDrills(a.drills, b.drills) } : {};         // exercices de l'Académie (skills.js) : meilleur niveau, meilleure mesure
-  return {
-    ...b, ...a, ...fav, ...drills, ...daily2, ...mergeProgress(a, b),
+  // Pièces (TECH-029) : modèle additif (js/wallet.js : compteurs par appareil, achats et cadeaux réunis) ; un profil sans portefeuille (ancien client, ancienne sauvegarde)
+  // y entre par sa ligne de base, fusionnée par l'ancienne règle (le plus favorable, moins le prix de ce qu'il n'avait pas ; jamais le prix d'un cadeau).
+  const out = {
+    ...b, ...a, ...fav, ...drills, ...daily2, ...mergeProgress(a, b), ...title, ...xpDay,
     id: b.id || a.id,                    // l'identifiant du joueur reste celui du compte
-    coins: mergeCoins(a, b, owned), owned, medals, eggs, shards, stats, presets, academy, collections, dailyDays, titlesSeen,
+    owned, medals, eggs, shards, stats, presets, academy, collections, dailyDays, titlesSeen, ...(a.goals || b.goals ? { goals } : {}),
     loadout: a.loadout || b.loadout,     // l'appareil courant garde sa personnalisation
   };
+  out.wallet = mergeWallets(a, b);
+  out.coins = balance(out, out.wallet);
+  return out;
 }
 
 // local, remote : formes cloud {clé: valeur}. Renvoie la forme cloud fusionnée.
@@ -119,10 +138,13 @@ export function mergeSaves(local, remote) {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
   const gone = { ...obj(b.tracksDel), ...obj(a.tracksDel) };
   for (const k of Object.keys(obj(b.tracksDel))) gone[k] = Math.max(num(a.tracksDel && a.tracksDel[k]), num(b.tracksDel[k]));
+  const tracks = a.tracks || b.tracks ? mergeTracks(a.tracks, b.tracks, gone) : null;
+  // Une pierre tombale DÉPASSÉE (le circuit a été recréé ou restauré après elle, profile.applySave) ne sert plus : elle part (le même résultat sur chaque appareil, quel que soit l'ordre).
+  if (tracks) for (const t of tracks) if (gone[t.id] != null && num(t.updated) > num(gone[t.id])) delete gone[t.id];
   for (const k of keys) {
     if (!isSyncKey(k)) continue;
     if (k === 'tracksDel') out[k] = gone;
-    else if (k === 'tracks') out[k] = mergeTracks(a[k], b[k], gone);
+    else if (k === 'tracks') out[k] = tracks;
     else if (k === 'profile') out[k] = mergeProfile(a[k], b[k]);
     else if (k.startsWith('rec3.')) out[k] = mergeRecord(a[k], b[k]);
     else if (k.startsWith('runs.')) out[k] = cleanRuns([...(Array.isArray(a[k]) ? a[k] : []), ...(Array.isArray(b[k]) ? b[k] : [])]);    // dernières courses : réunies, les plus récentes
@@ -130,7 +152,7 @@ export function mergeSaves(local, remote) {
   }
   if (resetAt) out.recReset = resetAt;
   if (!('tracksDel' in out) && Object.keys(gone).length) out.tracksDel = gone;
-  if (!('tracks' in out) && (a.tracks || b.tracks)) out.tracks = mergeTracks(a.tracks, b.tracks, gone);
+  if (!('tracks' in out) && tracks) out.tracks = tracks;
   return out;
 }
 
@@ -146,5 +168,23 @@ function sortKeys(o) {
 export function withoutGhosts(data) {
   const out = {};
   for (const [k, v] of Object.entries(data)) out[k] = k.startsWith('rec3.') && v && typeof v === 'object' ? { ...v, ghost: null } : v;
+  return out;
+}
+
+// Ce qui part réellement dans le cloud : `data` tel quel s'il tient dans `max` caractères ; sinon sans les fantômes (withoutGhosts), puis, si cela ne suffit pas, sans les commandes des plus
+// anciens records, jusqu'à tenir (TECH-074). Le temps, les temps intermédiaires et la version de physique ne sont jamais retirés. Les anciens clients lisent ces records comme ceux d'un
+// appareil qui n'a pas gardé la rejouabilité (inputs: null existe déjà : storage.slim).
+export function fitCloud(data, max) {
+  const len = (v) => JSON.stringify(v).length;
+  if (len(data) <= max) return data;
+  const out = withoutGhosts(data);
+  let size = len(out);
+  if (size <= max) return out;
+  const withInputs = Object.keys(out).filter((k) => k.startsWith('rec3.') && out[k] && typeof out[k] === 'object' && out[k].inputs).sort((a, b) => num(out[a].date) - num(out[b].date));
+  for (const k of withInputs) {
+    size -= len(out[k].inputs) - len(null);
+    out[k] = { ...out[k], inputs: null };
+    if (size <= max) break;
+  }
   return out;
 }

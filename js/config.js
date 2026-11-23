@@ -24,6 +24,9 @@ const DEFAULTS = {
   iceUrl: undefined,
   // Pages légales (js/legal.js) : qui publie le jeu, comment le joindre, où lire son code. `contact` : une adresse e-mail réservée au jeu (demandes RGPD,
   // signalements). Vide, les pages renvoient vers la page du projet (`source`) ; tools/test-legal.mjs le signale tant qu'elle manque.
+  // Comptes (supabase/COMPTES.md, « Modèle d'identité ») : convertAnonymous — 'auto' : à l'inscription, l'utilisateur ANONYME de l'invité est converti en compte (même identifiant :
+  // ses temps, circuits publiés et « j'aime » restent à lui) si le serveur l'annonce (fonction account_conversion_ready) ; false : jamais (nouvel utilisateur, annoncé au joueur).
+  accounts: { convertAnonymous: 'auto' },
   legal: {
     publisher: 'lucjules',
     contact: '',
@@ -37,4 +40,5 @@ export const CONFIG = {
   iceServers: Array.isArray(override.iceServers) ? override.iceServers : DEFAULTS.iceServers,
   iceUrl: typeof override.iceUrl === 'string' ? override.iceUrl : `${(override.supabase && override.supabase.url) || DEFAULTS.supabase.url}/functions/v1/ice`,
   legal: { ...DEFAULTS.legal, ...(override.legal || {}) },
+  accounts: { ...DEFAULTS.accounts, ...(override.accounts || {}) },
 };
