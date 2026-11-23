@@ -80,7 +80,7 @@ export function grantRewards(ctx) {
   const seen = new Set(Array.isArray(p.titlesSeen) ? p.titlesSeen : []);
   for (const id of earnedTitles({ ...ctx, collections: Object.keys(p.collections).length })) if (!seen.has(id)) { out.titles.push(id); seen.add(id); }
   p.titlesSeen = [...seen];
-  if (!earnedTitles({ ...ctx, collections: Object.keys(p.collections).length }).includes(p.title)) p.title = '';       // un titre qui n'est (plus) mérité ne reste pas affiché
+  if (p.title && !earnedTitles({ ...ctx, collections: Object.keys(p.collections).length }).includes(p.title)) { p.title = ''; p.titleAt = Date.now(); }       // un titre qui n'est (plus) mérité ne reste pas affiché (daté : la fusion garde le dernier choix)
   saveProfile();
   return out;
 }
@@ -118,6 +118,7 @@ export function chooseTitle(id, ctx) {
   const ok = !id || earnedTitles({ ...ctx, collections: Object.keys(p.collections || {}).length }).includes(id);
   if (!ok) return false;
   p.title = id || '';
+  p.titleAt = Date.now();          // (fusion entre appareils : le dernier titre choisi l'emporte, cloudsave.mergeProfile)
   saveProfile();
   return true;
 }

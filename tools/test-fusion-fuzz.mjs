@@ -1,5 +1,6 @@
 // Fuzz de la fusion des profils entre appareils (TRANS-13) : node tools/test-fusion-fuzz.mjs   (npm test)
-// Des appareils (2 ou 3) partent du même profil d'avant le modèle additif, font des opérations au hasard (gains, achats, cadeaux, code caché, objectifs, médailles…) et se
+// Des appareils (2 ou 3) partent du même profil d'avant le modèle additif, font des opérations au hasard (gains, achats, cadeaux, code caché, objectifs, titre, premières
+// arrivées du jour, médailles…) et se
 // synchronisent avec un cloud dans un ordre au hasard. On vérifie, pour CHAQUE scénario :
 //   - convergence : après deux tours de synchronisation, tous les appareils et le cloud ont le même profil (quel que soit l'ordre) ; fusionner dans n'importe quel ordre donne le même résultat ;
 //   - pièces : solde final = solde de départ + somme des gains réels − prix des objets achetés (une fois chacun) ; jamais plus ; les cadeaux ne sont jamais déduits ;
@@ -75,7 +76,14 @@ function scenario(seed, nDev, { old = -1, ops = 30 } = {}) {
       if (d.p.goals[k]) continue;
       d.p.goals[k] = 1; truth.goals.add(k);
       earn(d, GOAL_COINS);
-    } else if (r < 0.76) {                  // médaille
+    } else if (r < 0.70) {                  // titre choisi (daté, comme rewards.chooseTitle)
+      d.p.title = pick(['', 'veteran', 'derapeur', 'fidele']); d.p.titleAt = 1000 + i;
+    } else if (r < 0.74) {                  // première arrivée du jour sur un circuit (progression.awardRace)
+      const day = pick(['2026-11-20', '2026-11-21']), k = pick(TRACKS);
+      const xd = d.p.xpDay && d.p.xpDay.day === day ? d.p.xpDay : { day, keys: [] };
+      if (!xd.keys.includes(k)) xd.keys = [...xd.keys, k];
+      d.p.xpDay = xd;
+    } else if (r < 0.80) {                  // médaille
       const k = pick(TRACKS), t = int(4);
       d.p.medals = { ...(d.p.medals || {}) };
       if (!(k in d.p.medals) || t < d.p.medals[k]) d.p.medals[k] = t;
@@ -89,11 +97,11 @@ function scenario(seed, nDev, { old = -1, ops = 30 } = {}) {
   return { devs, cloud, truth, before, start };
 }
 const priceOf = (keys) => [...keys].reduce((s, k) => s + catalogCost(k), 0);
-const shared = (p) => ({ coins: p.coins, wallet: p.wallet, owned: p.owned, medals: p.medals, eggs: p.eggs });
+const shared = (p) => ({ coins: p.coins, wallet: p.wallet, owned: p.owned, medals: p.medals, eggs: p.eggs, goals: p.goals, title: p.title, titleAt: p.titleAt, xpDay: p.xpDay });
 
 console.log('Pièces : modèle additif, 2 et 3 appareils');
 for (const nDev of [2, 3]) {
-  test(`${nDev} appareils, 2 500 scénarios : convergence, solde = départ + gains réels − achats (une fois), cadeaux jamais déduits, rien de perdu`, () => {
+  test(`${nDev} appareils, 2 500 scénarios : convergence (pièces, objets, médailles, objectifs, titre, premières arrivées du jour), solde = départ + gains réels − achats (une fois), cadeaux jamais déduits, rien de perdu`, () => {
     for (let s = 1; s <= 2500; s++) {
       const seed = s * 7919 + nDev;
       const { devs, cloud, truth } = scenario(seed, nDev);
@@ -103,10 +111,11 @@ for (const nDev of [2, 3]) {
       assert.equal(cloud.coins, balance(cloud, walletOf(cloud)));
       for (const k of truth.owned) assert.ok(cloud.owned[k], `graine ${seed} : objet ${k} perdu`);
       for (const [k, t] of Object.entries(truth.medals)) assert.equal(cloud.medals[k], t, `graine ${seed} : médaille ${k}`);
+      for (const k of truth.goals) assert.ok(cloud.goals && cloud.goals[k], `graine ${seed} : objectif ${k} perdu`);
     }
   });
 }
-test('l\'ordre ne compte pas : fusionner les versions des appareils dans n\'importe quel ordre donne le même portefeuille et le même solde (1 500 scénarios à 3 appareils)', () => {
+test('l\'ordre ne compte pas : fusionner les versions des appareils dans n\'importe quel ordre donne le même profil partagé (pièces, objets, objectifs, titre…) ; fusionner avec soi-même ne change rien (1 500 scénarios à 3 appareils)', () => {
   for (let s = 1; s <= 1500; s++) {
     const seed = s * 104729;
     const { before } = scenario(seed, 3, { ops: 25 });

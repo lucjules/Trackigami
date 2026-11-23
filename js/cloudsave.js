@@ -6,7 +6,8 @@
 //  - circuits : union par identifiant, le plus récent gagne ; les pierres tombales effacent les circuits supprimés ;
 //  - profil : médailles et objets réunis, statistiques au maximum, pièces additives (js/wallet.js : rien de perdu, rien d'inventé) ; favoris réunis (pierres tombales) ;
 //    exercices de l'Académie : meilleur niveau et meilleure mesure ; mutations du jour réunies, meilleure série au maximum ;
-//    expérience au maximum, licences réunies (date la plus ancienne), défis de maîtrise réunis ;
+//    expérience au maximum, licences réunies (date la plus ancienne), défis de maîtrise réunis ; objectifs bonus réunis ; titre : le dernier choisi ;
+//    premières arrivées du jour : le jour le plus récent (circuits réunis) ;
 //  - dernières courses (runs.*) : réunies, les plus récentes gardées.
 import { mergeWallets, balance } from './wallet.js';
 import { mergeFavorites } from './favorites.js';
@@ -86,7 +87,18 @@ export function mergeProfile(local, remote) {
   const collections = { ...obj(b.collections), ...obj(a.collections) };      // collections récompensées : on réunit
   const dailyDays = [...new Set([...(Array.isArray(a.dailyDays) ? a.dailyDays : []), ...(Array.isArray(b.dailyDays) ? b.dailyDays : [])])].filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().slice(-400);
   const mutDays = [...new Set([...(Array.isArray(a.mutDays) ? a.mutDays : []), ...(Array.isArray(b.mutDays) ? b.mutDays : [])])].filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().slice(-400);   // mutations du jour terminées (E13)
-  const titlesSeen = [...new Set([...(Array.isArray(a.titlesSeen) ? a.titlesSeen : []), ...(Array.isArray(b.titlesSeen) ? b.titlesSeen : [])])].slice(0, 40);
+  const titlesSeen = [...new Set([...(Array.isArray(a.titlesSeen) ? a.titlesSeen : []), ...(Array.isArray(b.titlesSeen) ? b.titlesSeen : [])])].filter((t) => typeof t === 'string').sort().slice(0, 40);   // (trié : même résultat quel que soit l'ordre)
+  // Objectifs bonus de la carrière (TECH-028) : réunis ; un objectif réussi sur un appareil l'est partout (il ne se repaie pas).
+  const goals = Object.fromEntries([...new Set([...Object.keys(obj(a.goals)), ...Object.keys(obj(b.goals))])].filter((k) => obj(a.goals)[k] || obj(b.goals)[k]).sort().map((k) => [k, 1]));
+  // Titre affiché : le DERNIER choisi (ou retiré) l'emporte (titleAt : date du choix, rewards.chooseTitle) ; à date égale (profils d'avant), le plus grand identifiant, pour converger.
+  const ta = num(a.titleAt), tb = num(b.titleAt), sa = typeof a.title === 'string' ? a.title : '', sb = typeof b.title === 'string' ? b.title : '';
+  const title = a.title !== undefined || b.title !== undefined || ta || tb ? { title: ta !== tb ? (ta > tb ? sa : sb) : (sa >= sb ? sa : sb), ...(ta || tb ? { titleAt: Math.max(ta, tb) } : {}) } : {};
+  // Premières arrivées du jour (xpDay, progression.awardRace) : le jour le plus récent ; le même jour, les circuits des deux côtés (triés) : le bonus n'est pas repayé ailleurs.
+  const xd = (x) => (x && typeof x === 'object' && /^\d{4}-\d{2}-\d{2}$/.test(x.day) && Array.isArray(x.keys) ? x : null);
+  const xa = xd(a.xpDay), xb = xd(b.xpDay);
+  const day = xa && xb ? (xa.day > xb.day ? xa.day : xb.day) : (xa || xb || {}).day;
+  const dayKeys = [xa, xb].filter((x) => x && x.day === day).flatMap((x) => x.keys);
+  const xpDay = xa || xb ? { xpDay: { day, keys: [...new Set(dayKeys)].filter((k) => typeof k === 'string').sort().slice(0, 300) } } : {};
   stats.turbos = Math.max(num(a.stats && a.stats.turbos), num(b.stats && b.stats.turbos));
   const daily2 = a.mutDays || b.mutDays || a.dailyBest || b.dailyBest ? { mutDays, dailyBest: Math.max(num(a.dailyBest), num(b.dailyBest)) } : {};   // meilleure série : au maximum
   const presets = Array.isArray(a.presets) && a.presets.some(Boolean) ? a.presets : (Array.isArray(b.presets) ? b.presets : a.presets);
@@ -95,9 +107,9 @@ export function mergeProfile(local, remote) {
   // Pièces (TECH-029) : modèle additif (js/wallet.js : compteurs par appareil, achats et cadeaux réunis) ; un profil sans portefeuille (ancien client, ancienne sauvegarde)
   // y entre par sa ligne de base, fusionnée par l'ancienne règle (le plus favorable, moins le prix de ce qu'il n'avait pas ; jamais le prix d'un cadeau).
   const out = {
-    ...b, ...a, ...fav, ...drills, ...daily2, ...mergeProgress(a, b),
+    ...b, ...a, ...fav, ...drills, ...daily2, ...mergeProgress(a, b), ...title, ...xpDay,
     id: b.id || a.id,                    // l'identifiant du joueur reste celui du compte
-    owned, medals, eggs, shards, stats, presets, academy, collections, dailyDays, titlesSeen,
+    owned, medals, eggs, shards, stats, presets, academy, collections, dailyDays, titlesSeen, ...(a.goals || b.goals ? { goals } : {}),
     loadout: a.loadout || b.loadout,     // l'appareil courant garde sa personnalisation
   };
   out.wallet = mergeWallets(a, b);

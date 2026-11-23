@@ -82,5 +82,37 @@ await test('achat sur A, gains sur B : l\'achat est déduit UNE fois, les gains 
   assert.equal(profile().coins, 300 - cost + 40); assert.ok(profile().owned['spoiler:gt']);
 });
 
+console.log('TECH-028 : objectifs, titre, premières arrivées du jour');
+const { completeGoal, goalDone } = await import('../js/career.js');
+const { chooseTitle, emptyContext } = await import('../js/rewards.js');
+const { awardRace } = await import('../js/progression.js');
+const patches = () => srv.calls.filter((c) => c.method === 'PATCH' && c.path === '/rest/v1/cloud_saves').length;
+await test('objectif réussi sur B : A le voit réussi, ne le repaie pas ; les deux convergent (une seule récompense)', async () => {
+  const [A, B] = await twoDevices();
+  await on(A); completeGoal('b-a-1#goal'); await account.sync();
+  await on(B); await account.sync(); completeGoal('b-b-2#goal'); await account.sync();
+  await on(A); await account.sync();
+  assert.ok(goalDone('b-b-2#goal'), 'l\'objectif de B est réussi sur A');
+  const before = profile().coins;
+  assert.equal(completeGoal('b-b-2#goal'), 0, 'pas de seconde récompense'); assert.equal(profile().coins, before);
+  await account.sync(); await on(B); await account.sync();
+  assert.ok(goalDone('b-a-1#goal') && goalDone('b-b-2#goal'));
+  assert.equal(profile().coins, 100, 'deux objectifs, deux récompenses de 50 ◆, pas trois');
+});
+await test('titre et premières arrivées du jour différents sur A et B : ils convergent, puis plus AUCUNE écriture (avant : une à chaque synchronisation)', async () => {
+  const [A, B] = await twoDevices();
+  const ctx = { ...emptyContext(), races: 250, turbos: 150 };
+  await on(A); awardRace({ trackKey: 'b-a-1', tier: -1 }, '2026-11-20'); chooseTitle('veteran', ctx); await account.sync();
+  await on(B); await account.sync(); awardRace({ trackKey: 'b-b-2', tier: -1 }, '2026-11-20'); clock.now += 1000; chooseTitle('derapeur', ctx); await account.sync();
+  await on(A); await account.sync();
+  await on(B); await account.sync();
+  await on(A); await account.sync();
+  srv.calls.length = 0;
+  for (const d of [A, B, A, B]) { await on(d); assert.equal(await account.sync(), 'à jour', d); }
+  assert.equal(patches(), 0, 'aucune écriture');
+  assert.deepEqual([...profile().xpDay.keys].sort(), ['b-a-1', 'b-b-2'], 'premières arrivées du jour réunies');
+  const titleB = profile().title; await on(A); assert.equal(profile().title, titleB, 'même titre partout');
+});
+
 await finish('Toutes les reproductions de la fusion passent.');
 process.exit(0);
