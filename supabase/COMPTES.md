@@ -50,7 +50,9 @@ Supabase lève aussi cette vérification. Aucun e-mail n'est jamais envoyé à c
   médailles réunis, statistiques au maximum ; les pièces ne sont jamais inventées (l'achat fait sur un autre appareil est déduit).
 - Ne sont pas synchronisés : réglages de l'appareil (volume, touches, qualité), brouillon de l'éditeur.
 - Création d'un compte depuis un appareil qui a déjà de la progression « invité » : case *Reprendre la progression de cet
-  appareil* (cochée par défaut).
+  appareil* (cochée par défaut). La progression est **déplacée** (0.16.11) : copiée dans le compte, relue, et seulement ensuite effacée de
+  l'invité ; bibliothèques comprises (prefabs, pièces perso, modes, brouillon, preuves de vérification). Si elle ne tient pas dans le
+  stockage, l'invité garde tout et le joueur le sait. Les réglages de l'appareil restent à l'invité.
 - Suppression : *Profil > Supprimer le compte* efface le compte, la sauvegarde, les circuits publiés et les temps en ligne.
 
 ## Tests
@@ -89,3 +91,73 @@ Les circuits publiés avant l'étape 15 gardent un temps `author_verified = fals
 **Limites connues** : une session anonyme est gratuite, donc la limite par pilote se contourne en changeant de session (le plafond global en base borne le total de
 rejeux) ; `ALLOWED_ORIGIN` est `*` tant qu'il n'est pas réglé (la session Supabase est exigée de toute façon) ; le temps de l'auteur d'un circuit de joueur
 (`author_time`, qui donne les médailles de ce circuit) est vérifié par le jeu à la publication mais pas rejoué par la base.
+
+## Modèle d'identité (0.16.11 : TECH-024, TECH-025, TECH-026 ; schéma aussi en tête de `js/online.js`)
+
+```
+première action en ligne        inscription                                          déconnexion
+──────────────────────► INVITÉ (uid A) ──── conversion (serveur prêt) ─────► COMPTE uid A ──────► INVITÉ NEUF (rien d'orphelin)
+  session anonyme                     │     MÊME utilisateur, même uid
+  (POST /auth/v1/signup)              └──── sinon (annoncé au joueur) ─────► COMPTE uid B ──────► INVITÉ uid A retrouvé
+connexion à un compte existant : l'invité A reste tel quel sur l'appareil ; la déconnexion le retrouve.
+```
+
+- **Un compte converti EST l'ancien invité** : ses temps, circuits publiés, « j'aime », amis gardent le même identifiant ; sa ligne `players` prend le
+  pseudo du compte (une seule ligne). À la conversion, la session d'invité quitte la portée de l'invité (sinon, déconnecté, l'invité serait encore
+  le compte) ; la déconnexion ouvre donc un invité neuf, qui ne crée une session anonyme qu'au premier besoin.
+- **La session d'un invité n'est jamais détruite sans raison** : la déconnexion la retrouve (avant 0.16.11, elle l'effaçait : données orphelines,
+  un anonyme de plus à chaque cycle) ; seule une conversion la retire. Un jeton REFUSÉ par le serveur (révoqué) donne une nouvelle identité
+  d'invité, et le joueur en est prévenu.
+- **Deux onglets** : avant de renouveler, le jeu relit la session enregistrée (un autre onglet a pu consommer le jeton, à usage unique) ; le
+  renouvellement se fait sous un verrou entre onglets (`navigator.locks`) ; sans lui (navigateurs anciens), un bail dans le stockage
+  (`copytrack.authLease`, non atomique : il rend la course très improbable, pas impossible) et, sur un refus, une attente qu'un autre onglet ait
+  enregistré sa session. L'évènement `storage` fait suivre la session dans les autres onglets.
+- **Aucun jeton n'est écrit dans un journal** (tools/test-identite.mjs le vérifie sur ses scénarios).
+
+### Prérequis serveur de la conversion (à installer par une étape SQL dédiée : rien n'est appliqué par cette version)
+
+Le jeu ne tente la conversion que si le serveur l'annonce. Tant que ce n'est pas le cas, l'inscription crée un nouvel utilisateur (comme avant), garde
+intacte l'identité d'invité de l'appareil et le dit au joueur : rien n'est jamais converti à moitié.
+
+1. Une fonction `public.account_conversion_ready()` (sans paramètre, `returns boolean`, exécutable par `anon` et `authenticated`) qui renvoie `true`.
+   Absente (projet actuel) : le jeu ne convertit pas.
+2. La ligne `accounts` doit être créée quand un utilisateur ANONYME devient un compte : aujourd'hui, `handle_new_account()` n'est appelée qu'à
+   l'INSERTION dans `auth.users` (`etape4-comptes.sql`), or une conversion est une MISE À JOUR (adresse posée, `is_anonymous` qui passe à faux,
+   `raw_user_meta_data.username`). Mêmes contrôles qu'à l'inscription : domaine technique, pseudo = partie locale de l'adresse, unicité.
+   Sans cette ligne, la sauvegarde cloud du compte est refusée (règle d'insertion de `cloud_saves`) : le jeu le détecte après la conversion et
+   affiche un échec explicite (le joueur reste invité, sa progression intacte), mais la conversion côté Auth ne s'annule pas : ne publier la
+   fonction du point 1 qu'avec le point 2.
+3. *Confirm email* désactivé (ci-dessus) : le jeu le lit dans `/auth/v1/settings` (`mailer_autoconfirm`) avant d'essayer ; activé, il n'essaie pas.
+4. Le domaine technique `accounts.copytrack.invalid` (même remarque que plus haut si le projet le refuse : `email_address_invalid`).
+5. Le déploiement peut couper la conversion sans toucher au serveur : `accounts: { convertAnonymous: false }` dans `js/config.js`.
+
+### Vérification sur un VRAI projet (ce dépôt ne peut pas l'éprouver : les tests utilisent un faux Supabase)
+
+Ne jamais copier un jeton dans un ticket, une capture ou un journal.
+
+1. **Réglages Auth** : `GET /auth/v1/settings` (clé publique) → `mailer_autoconfirm: true`, `external.anonymous_users: true`.
+2. **Conversion côté Auth** : session anonyme (`POST /auth/v1/signup` avec `{}`), puis `PUT /auth/v1/user` avec son jeton et
+   `{ email: "essai@accounts.copytrack.invalid", password, data: { username: "essai" } }` → 200, `is_anonymous: false`, `email` posé (pas de `new_email`
+   en attente), **même** `id`. GoTrue accepte-t-il le mot de passe dans la même requête qu'une adresse pour un anonyme ? À constater. Puis
+   `POST /auth/v1/token?grant_type=password` avec l'adresse : même `id`. Après renouvellement, le jeton ne porte plus `is_anonymous: true`.
+3. **Base** : une fois l'étape SQL des prérequis installée : ligne `accounts` pour cet `id`, `account_conversion_ready()` vrai ; dans le jeu :
+   invité → publier un circuit et envoyer un temps → créer un compte → une seule ligne `players` à ce pseudo, republier le circuit réussit ;
+   déconnexion, reconnexion : temps, circuit et « j'aime » toujours là.
+4. **Réutilisation d'un jeton de renouvellement** : renouveler avec le jeton A (→ B), puis réutiliser A tout de suite, puis au-delà de
+   l'intervalle de réutilisation du projet (*Refresh token reuse interval*, 10 s par défaut d'après la documentation de Supabase, à confirmer) :
+   noter la réponse, et si B est encore utilisable (révocation de la famille : *Detect and revoke potentially compromised refresh tokens*).
+5. **Deux onglets** : ouvrir le jeu dans deux onglets, forcer l'expiration (outils du navigateur : `expires_at` à 1 dans `shardway.online.session`
+   ou `copytrack.account`), agir dans les deux : même identifiant d'invité, aucun « Session expirée » ; recommencer dans un navigateur sans
+   `navigator.locks` si possible (repli).
+6. **Limite d'inscriptions anonymes** (*Authentication › Rate limits*, 30 par heure et par adresse relevé en 0.9.59) : un cycle invité →
+   compte → déconnexion → reconnexion ne doit plus consommer d'inscription anonyme (compter les `auth.users` anonymes créés pendant l'essai).
+
+### Données orphelines laissées par l'ancien comportement (avant 0.16.11)
+
+Rien n'est modifié automatiquement : on ne peut pas prouver, côté serveur, qu'un utilisateur anonyme et un compte sont la même personne.
+- Les repérer en lecture seule : lignes `players` de même `lower(name)` dont l'une appartient à un utilisateur anonyme et l'autre à un compte ;
+  circuits publiés par des anonymes inactifs. Les anonymes inactifs 12 mois sont déjà purgés par `purge_expired()` (étape 18, si appliquée).
+- Un joueur qui s'est inscrit avec une ancienne version SANS se déconnecter depuis a encore la session de son ancien invité sur son appareil
+  (seule la déconnexion l'effaçait) : un rattachement futur pourrait s'appuyer sur cette preuve de possession (fonction serveur à concevoir,
+  hors de cette version). Pour un joueur déjà déconnecté, l'ancienne session est perdue : aucune action automatique n'est possible.
+

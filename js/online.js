@@ -3,6 +3,21 @@
 // d'authentification. Seule la clé PUBLIQUE est ici : la sécurité vient des règles
 // de la base (voir supabase/etape1-communaute.sql). Sans réseau, le jeu marche
 // normalement et ces fonctions répondent simplement « hors ligne ».
+//
+// MODÈLE D'IDENTITÉ (TRANS-11 ; détails, prérequis serveur et vérification réelle : supabase/COMPTES.md)
+//
+//   première action en ligne                 inscription (« Créer mon compte »)                    déconnexion
+//   ───────────────────────► INVITÉ ─────────────────────────────────────────────► COMPTE ───────────────────► INVITÉ
+//   session anonyme créée      uid A  ── conversion (serveur prêt) : MÊME uid A ──►  uid A    (l'invité était A : sa session a été
+//   (POST /auth/v1/signup)            │  PUT /auth/v1/user : adresse, mot de passe          retirée ; un invité NEUF, rien d'orphelin)
+//                                     └─ sinon (annoncé) : nouvel utilisateur uid B ──► uid B ──────────────► INVITÉ uid A retrouvé
+//   connexion à un compte existant : l'invité A reste tel quel sur l'appareil ; la déconnexion le retrouve.
+//
+//   Où sont les sessions : invité → `online.session` dans la portée de l'invité (storage.js, jamais dans un code joueur : DEVICE_ONLY_KEYS) ;
+//   compte → la clé globale `copytrack.account` (account.js). Une session d'invité n'est retirée QUE lorsqu'elle est devenue celle d'un compte.
+//   Renouvellement (jeton à usage unique) : relire la session enregistrée, puis renouveler sous verrou entre onglets (navigator.locks ; repli : bail
+//   `copytrack.authLease`), écouter l'évènement « storage ». Un vrai refus du serveur (jeton révoqué) : compte → « session expirée » ; invité → une
+//   nouvelle identité, ANNONCÉE (onNotice). Aucun jeton n'est jamais écrit dans un journal.
 import { getJSON, setJSON, getGlobal, setGlobal, scopedKey, globalKey } from './storage.js';
 import { CONFIG } from './config.js';
 import { MAX_PUBLISH_CHARS, MAX_PUBLISH_PIECES } from './constants.js';
