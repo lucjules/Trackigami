@@ -157,6 +157,22 @@ await test('plusieurs niveaux d\'allègement : sans fantômes d\'abord ; si cela
   assert.ok(/n’y sont pas écrits/.test(account.note), account.note);
 });
 
+await test('reloadProfile() ne planifie JAMAIS de synchronisation (cause de la boucle : il réécrivait le profil par le crochet d\'écriture) ; une vraie modification du joueur, si', async () => {
+  boot('R');
+  await account.signUp('Rel_01', 'motdepasse1');
+  await advance(10_000);
+  assert.equal(timers.size, 0);
+  const stored = device('R').local.m.get(`shardwayacct.${account.uid}.profile`);
+  device('R').local.m.set(`shardwayacct.${account.uid}.profile`, JSON.stringify({ coins: 5 }));      // (profil incomplet : profile() va le remettre en forme et l'écrire)
+  reloadProfile();
+  assert.equal(timers.size, 0, 'rien de planifié'); assert.equal(account._dirty, false);
+  assert.ok(device('R').local.m.get(`shardwayacct.${account.uid}.profile`).includes('"stats"'), 'le profil relu a bien été remis en forme et écrit');
+  assert.ok(stored);
+  profile().coins += 1; (await import('../js/profile.js')).saveProfile();
+  assert.equal(timers.size, 1, 'une modification du joueur planifie la synchronisation');
+  await advance(5000);
+});
+
 console.log('TECH-074 : sauvegarde au-delà de la limite d\'envoi (6 Mo)');
 const bytes = (o) => JSON.stringify(o).length;
 const bigLocal = (n, ghost, inputs) => { for (let i = 0; i < n; i++) storage.saveRecord('b-g' + i + '-x', rec(30 + i * 0.1, 2000 + i, { ghost: ghost ? 'g'.repeat(ghost) : null, inputs: inputs ? 'i'.repeat(inputs) : 'x' })); };

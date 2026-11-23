@@ -18,7 +18,7 @@ Audit : `TECH-007` (P1), `TECH-022`, `TECH-074`, `TECH-075`, `TECH-078` ; cause 
 - **Une sauvegarde de plus de 6 Mo n'est plus renvoyée à chaque synchronisation** (`TECH-074`) : on compare ce qui partirait (fusion allégée) à la copie du cloud : plus de PATCH de ≈ 6 Mo ni de `rev` incrémenté pour rien. Au-delà de la limite, sans fantômes, puis sans les commandes des plus anciens records, jusqu'à tenir. À confirmer en production : le comportement réel au-delà de la limite de la base (8 Mo compressés évoqués par l'audit) n'a pas pu être essayé ici.
 - **Un import avec le stockage plein n'annonce plus « Sauvegarde restaurée ! »** (`TECH-075`) : `applySave` lève `StorageFullError`, rien n'est modifié (écriture atomique), le joueur lit « Stockage plein : la sauvegarde n'a pas été restaurée… ». Les essais d'éditeur sont libérés avant de renoncer.
 - **Le code joueur ne contient plus l'identifiant d'installation** (`TECH-078`) : `telemetry.state` et `errors.queue` rejoignent `DEVICE_ONLY_KEYS` (jamais exportés, jamais importés, ceux de l'appareil survivent à un « Remplacer »). L'export des données du joueur (RGPD) garde l'identifiant (c'est sa donnée) mais jamais la session, le profil en ligne, la preuve ni les essais d'éditeur.
-- Tests : `tools/test-quota-sauvegardes.mjs` (21 tests, tous en échec sur le code d'avant), temps virtuel et quota simulés (`tools/fake-supabase.mjs`).
+- Tests : `tools/test-quota-sauvegardes.mjs` (22 tests, tous en échec sur le code d’avant), temps virtuel et quota simulés (`tools/fake-supabase.mjs`).
 
 ## Bêta 0.16.8 — éditeur : neuf défauts indépendants (calques, groupes, états gardés, sélection, collage, sortie)
 
