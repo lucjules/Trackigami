@@ -4,11 +4,11 @@
 // et sur leur forme cloud {clé: valeur JSON} (jsonb côté base). La fusion ne perd jamais de progression :
 //  - records : le meilleur temps gagne (à version de physique égale) ;
 //  - circuits : union par identifiant, le plus récent gagne ; les pierres tombales effacent les circuits supprimés ;
-//  - profil : médailles et objets réunis, statistiques au maximum, pièces sans jamais en inventer ; favoris réunis (pierres tombales) ;
+//  - profil : médailles et objets réunis, statistiques au maximum, pièces additives (js/wallet.js : rien de perdu, rien d'inventé) ; favoris réunis (pierres tombales) ;
 //    exercices de l'Académie : meilleur niveau et meilleure mesure ; mutations du jour réunies, meilleure série au maximum ;
 //    expérience au maximum, licences réunies (date la plus ancienne), défis de maîtrise réunis ;
 //  - dernières courses (runs.*) : réunies, les plus récentes gardées.
-import { itemCost } from './cosmetics.js';
+import { mergeWallets, balance } from './wallet.js';
 import { mergeFavorites } from './favorites.js';
 import { cleanRuns, validRecord, validTrackEntry, isTrialName } from './storage.js';
 import { mergeDrills } from './skills.js';
@@ -72,14 +72,6 @@ function mergeTracks(a, b, gone) {
   return [...map.values()].filter((t) => !(gone[t.id] != null && num(gone[t.id]) >= num(t.updated)));
 }
 
-// Pièces : chaque côté a pu acheter des objets que l'autre n'a pas. On réunit les objets, puis on retire au côté
-// le prix de ceux qu'il n'avait pas, et on garde le plus favorable des deux. Jamais plus que ce qu'un côté avait.
-function mergeCoins(a, b, owned) {
-  const lacking = (side) => Object.keys(owned).filter((k) => !(k in obj(side.owned)))
-    .reduce((sum, k) => { const [cat, ...id] = k.split(':'); return sum + num(itemCost(cat, id.join(':'))); }, 0);
-  return Math.max(0, num(a.coins) - lacking(a), num(b.coins) - lacking(b));
-}
-
 export function mergeProfile(local, remote) {
   const a = obj(local), b = obj(remote);
   if (!Object.keys(a).length) return { ...b };
@@ -100,12 +92,17 @@ export function mergeProfile(local, remote) {
   const presets = Array.isArray(a.presets) && a.presets.some(Boolean) ? a.presets : (Array.isArray(b.presets) ? b.presets : a.presets);
   const fav = (a.favorites || b.favorites || a.favDel || b.favDel) ? mergeFavorites(a, b) : {};      // favoris du Race Hub (favorites.js)
   const drills = a.drills || b.drills ? { drills: mergeDrills(a.drills, b.drills) } : {};         // exercices de l'Académie (skills.js) : meilleur niveau, meilleure mesure
-  return {
+  // Pièces (TECH-029) : modèle additif (js/wallet.js : compteurs par appareil, achats et cadeaux réunis) ; un profil sans portefeuille (ancien client, ancienne sauvegarde)
+  // y entre par sa ligne de base, fusionnée par l'ancienne règle (le plus favorable, moins le prix de ce qu'il n'avait pas ; jamais le prix d'un cadeau).
+  const out = {
     ...b, ...a, ...fav, ...drills, ...daily2, ...mergeProgress(a, b),
     id: b.id || a.id,                    // l'identifiant du joueur reste celui du compte
-    coins: mergeCoins(a, b, owned), owned, medals, eggs, shards, stats, presets, academy, collections, dailyDays, titlesSeen,
+    owned, medals, eggs, shards, stats, presets, academy, collections, dailyDays, titlesSeen,
     loadout: a.loadout || b.loadout,     // l'appareil courant garde sa personnalisation
   };
+  out.wallet = mergeWallets(a, b);
+  out.coins = balance(out, out.wallet);
+  return out;
 }
 
 // local, remote : formes cloud {clé: valeur}. Renvoie la forme cloud fusionnée.

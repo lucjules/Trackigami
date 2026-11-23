@@ -1,7 +1,7 @@
 // Récompenses (0.9.18) : titres affichés au classement, éléments EXCLUSIFS du garage (qui ne s'achètent pas), collections à thème. Données et règles pures : le contexte (médailles, défis, leçons…) est
 // rassemblé par app/rewards.js, ici on décide seulement ce qui est mérité. Rien ne touche à la physique ni aux temps : tout est visuel.
 import { CATALOG } from './cosmetics.js';
-import { profile, saveProfile, addCoins, owns } from './profile.js';
+import { profile, saveProfile, addCoins, owns, grantGift } from './profile.js';
 import { streakOf } from './mutations.js';
 import { LEVEL_REWARDS } from './progression.js';
 
@@ -68,7 +68,7 @@ export function grantRewards(ctx) {
   const out = { exclusives: [], collections: [], titles: [] };
   for (const e of EXCLUSIVES) {
     if (!e.test(ctx) || p.owned[e.cat + ':' + e.id]) continue;
-    p.owned[e.cat + ':' + e.id] = 1;
+    grantGift(e.cat, e.id);
     out.exclusives.push({ cat: e.cat, id: e.id, label: ((CATALOG[e.cat] || []).find((x) => x.id === e.id) || {}).label || e.id });
   }
   for (const col of COLLECTIONS) {

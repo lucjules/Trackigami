@@ -1,9 +1,10 @@
 // Profil du joueur : pièces, objets débloqués, équipement, code de sauvegarde.
 // Le jeu est 100 % statique (aucun serveur) : le « code joueur » est la sauvegarde
 // elle-même, compressée, à copier / coller ou à télécharger sous forme de fichier.
-import { getJSON, setJSON, dumpAll, restoreAllOrThrow, DEVICE_ONLY_KEYS, isTrialName } from './storage.js';
+import { getJSON, setJSON, getGlobal, setGlobal, dumpAll, restoreAllOrThrow, DEVICE_ONLY_KEYS, isTrialName } from './storage.js';
 import { DEFAULT_LOADOUT, itemCost, sanitizeLoadout, itemsOf, exclusiveOf } from './cosmetics.js';
 import { hashString } from './track.js';
+import { settle, fromWallet, recordPurchase, recordGift } from './wallet.js';
 
 const ID_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -13,6 +14,22 @@ function newPlayerId() {
   (globalThis.crypto || { getRandomValues: (x) => x.map(() => Math.random() * 256) }).getRandomValues(a);
   for (let i = 0; i < 10; i++) s += ID_CHARS[a[i] % ID_CHARS.length] + (i === 4 ? '-' : '');
   return s;
+}
+
+// Identifiant de CET appareil pour les compteurs de pièces (wallet.js) : aléatoire, propre au navigateur (clé globale « copytrack.device », hors de toute portée : jamais dans un
+// code joueur, une sauvegarde partagée ni l'export ; il ne sert qu'à nommer les compteurs de l'appareil dans le profil). Renouvelé après un import « Remplacer » : les compteurs
+// importés de cet appareil pourraient être plus anciens que ceux du cloud, et un compteur ne doit jamais reculer.
+const DEVICE_RE = /^[a-z0-9]{10}$/;
+export function deviceId() {
+  let id = getGlobal('device', '');
+  if (!DEVICE_RE.test(id || '')) { id = newDeviceId(); setGlobal('device', id); }
+  return id;
+}
+export function rotateDevice() { const id = newDeviceId(); setGlobal('device', id); return id; }
+function newDeviceId() {
+  const a = new Uint8Array(10);
+  (globalThis.crypto || { getRandomValues: (x) => x.map(() => Math.random() * 256) }).getRandomValues(a);
+  return Array.from(a, (b) => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
 }
 
 const DEFAULT = () => ({
@@ -31,13 +48,15 @@ export function profile() {
     cache.medals = cache.medals && typeof cache.medals === 'object' ? cache.medals : {};
     cache.stats = { races: 0, earned: 0, ...(cache.stats || {}) };
     if (!cache.id) cache.id = newPlayerId();
+    fromWallet(cache);          // pièces : le portefeuille fait foi ; un profil d'avant 0.16.10 y est migré (ligne de base = son solde : le total ne change pas)
     setJSON('profile', cache, { quiet: quietLoad });
   }
   return cache;
 }
 
+// (les pièces changées par le code de cet appareil depuis la dernière écriture sont portées à son compteur : wallet.settle)
 export function saveProfile() {
-  if (cache) setJSON('profile', cache);
+  if (cache) { settle(cache, deviceId()); setJSON('profile', cache); }
 }
 
 // Relit le profil depuis le stockage (après une restauration, une synchronisation, un changement de compte). Ne déclenche JAMAIS de synchronisation : elle écrit le profil remis en forme
@@ -63,10 +82,19 @@ export function buy(items) {
   const cost = totalCost(items);
   if (cost > p.coins) return false;
   if (items.some(([c, id]) => exclusiveOf(c, id))) return false;       // un exclusif ne s'achète jamais
+  settle(p, deviceId());                     // (le solde d'avant l'achat est bien celui du portefeuille)
   p.coins -= cost;
   for (const [c, id] of items) p.owned[c + ':' + id] = 1;
+  recordPurchase(p, items);                  // l'achat est une clé du portefeuille : payé une fois, même s'il est refait hors ligne sur un autre appareil
   saveProfile();
   return true;
+}
+
+// Objet OFFERT (code caché, exclusif mérité) : possédé, et marqué pour n'être jamais déduit des pièces à la fusion (TECH-029). L'appelant écrit le profil.
+export function grantGift(cat, id) {
+  const p = profile(), k = cat + ':' + id;
+  p.owned[k] = 1;
+  recordGift(p, k);
 }
 
 export function addCoins(n) {
@@ -214,6 +242,7 @@ export function applySave(obj, mode = 'replace', now = Date.now()) {
     const own = {};
     for (const k of DEVICE_ONLY_KEYS) if (typeof cur[k] === 'string') own[k] = cur[k];      // l'identité en ligne de CET appareil survit à une restauration
     restoreAllOrThrow({ ...obj.data, ...own });
+    rotateDevice();          // les compteurs de pièces importés de cet appareil peuvent être plus anciens que ceux du cloud : les gains qui suivent vont à un compteur neuf (wallet.js)
   } else {
     const out = { ...cur };
     for (const [k, v] of Object.entries(obj.data)) {
