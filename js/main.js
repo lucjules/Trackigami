@@ -580,6 +580,7 @@ const NO_WEBGL = 'Ce navigateur n’a pas pu démarrer la 3D (WebGL 2). Active l
     window.copytrack = app;      // accès de débogage et des tests navigateur (tools/test-browser.mjs)
     app.start();
     account.onNotice = (msg) => app.ui.flash(msg, 6);      // l'espace de l'appareil ne suffit pas à la sauvegarde du compte (TECH-007) : le joueur le sait
+    online.onNotice = (msg) => app.ui.flash(msg, 6);      // une nouvelle identité d'invité n'est jamais créée en silence (TECH-026)
     onProfileChange(() => app.ui.updateCoins());          // un autre onglet a écrit le profil (TECH-027) : les pièces affichées suivent
     if (identity.kind === 'account') account.sync().catch(() => { /* hors ligne : reprise plus tard */ });
   } catch (err) {

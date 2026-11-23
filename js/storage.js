@@ -16,6 +16,7 @@ export function setScope(accountId) {
 export const getScope = () => (PREFIX === GUEST_PREFIX ? '' : PREFIX.slice('shardwayacct.'.length, -1));
 
 // Clés hors portée (identité du compte, marqueur de session invité) : lues avant de choisir la portée.
+export const globalKey = (key) => 'copytrack.' + key;
 export function getGlobal(key, fallback = null) {
   try { const v = localStorage.getItem('copytrack.' + key); return v == null ? fallback : JSON.parse(v); } catch { return fallback; }
 }

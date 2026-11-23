@@ -3,7 +3,7 @@
 // d'authentification. Seule la clé PUBLIQUE est ici : la sécurité vient des règles
 // de la base (voir supabase/etape1-communaute.sql). Sans réseau, le jeu marche
 // normalement et ces fonctions répondent simplement « hors ligne ».
-import { getJSON, setJSON } from './storage.js';
+import { getJSON, setJSON, getGlobal, setGlobal, scopedKey, globalKey } from './storage.js';
 import { CONFIG } from './config.js';
 import { MAX_PUBLISH_CHARS, MAX_PUBLISH_PIECES } from './constants.js';
 import { PHYS_VER } from './version.js';
@@ -67,6 +67,12 @@ export function versionMismatchText(err, physVer) {
 const refusedToken = (e) => !!e && (e.status === 400 || e.status === 401 || e.status === 403);
 const transient = (e) => (e && e.code === 'offline' ? e : new OnlineError('Serveur momentanément indisponible : réessaie dans un instant.', 'offline', e && e.status));
 
+const AUTH_LOCK = 'trackigami-auth';
+// Une session encore valable au moins une minute.
+const fresh = (s) => !!(s && s.access_token && s.expires_at && s.expires_at * 1000 > Date.now() + 60000);
+const sessionOf = (txt) => { try { const s = JSON.parse(txt); return s && typeof s === 'object' && s.access_token && s.refresh_token && s.user && s.user.id ? s : null; } catch { return null; } };
+export const NEW_GUEST_IDENTITY = 'Ta session d’invité n’est plus reconnue par le serveur : une nouvelle identité en ligne a été créée (tes anciens temps et circuits publiés restent sous l’ancienne).';
+
 class OnlineClient {
   constructor() {
     this.kind = 'guest';                 // 'guest' : session anonyme ; 'account' : session du compte (voir account.js)
@@ -74,7 +80,13 @@ class OnlineClient {
     this.player = getJSON('online.player', null);
     this.onAccountSession = null;        // appelé quand la session du compte est renouvelée (pour la mémoriser)
     this._authP = null;
+    this._onNotice = null; this._pending = [];
   }
+
+  // Ce que le joueur doit savoir (une nouvelle identité d'invité, jamais en silence) : l'application le montre ; en attendant qu'elle soit prête, c'est gardé.
+  get onNotice() { return this._onNotice; }
+  set onNotice(fn) { this._onNotice = fn; if (fn) for (const m of this._pending.splice(0)) { try { fn(m); } catch { /* l'affichage ne casse rien */ } } }
+  _announce(msg) { if (this._onNotice) { try { this._onNotice(msg); } catch { /* idem */ } } else this._pending.push(msg); }
 
   // Passe en mode compte : la session est celle du compte, jamais une session anonyme de remplacement.
   useAccount(session) {
@@ -90,6 +102,68 @@ class OnlineClient {
     this.player = null;
     setJSON('online.session', null);
     setJSON('online.player', null);
+  }
+
+  // La session telle qu'enregistrée sur l'appareil (un autre onglet a pu la renouveler) : celle de l'invité dans sa portée, celle du compte dans la clé globale du compte.
+  _stored() {
+    if (this.kind === 'account') { const g = getGlobal('account', null); return g && g.session && g.uid === this.uid ? g.session : null; }
+    return getJSON('online.session', null);
+  }
+  // Reprend la session enregistrée si elle est plus récente que la nôtre (même compte ; pour l'invité : l'identité de l'appareil). Renvoie true si elle a été reprise.
+  _adoptStored() {
+    const st = this._stored();
+    if (!st || !st.access_token || !st.refresh_token || !st.user || !st.user.id) return false;
+    const s = this.session;
+    if (s && st.refresh_token === s.refresh_token) return false;
+    if (s && this.kind === 'account' && st.user.id !== s.user.id) return false;
+    if (s && st.user.id === s.user.id && (+st.expires_at || 0) < (+s.expires_at || 0)) return false;
+    this.session = st;
+    if (this.kind === 'guest') this.player = getJSON('online.player', null);
+    return true;
+  }
+  // Évènement « storage » (un autre onglet a écrit) : la session renouvelée là-bas est reprise ici tout de suite.
+  storageEvent(e) {
+    if (!e || typeof e.key !== 'string') return false;
+    if (this.kind === 'guest' && e.key !== scopedKey('online.session')) return false;
+    if (this.kind === 'account' && e.key !== globalKey('account')) return false;
+    if (this.kind === 'guest' && !sessionOf(e.newValue)) return false;
+    return this._adoptStored();
+  }
+
+  // Verrou entre onglets pour renouveler (Web Locks API : un seul onglet à la fois, les autres attendent puis relisent la session enregistrée). Sans navigator.locks
+  // (navigateur ancien), REPLI : un bail dans le stockage (clé globale « authLease » : qui renouvelle, jusqu'à quand), écrit puis relu après un court délai ; il n'est pas
+  // atomique (deux onglets peuvent, rarement, se croire seuls), d'où aussi la relecture de la session avant d'envoyer le jeton et l'attente, sur un refus, qu'un autre onglet ait
+  // enregistré la sienne (_awaitOther). Un bail abandonné (onglet fermé) expire seul au bout de 8 s.
+  _withLock(fn) {
+    const locks = typeof navigator !== 'undefined' && navigator && navigator.locks;
+    return locks && typeof locks.request === 'function' ? locks.request(AUTH_LOCK, fn) : this._leaseLock(fn);
+  }
+  async _leaseLock(fn) {
+    const me = this._tab || (this._tab = Math.random().toString(36).slice(2, 10));
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    for (let i = 0; i < 24; i++) {
+      const l = getGlobal('authLease', null);
+      if (!l || !(l.until > Date.now()) || l.owner === me) {
+        setGlobal('authLease', { owner: me, until: Date.now() + 8000 });
+        await wait(60);                                    // (un autre onglet qui écrit en même temps se manifeste)
+        const l2 = getGlobal('authLease', null);
+        if (l2 && l2.owner === me) {
+          try { return await fn(); } finally { const l3 = getGlobal('authLease', null); if (l3 && l3.owner === me) setGlobal('authLease', null); }
+        }
+      }
+      await wait(250);
+    }
+    return fn();                                           // (bail jamais obtenu en ~7 s : on renouvelle quand même, la relecture protège encore)
+  }
+  async _awaitOther(used) {
+    for (let i = 0; i < 6; i++) {
+      if (this._adoptStored() && this.session.refresh_token !== used) return this.session;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return this._adoptStored() && this.session.refresh_token !== used ? this.session : null;
+  }
+  async _refresh(s) {
+    return this._norm(await this._fetch('/auth/v1/token?grant_type=refresh_token', { method: 'POST', body: { refresh_token: s && s.refresh_token }, auth: false }));
   }
 
   // Appel REST authentifié (utilisé par account.js).
@@ -136,43 +210,50 @@ class OnlineClient {
     return data;
   }
 
-  // Session anonyme : créée au premier besoin, rafraîchie avant expiration.
+  // Session anonyme : créée au premier besoin, rafraîchie avant expiration. Deux onglets (TECH-026) : chacun relit la session ENREGISTRÉE avant de renouveler (un autre a pu
+  // le faire : son jeton de renouvellement, à usage unique, est alors déjà consommé), sous un verrou entre onglets ; un refus n'est un vrai refus qu'après relecture.
   async ensureSession() {
-    const s = this.session;
-    if (s && s.access_token && s.expires_at && s.expires_at * 1000 > Date.now() + 60000) return s;
-    if (!this._authP) {
-      this._authP = (async () => {
-        try {
-          if (this.kind === 'account') {
-            // Compte : on renouvelle SA session. Jamais de repli sur une session anonyme (ce serait un autre joueur).
-            try {
-              this.session = this._norm(await this._fetch('/auth/v1/token?grant_type=refresh_token', { method: 'POST', body: { refresh_token: s && s.refresh_token }, auth: false }));
-            } catch (e) {
-              if (!refusedToken(e)) throw transient(e);      // réseau coupé, serveur en panne ou trop d'essais : la session est conservée, on réessaiera
-              throw new OnlineError('Session expirée : reconnecte-toi.', 'session-expired');
-            }
-            this._save();
-            return this.session;
-          }
-          if (s && s.refresh_token) {
-            try {
-              this.session = this._norm(await this._fetch('/auth/v1/token?grant_type=refresh_token', { method: 'POST', body: { refresh_token: s.refresh_token }, auth: false }));
-              this._save();
-              return this.session;
-            } catch (e) {
-              // Seul un jeton REFUSÉ par le serveur donne une nouvelle session anonyme (donc un autre pilote). Une panne passagère (réseau, 5xx, trop
-              // d'essais) ne doit pas faire perdre son identité à l'invité : l'erreur remonte et la session est gardée pour le prochain essai.
-              if (!refusedToken(e)) throw transient(e);
-            }
-          }
-          this.session = this._norm(await this._fetch('/auth/v1/signup', { method: 'POST', body: { data: {} }, auth: false }));
-          this.player = null;
-          this._save();
-          return this.session;
-        } finally { this._authP = null; }
-      })();
-    }
+    if (!fresh(this.session)) this._adoptStored();
+    if (fresh(this.session)) return this.session;
+    // (le verrou ne sert qu'à RENOUVELER un jeton existant : une toute première session n'a rien à protéger)
+    if (!this._authP) this._authP = Promise.resolve(this.session && this.session.refresh_token ? this._withLock(() => this._renew()) : this._renew()).finally(() => { this._authP = null; });
     return this._authP;
+  }
+
+  async _renew() {
+    this._adoptStored();                                  // (pendant l'attente du verrou, un autre onglet a peut-être renouvelé)
+    if (fresh(this.session)) return this.session;
+    const s = this.session;
+    if (this.kind === 'account') {
+      // Compte : on renouvelle SA session. Jamais de repli sur une session anonyme (ce serait un autre joueur).
+      try { this.session = await this._refresh(s); } catch (e) {
+        if (!refusedToken(e)) throw transient(e);        // réseau coupé, serveur en panne ou trop d'essais : la session est conservée, on réessaiera
+        const other = await this._awaitOther(s && s.refresh_token);
+        if (other) return other;                           // un autre onglet l'avait renouvelée : rien n'est perdu
+        throw new OnlineError('Session expirée : reconnecte-toi.', 'session-expired');
+      }
+      this._save();
+      return this.session;
+    }
+    if (s && s.refresh_token) {
+      try {
+        this.session = await this._refresh(s);
+        this._save();
+        return this.session;
+      } catch (e) {
+        // Seul un jeton REFUSÉ par le serveur donne une nouvelle session anonyme (donc un autre pilote). Une panne passagère (réseau, 5xx, trop
+        // d'essais) ne doit pas faire perdre son identité à l'invité : l'erreur remonte et la session est gardée pour le prochain essai.
+        if (!refusedToken(e)) throw transient(e);
+        const other = await this._awaitOther(s.refresh_token);
+        if (other) return other;
+      }
+    }
+    const had = !!(s && s.user && s.user.id);
+    this.session = this._norm(await this._fetch('/auth/v1/signup', { method: 'POST', body: { data: {} }, auth: false }));
+    this.player = null;
+    this._save();
+    if (had) this._announce(NEW_GUEST_IDENTITY);           // l'ancienne identité est perdue côté serveur : le joueur le sait
+    return this.session;
   }
 
   _norm(d) {
@@ -412,3 +493,5 @@ class OnlineClient {
 }
 
 export const online = new OnlineClient();
+// Un autre onglet a renouvelé la session (TECH-026) : on la reprend sans attendre le prochain appel.
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('storage', (e) => online.storageEvent(e));
