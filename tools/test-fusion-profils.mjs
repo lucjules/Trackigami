@@ -275,5 +275,40 @@ await test('sans écriture pendant la synchronisation : une seule lecture, aucun
   assert.equal(timers.size, 0); assert.equal(account._dirty, false);
 });
 
+console.log('De bout en bout : vrais appareils simulés (profil, synchronisation, faux Supabase)');
+await test('500 parties à 2 ou 3 appareils, opérations au hasard (gains, achats, cadeaux, objectifs, médailles, réseau coupé) : convergence, pièces exactes, rien de perdu', async () => {
+  const { grantGift, rewardCoins } = P;
+  const items = [['spoiler', 'gt'], ['spoiler', 'duck'], ['led', 'cyan'], ['wheels', 'neon'], ['decal', 'stripe']];
+  for (let g = 1; g <= 500; g++) {
+    let x = (g * 40503) >>> 0; const rnd = () => (x = (x * 1664525 + 1013904223) >>> 0) / 4294967296;
+    const n = g % 2 ? 2 : 3, name = 'Fz_' + g;
+    srv.offline = false; srv.delay = {};
+    const devs = Array.from({ length: n }, (_, i) => 'Z' + g + '-' + i);
+    boot(devs[0]); await account.signUp(name, 'motdepasse1');
+    for (const d of devs.slice(1)) { boot(d); await account.signIn(name, 'motdepasse1'); }
+    let gained = 0; const bought = new Set(), goals = new Set(), medals = {}, owned = new Set();
+    for (let i = 0; i < 18; i++) {
+      await on(devs[Math.floor(rnd() * n)]);
+      srv.offline = rnd() < 0.3;
+      const r = rnd();
+      if (r < 0.3) { const c = 1 + Math.floor(rnd() * 150); addCoins(c); gained += c; }
+      else if (r < 0.45) { const it = items[Math.floor(rnd() * items.length)], k = it.join(':'); if (!profile().owned[k] && profile().coins >= itemCost(...it) && buy([it])) { bought.add(k); owned.add(k); } }
+      else if (r < 0.52) { if (!profile().eggs.konami) { profile().eggs.konami = 1; grantGift('led', 'rainbow'); addCoins(100); gained += 100; owned.add('led:rainbow'); } }
+      else if (r < 0.65) { const k = 'b-g' + Math.floor(rnd() * 3) + '#goal'; gained += completeGoal(k); goals.add(k); }
+      else if (r < 0.85) { const k = 'b-m' + Math.floor(rnd() * 3), t = Math.floor(rnd() * 4); gained += rewardCoins({ tier: t, trackKey: k }).coins; medals[k] = Math.min(medals[k] ?? 9, t); }
+      await account.sync().catch(() => {});
+    }
+    srv.offline = false;
+    for (let round = 0; round < 2; round++) for (const d of devs) { await on(d); await account.sync(); }
+    const cloud = cloudOf().profile;
+    const expect = gained - [...bought].reduce((t, k) => t + itemCost(...k.split(':')), 0);
+    assert.equal(cloud.coins, expect, `partie ${g} : pièces ${cloud.coins}, attendu ${expect}`);
+    for (const d of devs) { await on(d); assert.equal(profile().coins, expect, `partie ${g} : ${d}`); assert.equal(await account.sync(), 'à jour', `partie ${g} : ${d} converge`); }
+    for (const k of owned) assert.ok(cloud.owned[k], `partie ${g} : objet ${k}`);
+    for (const k of goals) assert.ok(cloud.goals[k], `partie ${g} : objectif ${k}`);
+    for (const [k, t] of Object.entries(medals)) assert.equal(cloud.medals[k], t, `partie ${g} : médaille ${k}`);
+  }
+});
+
 await finish('Toutes les reproductions de la fusion passent.');
 process.exit(0);
