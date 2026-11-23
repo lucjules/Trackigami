@@ -36,6 +36,7 @@ export default {
   'Délai dépassé.': 'Timed out.',
   'Comptes non installés sur le serveur (étape 4 SQL).': 'Accounts are not installed on the server (SQL step 4).',
   'Ce pseudo est déjà pris.': 'This username is already taken.',
+  'Compte créé, mais ta progression d’invité n’a pas pu y être reprise (stockage plein) : elle reste, intacte, en mode invité sur cet appareil. Pour la reprendre : en mode invité, Profil › Sauvegardes › Exporter le code joueur, puis importe-le dans le compte.': 'Account created, but your guest progress could not be moved into it (storage full): it stays, intact, in guest mode on this device. To bring it over: in guest mode, Profile › Saves › Export the player code, then import it into the account.',
   'Compte créé, mais le serveur exige une confirmation par e-mail (voir COMPTES.md).': 'Account created, but the server requires e-mail confirmation (see COMPTES.md).',
   'Pseudo ou mot de passe incorrect.': 'Wrong username or password.',
   'Synchronisation interrompue (conflit répété) : réessaie dans un instant.': 'Sync interrupted (repeated conflict): try again in a moment.',

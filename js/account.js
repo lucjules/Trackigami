@@ -9,7 +9,8 @@
 // au lieu d'écraser : aucune progression perdue si deux appareils ont joué.
 import { online, OnlineError } from './online.js';
 import {
-  getGlobal, setGlobal, setScope, getSessionFlag, setSessionFlag, dumpAll, restoreAll, restoreFitting, onWrite, loadSettings, saveSettings, removeKeys,
+  getGlobal, setGlobal, setScope, getScope, getSessionFlag, setSessionFlag, dumpAll, restoreAll, restoreFitting, restoreAllOrThrow, getRaw, onWrite, loadSettings, saveSettings, removeKeys,
+  isTrialName, StorageFullError,
 } from './storage.js';
 import { toCloud, fromCloud, mergeSaves, sameData, pickSynced, fitCloud, isSyncKey } from './cloudsave.js';
 import { reloadProfile } from './profile.js';
@@ -21,6 +22,10 @@ const MAX_CLOUD_BYTES = 6_000_000;     // au-delà, les fantômes enregistrés (
 
 // Messages quand la copie locale du compte ne tient pas dans le stockage de l'appareil (le cloud, lui, garde tout).
 const FIT_FAILED = 'Espace insuffisant sur cet appareil : la sauvegarde du compte n’a pas pu y être écrite (le cloud la garde). Libère de la place sur l’appareil, puis « Synchroniser maintenant ».';
+// « Garder ma progression » (TECH-024) : ce qui passe de l'invité au compte : TOUTE la progression et les bibliothèques (circuits, records, profil, prefabs, pièces perso, modes,
+// brouillon, preuves de vérification…). Restent à l'appareil : ses réglages, l'identité en ligne de l'invité, les statistiques et erreurs en attente, les essais de l'éditeur (jetables).
+const STAY_ON_DEVICE = new Set(['settings', 'online.session', 'online.player', 'telemetry.state', 'telemetry.queue', 'errors.queue']);
+export const MIGRATION_FAILED = 'Compte créé, mais ta progression d’invité n’a pas pu y être reprise (stockage plein) : elle reste, intacte, en mode invité sur cet appareil. Pour la reprendre : en mode invité, Profil › Sauvegardes › Exporter le code joueur, puis importe-le dans le compte.';
 const fitNote = (fit) => (fit.level === 'partial'
   ? `Espace insuffisant sur cet appareil : ${fit.dropped} records du compte n’y sont pas écrits (le cloud les garde en entier).`
   : `Espace insuffisant sur cet appareil : copie du compte allégée (${fit.lightened} records sans fantôme ni commandes ; le cloud les garde en entier).`);
@@ -56,7 +61,8 @@ class Account {
     this.lastSync = 0;
     this.lastError = '';
     this.note = '';               // information (pas une erreur) sur la dernière synchronisation : copie locale allégée faute de place (TECH-007)
-    this.onNotice = null;         // (message) => … : l'application le montre au joueur quand une synchronisation touche à l'espace de l'appareil
+    this._onNotice = null;        // (message) => … : l'application le montre au joueur (espace de l'appareil, reprise de la progression…) ; avant qu'elle soit prête, c'est gardé
+    this._pending = [];
     this._lastNotice = '';
     this._storageFull = false;
     this._timer = null;
@@ -65,6 +71,10 @@ class Account {
     this._gen = 0;
     this._wired = false;
   }
+
+  get onNotice() { return this._onNotice; }
+  set onNotice(fn) { this._onNotice = fn; if (fn) for (const m of this._pending.splice(0)) this._say(m); }
+  _say(msg) { if (!this._onNotice) { this._pending.push(msg); return; } try { this._onNotice(msg); } catch { /* l'affichage ne casse rien */ } }
 
   get isAccount() { return !!this.state; }
   get username() { return this.state ? this.state.username : ''; }
@@ -146,23 +156,55 @@ class Account {
     }
   }
 
+  // Inscription. keepGuest : la progression de l'invité de cet appareil est DÉPLACÉE dans le compte (TECH-024) : copiée, vérifiée, et seulement ensuite effacée de l'invité ;
+  // si elle ne tient pas, l'invité garde tout et le joueur le sait. Renvoie { kind, username, migration: 'none' | 'done' | 'failed' }.
   async signUp(rawName, password, { keepGuest = false } = {}) {
     const c = checkPseudo(rawName, { account: true });
     if (!c.ok) throw new OnlineError(c.error, 'invalid');
     const p = checkPassword(password, c.name);
     if (!p.ok) throw new OnlineError(p.error, 'invalid');
     // La progression de l'invité est lue AVANT de changer de portée.
-    const guestDump = keepGuest ? pickSynced(dumpAll()) : null;
+    const guestData = keepGuest ? this._guestData() : null;
     const tutorialDone = !!loadSettings().tutorialDone;
     if (!(await this.usernameAvailable(c.name))) throw new OnlineError('Ce pseudo est déjà pris.', 'name-taken');
     const d = await online.rest('/auth/v1/signup', { method: 'POST', auth: false, body: { email: accountEmail(c.name), password, data: { username: c.name } } });
     if (!d || !d.access_token) throw new OnlineError('Compte créé, mais le serveur exige une confirmation par e-mail (voir COMPTES.md).', 'server-config');
     this._begin(d, c.name);
-    if (guestDump) restoreAll(guestDump, true);
+    let migration = keepGuest ? 'done' : 'none';
+    if (guestData) {
+      try {
+        this._copyTo(this.state.uid, guestData);                  // 1. copie vérifiée dans le compte (rien n'est écrit si tout ne tient pas)
+        this._dropFrom('', Object.keys(guestData));               // 2. seulement alors, l'invité n'en garde pas de double
+      } catch (e) {
+        if (!(e && e.code === 'storage-full')) throw e;
+        migration = 'failed';
+        this._say(MIGRATION_FAILED);
+      }
+    }
     const s = loadSettings(); s.playerName = c.name; s.tutorialDone = tutorialDone; saveSettings(s);
     reloadProfile();
     try { await online.ensurePlayer(c.name); await this.sync(); } catch { /* le compte existe ; la synchronisation reprendra */ }
-    return { kind: 'account', username: c.name };
+    return { kind: 'account', username: c.name, migration };
+  }
+
+  // La progression et les bibliothèques de l'invité (portée courante : celle de l'invité), sans ce qui reste à l'appareil (STAY_ON_DEVICE) ni les essais jetables.
+  _guestData() {
+    return Object.fromEntries(Object.entries(dumpAll()).filter(([k, v]) => typeof v === 'string' && !STAY_ON_DEVICE.has(k) && !isTrialName(k)));
+  }
+  // Copie VÉRIFIÉE de `data` dans la portée `uid` : atomique (storage.restoreAllOrThrow : rien n'est écrit si tout ne tient pas), puis relue clé par clé. Lève StorageFullError
+  // (code « storage-full ») ; la portée courante est rendue telle qu'elle était.
+  _copyTo(uid, data) {
+    const back = getScope();
+    setScope(uid);
+    try {
+      restoreAllOrThrow(data, true);
+      if (Object.keys(data).some((k) => getRaw(k) !== data[k])) { removeKeys(Object.keys(data)); throw new StorageFullError(); }
+    } finally { setScope(back); }
+  }
+  _dropFrom(scopeId, keys) {
+    const back = getScope();
+    setScope(scopeId);
+    try { removeKeys(keys); } finally { setScope(back); }
   }
 
   async signIn(rawName, password) {
@@ -253,7 +295,7 @@ class Account {
     if (!msg) { this._lastNotice = ''; return; }
     if (msg === this._lastNotice) return;
     this._lastNotice = msg;
-    if (this.onNotice) { try { this.onNotice(msg); } catch { /* l'affichage ne doit jamais casser la synchronisation */ } }
+    if (this._onNotice) { try { this._onNotice(msg); } catch { /* l'affichage ne doit jamais casser la synchronisation */ } }
   }
 
   async _doSync() {

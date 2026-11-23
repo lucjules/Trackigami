@@ -14,7 +14,8 @@ device('A');
 const storage = await import('../js/storage.js');
 const { online } = await import('../js/online.js');
 const { account } = await import('../js/account.js');
-const { reloadProfile } = await import('../js/profile.js');
+const { profile, saveProfile, reloadProfile } = await import('../js/profile.js');
+const { PHYS_VER } = await import('../js/version.js');
 
 // ---- Temps virtuel ----
 const clock = { now: 0 };
@@ -53,6 +54,7 @@ function boot(name) {
 }
 const anonSignups = () => srv.calls.filter((c) => c.path === '/auth/v1/signup' && !(c.body && c.body.email)).length;
 const resetSrv = () => { Object.assign(srv, { offline: false, refreshFails: false, refreshStatus: 0, singleUse: true, reuseRevokes: true, convertSupport: true, convertReady: null, autoconfirm: true, delay: {}, reuseCount: 0 }); srv.revoked.clear(); account.convertAnonymous = 'auto'; };
+const rec = (time, date) => ({ time, pv: PHYS_VER, splits: [], inputs: 'x', date, name: 'x', ghost: null });
 
 console.log('TECH-026 : deux onglets, jetons de renouvellement à usage unique');
 const tab = async (n) => (await import('../js/online.js?onglet=' + n)).online;
@@ -130,6 +132,52 @@ await test('vrai refus du serveur (jeton révoqué) : une nouvelle identité d\'
   online.onNotice = null; srv.refreshFails = false;
   assert.notEqual(online.uid, old);
   assert.equal(notices.length, 1, 'annoncé : ' + JSON.stringify(notices));
+});
+
+console.log('TECH-024 : « Garder ma progression » (sans conversion)');
+function richGuest(name) {
+  const d = boot(name); account.startGuest('Ana_05');
+  const p = profile(); p.coins = 1234; saveProfile();
+  for (let i = 0; i < 24; i++) storage.saveRecord('b-t' + i + '-x', rec(30 + i, 100 + i));
+  storage.savePrefab({ id: 'pf1', name: 'Rampe', code: 'SHP1:x' });
+  storage.saveCustomDeco({ id: 'cd1', name: 'Arche', parts: [] });
+  storage.saveMode({ id: 'm1', name: 'Mon mode', rules: { a: 1 } });
+  storage.setJSON('vproof', { t1: { inputs: 'v', time: 30 } });
+  storage.setEditorDraft({ code: 'BROUILLON' });
+  storage.saveMyTrack({ id: 'c1', name: 'Circuit', code: 'SHW3:abc' });
+  return d;
+}
+const guestKeys = (d) => [...d.local.m.keys()].filter((k) => k.startsWith('shardway.'));
+const setQuota = (d, quota) => {
+  const real = d.local.setItem.bind(d.local);
+  d.local.setItem = (k, v) => { let used = 0; for (const [kk, vv] of d.local.m) used += kk === k ? 0 : kk.length + vv.length; if (used + k.length + String(v).length > quota) throw new Error('QuotaExceededError'); real(k, v); };
+  return () => { d.local.setItem = real; };
+};
+const usedOf = (d) => { let n = 0; for (const [k, v] of d.local.m) n += k.length + v.length; return n; };
+await test('repli sans conversion + stockage serré : le compte est créé, la reprise échoue en le DISANT (avec la marche à suivre) ; l\'invité garde tout', async () => {
+  resetSrv(); srv.convertSupport = false;
+  const d = richGuest('M3');
+  const before = new Map([...d.local.m].filter(([k]) => k.startsWith('shardway.')));
+  const off = setQuota(d, usedOf(d) + 3000);
+  const notices = []; account.onNotice = (m) => notices.push(m);
+  const r = await account.signUp('Ana_07', 'motdepasse1', { keepGuest: true });
+  account.onNotice = null; off();
+  assert.equal(r.migration, 'failed');
+  assert.ok(notices.some((m) => /code joueur/i.test(m)), 'le joueur sait quoi faire : ' + JSON.stringify(notices));
+  for (const [k, v] of before) assert.equal(d.local.m.get(k), v, k + ' intacte dans l\'invité');
+});
+
+await test('repli sans conversion + place suffisante : la progression est DÉPLACÉE et vérifiée (pièces, records, circuits, prefabs, pièces perso, modes, preuve, brouillon) ; l\'invité n\'en garde pas de double', async () => {
+  resetSrv(); srv.convertSupport = false;
+  const d = richGuest('M4');
+  const r = await account.signUp('Ana_08', 'motdepasse1', { keepGuest: true });
+  assert.equal(r.migration, 'done');
+  assert.equal(profile().coins, 1234); assert.equal(Object.keys(storage.dumpAll()).filter((k) => k.startsWith('rec3.')).length, 24);
+  assert.deepEqual([storage.listPrefabs().length, storage.listCustomDecos().length, storage.listModes().length, storage.listMyTracks().length], [1, 1, 1, 1]);
+  assert.ok(storage.getJSON('vproof', null).t1); assert.equal(storage.getEditorDraft().code, 'BROUILLON');
+  const left = guestKeys(d).map((k) => k.slice('shardway.'.length)).filter((k) => /^(rec3\.|profile$|tracks$|prefabs$|cdecos$|modes$|vproof$|draft$)/.test(k));
+  assert.deepEqual(left, [], 'déplacée, pas copiée : ' + left.join(', '));
+  assert.ok(d.local.m.has('shardway.settings'), 'les réglages de l\'appareil restent à l\'invité');
 });
 
 test('aucun jeton ni mot de passe dans le journal', () => {
