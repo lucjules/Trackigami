@@ -5,6 +5,7 @@
 //   TECH-075  import avec stockage plein : l'échec est annoncé ; TECH-078 : code joueur sans telemetry.state ni errors.queue.
 // Le serveur Supabase est simulé (tools/fake-supabase.mjs), le quota du navigateur aussi, et le TEMPS est virtuel : on compte les requêtes sur 15 s sans attendre.
 import assert from 'node:assert/strict';
+import { setImmediate } from 'node:timers';
 import { test, finish } from './harness.mjs';
 import { device, srv } from './fake-supabase.mjs';
 
@@ -12,10 +13,9 @@ device('A');
 const storage = await import('../js/storage.js');
 const { online } = await import('../js/online.js');
 const { account } = await import('../js/account.js');
-const { profile, saveProfile, reloadProfile } = await import('../js/profile.js');
+const { profile, reloadProfile } = await import('../js/profile.js');
 
 // ---- Temps virtuel : setTimeout / clearTimeout remplacés ; advance(ms) fait avancer l'horloge en laissant les promesses se résoudre ----
-const realSetTimeout = globalThis.setTimeout, realClearTimeout = globalThis.clearTimeout;
 let now = 0, seq = 0;
 const timers = new Map();
 globalThis.setTimeout = (fn, ms = 0) => { const id = ++seq; timers.set(id, { at: now + Math.max(0, +ms || 0), fn, id }); return id; };
