@@ -14,6 +14,7 @@ import {
 } from './storage.js';
 import { toCloud, fromCloud, mergeSaves, sameData, pickSynced, fitCloud, isSyncKey } from './cloudsave.js';
 import { reloadProfile } from './profile.js';
+import { CONFIG } from './config.js';
 
 // Domaine technique des adresses (doit être le même que dans supabase/etape4-comptes.sql).
 const ACCOUNT_EMAIL_DOMAIN = 'accounts.copytrack.invalid';
@@ -25,6 +26,11 @@ const FIT_FAILED = 'Espace insuffisant sur cet appareil : la sauvegarde du compt
 // « Garder ma progression » (TECH-024) : ce qui passe de l'invité au compte : TOUTE la progression et les bibliothèques (circuits, records, profil, prefabs, pièces perso, modes,
 // brouillon, preuves de vérification…). Restent à l'appareil : ses réglages, l'identité en ligne de l'invité, les statistiques et erreurs en attente, les essais de l'éditeur (jetables).
 const STAY_ON_DEVICE = new Set(['settings', 'online.session', 'online.player', 'telemetry.state', 'telemetry.queue', 'errors.queue']);
+// Modèle d'identité (TECH-025, schéma en tête de js/online.js) : messages des cas où l'invité ne devient pas le compte, toujours dits au joueur.
+export const GUEST_KEPT = 'Compte créé. Ton identité d’invité (temps et circuits publiés) reste séparée de ce compte : tu la retrouves en te déconnectant.';
+const CONVERSION_UNSUPPORTED = 'Le serveur n’a pas enregistré le compte (conversion des invités mal installée, voir supabase/COMPTES.md) : tu restes invité, rien n’est perdu.';
+const CONFIRM_REQUIRED = 'Le serveur exige une confirmation d’adresse (« Confirm email ») : impossible de créer le compte depuis l’invité (voir supabase/COMPTES.md). Rien n’a changé.';
+const STORAGE_FULL_KEEP = 'Pas assez de place sur cet appareil pour reprendre ta progression dans le compte : rien n’a changé, elle reste en mode invité. Libère de la place, ou crée le compte sans la reprendre.';
 export const MIGRATION_FAILED = 'Compte créé, mais ta progression d’invité n’a pas pu y être reprise (stockage plein) : elle reste, intacte, en mode invité sur cet appareil. Pour la reprendre : en mode invité, Profil › Sauvegardes › Exporter le code joueur, puis importe-le dans le compte.';
 const fitNote = (fit) => (fit.level === 'partial'
   ? `Espace insuffisant sur cet appareil : ${fit.dropped} records du compte n’y sont pas écrits (le cloud les garde en entier).`
@@ -63,6 +69,7 @@ class Account {
     this.note = '';               // information (pas une erreur) sur la dernière synchronisation : copie locale allégée faute de place (TECH-007)
     this._onNotice = null;        // (message) => … : l'application le montre au joueur (espace de l'appareil, reprise de la progression…) ; avant qu'elle soit prête, c'est gardé
     this._pending = [];
+    this.convertAnonymous = CONFIG.accounts.convertAnonymous;      // 'auto' | false (js/config.js)
     this._lastNotice = '';
     this._storageFull = false;
     this._timer = null;
@@ -104,11 +111,13 @@ class Account {
     online.onAccountSession = (session) => { if (this.state) { this.state.session = session; setGlobal('account', this.state); } };
   }
 
+  // Retour à l'invité (déconnexion, suppression, session expirée). D'abord la portée de l'invité : useGuest() y REPREND l'identité d'invité de cet appareil, jamais effacée
+  // (TECH-025). Un compte né d'une conversion EST l'ancien invité : sa session d'invité a été retirée à la conversion, l'invité qui revient est donc neuf (rien d'orphelin).
   _forget() {
     this.state = null;
     setGlobal('account', null);
     online.onAccountSession = null;
-    setScope('');          // d'abord la portée invité : useGuest() efface la session anonyme de l'INVITÉ, pas celle du compte
+    setScope('');
     online.useGuest();
   }
 
@@ -167,6 +176,10 @@ class Account {
     const guestData = keepGuest ? this._guestData() : null;
     const tutorialDone = !!loadSettings().tutorialDone;
     if (!(await this.usernameAvailable(c.name))) throw new OnlineError('Ce pseudo est déjà pris.', 'name-taken');
+    // L'invité de cet appareil a une identité en ligne (session anonyme) : elle DEVIENT le compte si le serveur sait le faire (TECH-025). Sinon (projet sans la conversion,
+    // ou réglage du déploiement), un nouvel utilisateur est créé, l'identité d'invité reste intacte sur l'appareil, et le joueur le sait.
+    const guest = online.kind === 'guest' && online.session && online.session.user && online.session.user.id ? online.session.user.id : '';
+    if (guest && this.convertAnonymous !== false && (await this._conversionReady())) return this._convert(c.name, password, guestData, tutorialDone);
     const d = await online.rest('/auth/v1/signup', { method: 'POST', auth: false, body: { email: accountEmail(c.name), password, data: { username: c.name } } });
     if (!d || !d.access_token) throw new OnlineError('Compte créé, mais le serveur exige une confirmation par e-mail (voir COMPTES.md).', 'server-config');
     this._begin(d, c.name);
@@ -181,10 +194,57 @@ class Account {
         this._say(MIGRATION_FAILED);
       }
     }
-    const s = loadSettings(); s.playerName = c.name; s.tutorialDone = tutorialDone; saveSettings(s);
-    reloadProfile();
+    if (guest) this._say(GUEST_KEPT);
+    this._finishSignUp(c.name, tutorialDone);
     try { await online.ensurePlayer(c.name); await this.sync(); } catch { /* le compte existe ; la synchronisation reprendra */ }
-    return { kind: 'account', username: c.name, migration };
+    return { kind: 'account', username: c.name, migration, guestIdentity: guest ? 'kept' : 'none' };
+  }
+
+  _finishSignUp(name, tutorialDone) {
+    const s = loadSettings(); s.playerName = name; s.tutorialDone = tutorialDone; saveSettings(s);
+    reloadProfile();
+  }
+
+  // Le serveur sait-il convertir un invité (sa base crée la ligne `accounts` quand un utilisateur anonyme reçoit une adresse : voir supabase/COMPTES.md) ? Sans la fonction
+  // account_conversion_ready (projet d'avant), la réponse est non : rien n'est tenté.
+  async _conversionReady() {
+    try { return (await online.rest('/rest/v1/rpc/account_conversion_ready', { method: 'POST', auth: false, body: {} })) === true; }
+    catch (e) { if (e.code === 'offline') throw e; return false; }
+  }
+
+  // CONVERSION de l'invité en compte : même utilisateur, même identifiant ; il reçoit l'adresse technique, le mot de passe et le pseudo (API d'Auth prévue pour cela :
+  // PUT /auth/v1/user sur la session anonyme). Aucune étape destructive avant la réussite des précédentes :
+  //   1. réglage du projet : « Confirm email » doit être désactivé (sinon l'adresse resterait en attente et le compte serait inutilisable) ;
+  //   2. progression copiée et vérifiée dans la portée du compte (même identifiant), si demandé ; stockage plein : rien n'a changé, on le dit ;
+  //   3. conversion ; 4. la base a-t-elle créé le compte ? Non : échec explicite, le joueur reste l'invité ;
+  //   5. nouveau jeton (plus « anonyme ») ; 6. seulement alors : les jetons quittent la portée de l'invité, la copie de l'invité est effacée, le compte prend la main.
+  async _convert(name, password, guestData, tutorialDone) {
+    let set = null;
+    try { set = await online.rest('/auth/v1/settings', { auth: false }); } catch (e) { if (e.code === 'offline') throw e; }
+    if (set && set.mailer_autoconfirm === false) throw new OnlineError(CONFIRM_REQUIRED, 'server-config');
+    await online.ensureSession();
+    const uid = online.uid;
+    if (guestData) {
+      try { this._copyTo(uid, guestData); } catch (e) { if (e && e.code === 'storage-full') throw new OnlineError(STORAGE_FULL_KEEP, 'storage-full'); throw e; }
+    }
+    const undo = () => { if (guestData) this._dropFrom(uid, Object.keys(guestData)); };
+    const email = accountEmail(name);
+    let user, rows;
+    try {
+      user = await online.rest('/auth/v1/user', { method: 'PUT', body: { email, password, data: { username: name } } });
+      if (!user || user.is_anonymous !== false || String(user.email || '').toLowerCase() !== email) throw new OnlineError(CONFIRM_REQUIRED, 'server-config');
+      rows = await online.rest('/rest/v1/accounts?select=username&user_id=eq.' + encodeURIComponent(uid));
+      if (!Array.isArray(rows) || !rows[0]) throw new OnlineError(CONVERSION_UNSUPPORTED, 'conversion-unsupported');
+    } catch (e) { undo(); throw e; }
+    let session = online.session;
+    try { session = await online.refreshNow(); } catch { /* le jeton actuel reste valable jusqu'à son expiration */ }
+    online.forgetGuestSession();                                  // l'identité de l'invité EST celle du compte : ses jetons ne restent pas chez l'invité
+    if (guestData) this._dropFrom('', Object.keys(guestData));    // et sa progression n'y laisse pas de double
+    const username = rows[0].username || name;
+    this._begin(session, username);
+    this._finishSignUp(username, tutorialDone);
+    try { await online.ensurePlayer(username); await this.sync(); } catch { /* le compte existe ; la synchronisation reprendra */ }
+    return { kind: 'account', username, migration: guestData ? 'done' : 'none', guestIdentity: 'converted' };
   }
 
   // La progression et les bibliothèques de l'invité (portée courante : celle de l'invité), sans ce qui reste à l'appareil (STAY_ON_DEVICE) ni les essais jetables.

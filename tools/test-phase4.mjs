@@ -82,13 +82,14 @@ await test('importer un code (ancien, contenant une session) sur un autre appare
   boot('G'); srv.refreshStatus = 0;
   const mine = await online.ensureSession();
   const myTok = mine.refresh_token;
+  const myPlayer = device('G').local.getItem('shardway.online.player');      // (le profil en ligne de CET appareil, tel qu'il est avant l'import)
   const foreign = { v: 1, id: 'x', t: 1, data: { profile: JSON.stringify({ coins: 5 }), 'online.session': JSON.stringify({ access_token: 'volé', refresh_token: 'volé', expires_at: 9e9, user: { id: 'autre' } }), 'online.player': JSON.stringify({ id: 'autre', name: 'Victime' }), 'cle invalide!': 'x', nombre: 12 } };
   for (const mode of ['replace', 'merge']) {
     applySave(foreign, mode);
     const s = JSON.parse(device('G').local.getItem('shardway.online.session'));
     assert.equal(s.refresh_token, myTok, mode + ' : ma session est conservée');
     assert.ok(!device('G').local.getItem('shardway.cle invalide!'), mode + ' : clé de forme invalide ignorée');
-    assert.equal(JSON.parse(device('G').local.getItem('shardway.online.player') || 'null'), mine && JSON.parse(device('G').local.getItem('shardway.online.player') || 'null'));
+    assert.equal(device('G').local.getItem('shardway.online.player'), myPlayer, mode + ' : mon profil en ligne est conservé (jamais celui du code importé)');
   }
   assert.equal(JSON.parse(device('G').local.getItem('shardway.profile')).coins, 5, 'la progression, elle, est restaurée');
 });

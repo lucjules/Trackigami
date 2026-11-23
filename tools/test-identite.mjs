@@ -53,7 +53,9 @@ function boot(name) {
   return d;
 }
 const anonSignups = () => srv.calls.filter((c) => c.path === '/auth/v1/signup' && !(c.body && c.body.email)).length;
-const resetSrv = () => { Object.assign(srv, { offline: false, refreshFails: false, refreshStatus: 0, singleUse: true, reuseRevokes: true, convertSupport: true, convertReady: null, autoconfirm: true, delay: {}, reuseCount: 0 }); srv.revoked.clear(); account.convertAnonymous = 'auto'; };
+const fakeTrack = (code) => ({ encode: () => code, tiles: [], name: 'Mon circuit', desc: '' });
+const proof = { inputs: 'aW5wdXRz', time: 30 };
+const resetSrv = () => { Object.assign(srv, { offline: false, refreshFails: false, refreshStatus: 0, singleUse: true, reuseRevokes: true, convertSupport: true, convertReady: null, autoconfirm: true, delay: {}, reuseCount: 0 }); srv.revoked.clear(); srv.calls.length = 0; account.convertAnonymous = 'auto'; };
 const rec = (time, date) => ({ time, pv: PHYS_VER, splits: [], inputs: 'x', date, name: 'x', ghost: null });
 
 console.log('TECH-026 : deux onglets, jetons de renouvellement à usage unique');
@@ -99,7 +101,7 @@ await test('invité, deux onglets en même temps SANS navigator.locks (repli : b
 });
 await test('compte, onglet 2 resté en arrière : il ne réutilise pas le jeton (avec la détection de réutilisation, toute la famille serait révoquée) ; le compte reste connecté dans les deux onglets', async () => {
   resetSrv();
-  boot('S4'); await account.signUp('Kim_08', 'motdepasse1');
+  boot('S4'); await settle(account.signUp('Kim_08', 'motdepasse1'));
   const t2 = await tab(4); t2.useAccount(storage.getGlobal('account').session);
   t2.onAccountSession = (s) => { const g = storage.getGlobal('account'); storage.setGlobal('account', { ...g, session: s }); };
   expire(online); expire(t2); { const g = storage.getGlobal('account'); storage.setGlobal('account', { ...g, session: { ...g.session, expires_at: 1 } }); }
@@ -160,7 +162,7 @@ await test('repli sans conversion + stockage serré : le compte est créé, la r
   const before = new Map([...d.local.m].filter(([k]) => k.startsWith('shardway.')));
   const off = setQuota(d, usedOf(d) + 3000);
   const notices = []; account.onNotice = (m) => notices.push(m);
-  const r = await account.signUp('Ana_07', 'motdepasse1', { keepGuest: true });
+  const r = await settle(account.signUp('Ana_07', 'motdepasse1', { keepGuest: true }));
   account.onNotice = null; off();
   assert.equal(r.migration, 'failed');
   assert.ok(notices.some((m) => /code joueur/i.test(m)), 'le joueur sait quoi faire : ' + JSON.stringify(notices));
@@ -170,7 +172,7 @@ await test('repli sans conversion + stockage serré : le compte est créé, la r
 await test('repli sans conversion + place suffisante : la progression est DÉPLACÉE et vérifiée (pièces, records, circuits, prefabs, pièces perso, modes, preuve, brouillon) ; l\'invité n\'en garde pas de double', async () => {
   resetSrv(); srv.convertSupport = false;
   const d = richGuest('M4');
-  const r = await account.signUp('Ana_08', 'motdepasse1', { keepGuest: true });
+  const r = await settle(account.signUp('Ana_08', 'motdepasse1', { keepGuest: true }));
   assert.equal(r.migration, 'done');
   assert.equal(profile().coins, 1234); assert.equal(Object.keys(storage.dumpAll()).filter((k) => k.startsWith('rec3.')).length, 24);
   assert.deepEqual([storage.listPrefabs().length, storage.listCustomDecos().length, storage.listModes().length, storage.listMyTracks().length], [1, 1, 1, 1]);
@@ -180,6 +182,105 @@ await test('repli sans conversion + place suffisante : la progression est DÉPLA
   assert.ok(d.local.m.has('shardway.settings'), 'les réglages de l\'appareil restent à l\'invité');
 });
 
+console.log('TECH-025 : l\'invité devient le compte (conversion), la déconnexion ne détruit rien');
+await test('invité → inscription → déconnexion → reconnexion : temps, circuit publié et « j\'aime » restent rattachés ; un seul joueur ; republier son circuit réussit ; aucun anonyme de plus', async () => {
+  resetSrv();
+  boot('C1'); account.startGuest('Zoe_01');
+  await online.ensurePlayer('Zoe_01');
+  const guest = online.uid;
+  await online.submitScore({ trackKey: 'b-a-1', inputs: 'aQ', time: 20, physVer: PHYS_VER }, 'Zoe_01');
+  await online.publish(fakeTrack('SHW3:circuit-de-zoe'), 'Zoe_01', proof);
+  await online.toggleLike('t-42', 'Zoe_01');
+  const anon0 = anonSignups();
+  await settle(account.signUp('Zoe_01', 'motdepasse1', { keepGuest: true }));
+  assert.equal(account.uid, guest, 'le compte EST l\'ancienne identité de l\'invité (même identifiant)');
+  await online.publish(fakeTrack('SHW3:circuit-de-zoe'), 'Zoe_01', proof);              // republier : avant, « déjà publié par un autre pilote »
+  assert.equal([...srv.players.values()].filter((n) => n.toLowerCase() === 'zoe_01').length, 1, 'une seule ligne de joueur pour ce pseudo');
+  await account.signOut();
+  assert.ok(!online.uid, 'nouvel invité propre : pas d\'identité tant qu\'il n\'en a pas besoin');
+  boot('C1'); await account.signIn('Zoe_01', 'motdepasse1');
+  assert.equal(account.uid, guest);
+  assert.ok(srv.scores.has('b-a-1:' + guest), 'le temps de l\'invité est au compte'); assert.ok(srv.likes.has(guest + ':t-42'), 'le j\'aime aussi');
+  assert.equal(srv.tracks.get('SHW3:circuit-de-zoe').author, guest);
+  await online.publish(fakeTrack('SHW3:circuit-de-zoe'), 'Zoe_01', proof);
+  assert.equal(anonSignups(), anon0, 'aucune session anonyme créée par ce cycle');
+});
+await test('projet où la conversion n\'est pas installée (la base ne l\'annonce pas) : un nouvel utilisateur, ANNONCÉ ; la session de l\'invité survit à la déconnexion (ses données restent à lui, aucun anonyme de plus)', async () => {
+  resetSrv(); srv.convertSupport = false;
+  boot('C2'); account.startGuest('Lou_02');
+  await online.ensurePlayer('Lou_02');
+  const guest = online.uid;
+  await online.publish(fakeTrack('SHW3:circuit-de-lou'), 'Lou_02', proof);
+  const notices = []; account.onNotice = (m) => notices.push(m);
+  const r = await settle(account.signUp('Lou_02', 'motdepasse1', { keepGuest: true }));
+  account.onNotice = null;
+  assert.notEqual(account.uid, guest);
+  assert.equal(r.guestIdentity, 'kept', 'le repli est dit à l\'appelant');
+  assert.ok(notices.some((m) => /invité/i.test(m)), 'et au joueur : ' + JSON.stringify(notices));
+  const anon0 = anonSignups();
+  await account.signOut();
+  boot('C2');
+  await online.ensureSession();
+  assert.equal(online.uid, guest, 'retour à l\'invité : la MÊME identité (avant : effacée, un nouvel anonyme)');
+  assert.equal(anonSignups(), anon0);
+  await online.publish(fakeTrack('SHW3:circuit-de-lou'), 'Lou_02', proof);            // c'est toujours son circuit
+});
+await test('projet mal réglé (la base annonce la conversion mais ne crée pas le compte) : échec EXPLICITE, le joueur reste l\'invité qu\'il était, sa progression intacte', async () => {
+  resetSrv(); srv.convertSupport = false; srv.convertReady = true;
+  boot('C3'); account.startGuest('Max_03');
+  await online.ensurePlayer('Max_03');
+  const guest = online.uid;
+  storage.saveRecord('b-a-1', rec(22, 5));
+  await assert.rejects(() => settle(account.signUp('Max_03', 'motdepasse1', { keepGuest: true })), (e) => e.code === 'conversion-unsupported' && /COMPTES\.md/.test(e.message));
+  assert.equal(account.isAccount, false); assert.equal(online.kind, 'guest'); assert.equal(online.uid, guest);
+  assert.equal(storage.getScope(), ''); assert.equal(storage.getRecord('b-a-1').time, 22, 'la progression de l\'invité est intacte');
+});
+await test('« Confirm email » activé sur le projet : la conversion n\'est pas tentée, message clair, rien n\'a changé', async () => {
+  resetSrv(); srv.autoconfirm = false;
+  boot('C4'); account.startGuest('Noe_04');
+  await online.ensurePlayer('Noe_04');
+  const guest = online.uid;
+  await assert.rejects(() => settle(account.signUp('Noe_04', 'motdepasse1', { keepGuest: true })), (e) => e.code === 'server-config');
+  assert.equal(online.uid, guest); assert.ok(!srv.calls.some((c) => c.path === '/auth/v1/user' && c.method === 'PUT'), 'aucune modification de l\'utilisateur');
+});
+
+await test('la conversion se désactive par la configuration du déploiement (CONFIG.accounts.convertAnonymous = false) : nouvel utilisateur, annoncé', async () => {
+  resetSrv(); account.convertAnonymous = false;
+  boot('C5'); account.startGuest('Eva_09');
+  await online.ensurePlayer('Eva_09');
+  const guest = online.uid;
+  const r = await settle(account.signUp('Eva_09', 'motdepasse1'));
+  assert.notEqual(account.uid, guest); assert.equal(r.guestIdentity, 'kept');
+  assert.ok(!srv.calls.some((c) => c.path === '/rest/v1/rpc/account_conversion_ready'), 'le serveur n\'est même pas interrogé');
+});
+
+console.log('TECH-024 + TECH-025 : la progression suit l\'invité converti');
+await test('stockage serré : l\'inscription avec « Garder ma progression » échoue en le DISANT, et l\'invité garde TOUT (rien de déplacé, aucun compte à 0 ◆)', async () => {
+  resetSrv();
+  const d = richGuest('M1');
+  await online.ensurePlayer('Ana_05');
+  const before = new Map(d.local.m);
+  const off = setQuota(d, usedOf(d) + 3000);
+  await assert.rejects(() => settle(account.signUp('Ana_05', 'motdepasse1', { keepGuest: true })), (e) => e.code === 'storage-full' && /rien n.a changé|reste/i.test(e.message));
+  off();
+  assert.equal(account.isAccount, false, 'pas de compte créé à moitié');
+  for (const [k, v] of before) if (!k.startsWith('copytrack.')) assert.equal(d.local.m.get(k), v, k + ' intacte');
+  assert.ok(![...d.local.m.keys()].some((k) => k.startsWith('shardwayacct.')), 'aucune copie partielle laissée');
+  assert.equal(profile().coins, 1234); assert.equal(storage.listPrefabs().length, 1);
+});
+await test('place suffisante : la progression est DÉPLACÉE et vérifiée : pièces, 24 records, circuits, prefabs, pièces perso, modes, preuve de vérification, brouillon ; l\'invité n\'en garde pas de double', async () => {
+  resetSrv();
+  const d = richGuest('M2');
+  await settle(account.signUp('Ana_06', 'motdepasse1', { keepGuest: true }));
+  assert.ok(account.isAccount);
+  assert.equal(profile().coins, 1234);
+  assert.equal(Object.keys(storage.dumpAll()).filter((k) => k.startsWith('rec3.')).length, 24);
+  assert.deepEqual(storage.listPrefabs().map((x) => x.id), ['pf1']); assert.deepEqual(storage.listCustomDecos().map((x) => x.id), ['cd1']); assert.deepEqual(storage.listModes().map((x) => x.id), ['m1']);
+  assert.ok(storage.getJSON('vproof', null).t1); assert.equal(storage.getEditorDraft().code, 'BROUILLON'); assert.equal(storage.listMyTracks().length, 1);
+  const left = guestKeys(d).map((k) => k.slice('shardway.'.length)).filter((k) => /^(rec3\.|profile$|tracks$|prefabs$|cdecos$|modes$|vproof$|draft$)/.test(k));
+  assert.deepEqual(left, [], 'déplacée, pas copiée : ' + left.join(', '));
+  assert.equal(srv.saves.get(account.uid).data.profile.coins, 1234, 'et partie dans le cloud du compte');
+});
 test('aucun jeton ni mot de passe dans le journal', () => {
   const toks = [...srv.tokens.keys(), ...srv.refresh.keys()];
   for (const line of logged) { assert.ok(!toks.some((t) => new RegExp('\\b' + t + '\\b').test(line)), 'jeton journalisé : ' + line.slice(0, 120)); assert.ok(!/motdepasse1/.test(line)); }

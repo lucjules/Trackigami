@@ -95,11 +95,18 @@ class OnlineClient {
     this.player = null;                  // le profil en ligne (table players) est créé au premier besoin : ensurePlayer
   }
 
-  // Retour au mode invité (déconnexion) : une nouvelle session anonyme sera créée au premier besoin.
+  // Retour au mode invité (déconnexion ; la portée de stockage est déjà celle de l'invité) : on REPREND l'identité d'invité de cet appareil, telle qu'elle est enregistrée.
+  // Avant (TECH-025), elle était effacée : ses temps, circuits publiés et « j'aime » devenaient inaccessibles, et chaque déconnexion fabriquait un anonyme de plus. Il n'y en a
+  // pas (première visite, ou identité devenue celle d'un compte : forgetGuestSession) : une session anonyme neuve sera créée au premier besoin.
   useGuest() {
     this.kind = 'guest';
-    this.session = null;
-    this.player = null;
+    this.session = getJSON('online.session', null);
+    this.player = getJSON('online.player', null);
+  }
+
+  // L'identité d'invité de cet appareil est DEVENUE celle d'un compte (conversion, account.js) : ses jetons ne doivent plus rester dans la portée de l'invité (sinon, après une
+  // déconnexion, l'invité serait encore connecté au compte). Seul chemin qui retire une session d'invité, et seulement quand rien ne s'y rattache plus.
+  forgetGuestSession() {
     setJSON('online.session', null);
     setJSON('online.player', null);
   }
@@ -161,6 +168,13 @@ class OnlineClient {
       await new Promise((r) => setTimeout(r, 500));
     }
     return this._adoptStored() && this.session.refresh_token !== used ? this.session : null;
+  }
+  // Renouvelle tout de suite (après une conversion en compte : le nouveau jeton n'est plus marqué « anonyme »), sous le même verrou entre onglets.
+  async refreshNow() {
+    const s = await this._withLock(async () => { this._adoptStored(); return this._refresh(this.session); });
+    this.session = s;
+    this._save();
+    return s;
   }
   async _refresh(s) {
     return this._norm(await this._fetch('/auth/v1/token?grant_type=refresh_token', { method: 'POST', body: { refresh_token: s && s.refresh_token }, auth: false }));
