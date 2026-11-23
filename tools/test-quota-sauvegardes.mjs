@@ -57,7 +57,8 @@ function setQuota(d, quota) {
   };
 }
 const usedOf = (d) => { let n = 0; for (const [k, v] of d.local.m) n += k.length + v.length; return n; };
-const rec = (time, date, extra = {}) => ({ time, pv: 38, splits: [0.5, 0.9], inputs: 'x'.repeat(40), date, name: 'x', ghost: null, ...extra });
+const { PHYS_VER } = await import('../js/version.js');
+const rec = (time, date, extra = {}) => ({ time, pv: PHYS_VER, splits: [0.5, 0.9], inputs: 'x'.repeat(40), date, name: 'x', ghost: null, ...extra });
 const gets = () => srv.calls.filter((c) => c.method === 'GET' && c.path === '/rest/v1/cloud_saves').length;
 const patches = () => srv.calls.filter((c) => c.method === 'PATCH' && c.path === '/rest/v1/cloud_saves').length;
 

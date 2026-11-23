@@ -1,7 +1,9 @@
 // Profil du joueur : pièces, objets débloqués, équipement, code de sauvegarde.
 // Le jeu est 100 % statique (aucun serveur) : le « code joueur » est la sauvegarde
 // elle-même, compressée, à copier / coller ou à télécharger sous forme de fichier.
-import { getJSON, setJSON, getGlobal, setGlobal, dumpAll, restoreAllOrThrow, DEVICE_ONLY_KEYS, isTrialName } from './storage.js';
+import { getJSON, setJSON, getGlobal, setGlobal, dumpAll, restoreAllOrThrow, removeKeys, validRecord, DEVICE_ONLY_KEYS, isTrialName } from './storage.js';
+import { mergeSaves, toCloud, fromCloud } from './cloudsave.js';
+import { PHYS_VER } from './version.js';
 import { DEFAULT_LOADOUT, itemCost, sanitizeLoadout, itemsOf, exclusiveOf } from './cosmetics.js';
 import { hashString } from './track.js';
 import { settle, fromWallet, recordPurchase, recordGift } from './wallet.js';
@@ -229,7 +231,7 @@ function stampRestored(imp, cur, now) {
   return out;
 }
 
-// mode : 'replace' remplace tout ; 'merge' garde les meilleurs records et réunit les circuits.
+// mode : 'replace' remplace tout (explicite : y compris records d'autres physiques, réglages, bibliothèques) ; 'merge' fusionne la progression comme une synchronisation.
 // Lève StorageFullError (code « storage-full ») si l'appareil n'a pas la place d'écrire la restauration : RIEN n'a alors été modifié (écriture atomique, voir storage.restoreAll) ; l'appelant
 // l'annonce au lieu d'un succès (TECH-075).
 export function applySave(obj, mode = 'replace', now = Date.now()) {
@@ -244,43 +246,16 @@ export function applySave(obj, mode = 'replace', now = Date.now()) {
     restoreAllOrThrow({ ...obj.data, ...own });
     rotateDevice();          // les compteurs de pièces importés de cet appareil peuvent être plus anciens que ceux du cloud : les gains qui suivent vont à un compteur neuf (wallet.js)
   } else {
-    const out = { ...cur };
-    for (const [k, v] of Object.entries(obj.data)) {
-      if ((k.startsWith('rec.') || k.startsWith('rec2.') || k.startsWith('rec3.')) && typeof v === 'string') {
-        try {
-          const a = JSON.parse(cur[k] || 'null'), b = JSON.parse(v);
-          if (!a || (b && b.time < a.time)) out[k] = v;
-        } catch { out[k] = v; }
-      } else if (k === 'tracksDel' && typeof v === 'string') {
-        // Pierres tombales : réunies (la plus récente suppression de chaque circuit) ; stampRestored a déjà retiré celles des circuits restaurés.
-        const a = parse(cur[k], {}), b = parse(v, {}), u = { ...a };
-        for (const [id, t] of Object.entries(b)) u[id] = Math.max(Number(u[id]) || 0, Number(t) || 0);
-        for (const id of Object.keys(u)) if (!(id in b) && !(id in a)) delete u[id];
-        const kept = parse(imp.tracks, null);
-        if (Array.isArray(kept)) for (const t of kept) if (t && t.id in u && (Number(t.updated) || 0) > u[t.id]) delete u[t.id];
-        out[k] = JSON.stringify(u);
-      } else if (k === 'recReset' && typeof v === 'string') {
-        out[k] = String(Math.max(Number(cur[k]) || 0, Number(v) || 0));
-      } else if (k === 'tracks' && typeof v === 'string') {
-        try {
-          const a = JSON.parse(cur[k] || '[]'), b = JSON.parse(v);
-          const map = new Map(a.map((t) => [t.id, t]));
-          for (const t of b) if (!map.has(t.id) || (t.updated || 0) > (map.get(t.id).updated || 0)) map.set(t.id, t);
-          out[k] = JSON.stringify([...map.values()]);
-        } catch { out[k] = v; }
-      } else if (k === 'profile' && typeof v === 'string') {
-        try {
-          const a = JSON.parse(cur[k] || '{}'), b = JSON.parse(v);
-          out[k] = JSON.stringify({
-            ...b,
-            coins: Math.max(a.coins || 0, b.coins || 0),
-            owned: { ...(a.owned || {}), ...(b.owned || {}) },
-            medals: { ...(a.medals || {}), ...(b.medals || {}) },
-          });
-        } catch { out[k] = v; }
-      } else if (typeof v === 'string') out[k] = v;
-    }
-    restoreAllOrThrow(out);
+    // « Fusionner » (TECH-030) : LA fusion de la synchronisation (cloudsave.mergeSaves / mergeProfile), sur la progression seulement : expérience, objectifs, Académie, licences,
+    // médailles, pièces (modèle additif), records, circuits… réunis selon les mêmes règles. Le reste de l'appareil (réglages, brouillon, prefabs, pièces perso, modes) n'est pas
+    // touché. Un record importé qui n'est pas lisible (validRecord) ou d'une autre physique que celle du jeu est REFUSÉ (avant : un 0,001 s sans version remplaçait un vrai 30 s).
+    const acceptable = ([k, v]) => !k.startsWith('rec3.') || ((r) => validRecord(r) && r.pv === PHYS_VER)(parse(v, null));
+    const local = toCloud(cur);
+    const merged = mergeSaves(local, toCloud(Object.fromEntries(Object.entries(imp).filter(acceptable))));
+    if (merged.profile && local.profile && local.profile.id) merged.profile = { ...merged.profile, id: local.profile.id };      // l'identité du joueur ne change pas
+    const dropped = Object.keys(local).filter((k) => !(k in merged));                  // (comme une synchronisation : les records d'avant une remise à zéro importée)
+    restoreAllOrThrow(fromCloud(merged), true);
+    if (dropped.length) removeKeys(dropped);
   }
   return reloadProfile();
 }

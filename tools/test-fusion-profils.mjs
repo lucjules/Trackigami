@@ -126,5 +126,46 @@ test('une valeur de médaille invalide est ignorée : jamais convertie en crista
   }
 });
 
+console.log('TECH-030 : import « Fusionner »');
+const { applySave } = P;
+const { PHYS_VER } = await import('../js/version.js');
+await test('import « Fusionner » : XP, objectifs, Académie, licences, médailles conservés ; record fabriqué ou d\'une autre physique refusé ; brouillon et bibliothèques intacts', async () => {
+  boot('I1');
+  const p = profile();
+  Object.assign(p, { xp: 900, goals: { 'b-a-1#goal': 1 }, academy: { prise: 1 }, licences: { C: 1700000000000 }, medals: { 'b-a-1': 0 }, drills: { trajectoire: { lvl: 2, best: 50 } } });
+  saveProfile();
+  storage.saveRecord('b-a-1', { time: 30, pv: PHYS_VER, splits: [], date: 5, inputs: 'i' });
+  storage.setEditorDraft({ code: 'BROUILLON-LOCAL' });
+  storage.savePrefab({ id: 'pf1', name: 'Mon prefab', code: 'SHP1:local' });
+  storage.saveCustomDeco({ id: 'cd1', name: 'Ma pièce', parts: [] });
+  storage.saveMode({ id: 'm1', name: 'Mon mode', rules: { a: 1 } });
+  const imp = { v: 1, id: 'AUTRE-JOUEUR', t: 1, data: {
+    profile: JSON.stringify({ id: 'AUTRE-JOUEUR', coins: 10, xp: 5, medals: { 'b-a-1': 3, 'b-c-3': 2 }, goals: { 'b-c-3#goal': 1 }, owned: {} }),
+    'rec3.b-a-1': JSON.stringify({ time: 0.001, splits: [], date: 9 }),                                 // fabriqué : sans version de physique
+    'rec3.b-x-7': JSON.stringify({ time: 12, pv: PHYS_VER - 1, splits: [], date: 9 }),                  // autre physique
+    'rec3.b-y-8': JSON.stringify({ time: 0, pv: PHYS_VER, splits: [], date: 9 }),                       // invalide
+    'rec3.b-c-3': JSON.stringify({ time: 25, pv: PHYS_VER, splits: [], date: 9 }),                      // bon
+    draft: JSON.stringify({ code: 'BROUILLON-IMPORTÉ' }),
+    prefabs: JSON.stringify([{ id: 'x', name: 'Importé', code: 'SHP1:imp' }]), cdecos: '[]', modes: '[]',
+  } };
+  applySave(imp, 'merge');
+  const q = profile();
+  assert.equal(q.xp, 900); assert.ok(q.goals['b-a-1#goal'] && q.goals['b-c-3#goal']); assert.ok(q.academy.prise); assert.equal(q.licences.C, 1700000000000);
+  assert.equal(q.medals['b-a-1'], 0, 'cristal gardé'); assert.equal(q.medals['b-c-3'], 2); assert.equal(q.drills.trajectoire.lvl, 2);
+  assert.equal(storage.getRecord('b-a-1').time, 30, 'le vrai 30 s n\'est pas remplacé par un 0,001 s fabriqué');
+  assert.equal(storage.getRecord('b-x-7'), null, 'record d\'une autre physique refusé');
+  assert.equal(storage.getRecord('b-y-8'), null);
+  assert.equal(storage.getRecord('b-c-3').time, 25, 'un bon record importé est gardé');
+  assert.equal(storage.getEditorDraft().code, 'BROUILLON-LOCAL');
+  assert.deepEqual(storage.listPrefabs().map((x) => x.id), ['pf1']); assert.deepEqual(storage.listCustomDecos().map((x) => x.id), ['cd1']); assert.deepEqual(storage.listModes().map((x) => x.id), ['m1']);
+  assert.notEqual(q.id, 'AUTRE-JOUEUR', 'l\'identité du joueur ne change pas');
+});
+await test('import « Remplacer » garde son sens : tout est remplacé (y compris un record d\'une autre physique)', async () => {
+  boot('I2');
+  const p = profile(); p.xp = 900; saveProfile();
+  applySave({ v: 1, id: 'X', t: 1, data: { profile: JSON.stringify({ coins: 3, xp: 5 }), 'rec3.b-x-7': JSON.stringify({ time: 12, pv: PHYS_VER - 1, splits: [], date: 9 }) } }, 'replace');
+  assert.equal(profile().xp, 5); assert.equal(profile().coins, 3); assert.equal(storage.getRecord('b-x-7').time, 12);
+});
+
 await finish('Toutes les reproductions de la fusion passent.');
 process.exit(0);

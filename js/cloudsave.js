@@ -138,10 +138,13 @@ export function mergeSaves(local, remote) {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
   const gone = { ...obj(b.tracksDel), ...obj(a.tracksDel) };
   for (const k of Object.keys(obj(b.tracksDel))) gone[k] = Math.max(num(a.tracksDel && a.tracksDel[k]), num(b.tracksDel[k]));
+  const tracks = a.tracks || b.tracks ? mergeTracks(a.tracks, b.tracks, gone) : null;
+  // Une pierre tombale DÉPASSÉE (le circuit a été recréé ou restauré après elle, profile.applySave) ne sert plus : elle part (le même résultat sur chaque appareil, quel que soit l'ordre).
+  if (tracks) for (const t of tracks) if (gone[t.id] != null && num(t.updated) > num(gone[t.id])) delete gone[t.id];
   for (const k of keys) {
     if (!isSyncKey(k)) continue;
     if (k === 'tracksDel') out[k] = gone;
-    else if (k === 'tracks') out[k] = mergeTracks(a[k], b[k], gone);
+    else if (k === 'tracks') out[k] = tracks;
     else if (k === 'profile') out[k] = mergeProfile(a[k], b[k]);
     else if (k.startsWith('rec3.')) out[k] = mergeRecord(a[k], b[k]);
     else if (k.startsWith('runs.')) out[k] = cleanRuns([...(Array.isArray(a[k]) ? a[k] : []), ...(Array.isArray(b[k]) ? b[k] : [])]);    // dernières courses : réunies, les plus récentes
@@ -149,7 +152,7 @@ export function mergeSaves(local, remote) {
   }
   if (resetAt) out.recReset = resetAt;
   if (!('tracksDel' in out) && Object.keys(gone).length) out.tracksDel = gone;
-  if (!('tracks' in out) && (a.tracks || b.tracks)) out.tracks = mergeTracks(a.tracks, b.tracks, gone);
+  if (!('tracks' in out) && tracks) out.tracks = tracks;
   return out;
 }
 
