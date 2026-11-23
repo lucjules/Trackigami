@@ -79,6 +79,9 @@ function listPrefixedKeys() {
 
 // Accès bruts (profil, sauvegarde complète).
 export function getJSON(key, fallback) { return read(key, fallback); }
+// Le texte stocké d'une clé (ou null) et son nom complet dans le navigateur (évènement « storage » d'un autre onglet : profile.js, TECH-027).
+export function getRaw(key) { try { return localStorage.getItem(PREFIX + key); } catch { return null; } }
+export const scopedKey = (key) => PREFIX + key;
 // quiet : écriture qui NE relance PAS la synchronisation du compte (le profil relu après une synchronisation : sinon chaque synchronisation en rappelait une autre, TECH-007).
 export function setJSON(key, value, { quiet = false } = {}) { return write(key, value, quiet); }
 

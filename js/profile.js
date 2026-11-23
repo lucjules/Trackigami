@@ -1,8 +1,8 @@
 // Profil du joueur : pièces, objets débloqués, équipement, code de sauvegarde.
 // Le jeu est 100 % statique (aucun serveur) : le « code joueur » est la sauvegarde
 // elle-même, compressée, à copier / coller ou à télécharger sous forme de fichier.
-import { getJSON, setJSON, getGlobal, setGlobal, dumpAll, restoreAllOrThrow, removeKeys, validRecord, DEVICE_ONLY_KEYS, isTrialName } from './storage.js';
-import { mergeSaves, toCloud, fromCloud } from './cloudsave.js';
+import { getJSON, setJSON, getRaw, scopedKey, getScope, getGlobal, setGlobal, dumpAll, restoreAllOrThrow, removeKeys, validRecord, DEVICE_ONLY_KEYS, isTrialName } from './storage.js';
+import { mergeSaves, mergeProfile, toCloud, fromCloud } from './cloudsave.js';
 import { PHYS_VER } from './version.js';
 import { DEFAULT_LOADOUT, itemCost, sanitizeLoadout, itemsOf, exclusiveOf } from './cosmetics.js';
 import { hashString } from './track.js';
@@ -41,25 +41,69 @@ const DEFAULT = () => ({
 
 let cache = null;
 let quietLoad = false;       // true pendant reloadProfile : la remise en forme du profil relu n'est pas une modification du joueur (elle ne relance pas la synchronisation)
+// Deux onglets (TECH-027) : chacun a SON cache ; le stockage est commun. lastRaw : le texte du profil que ce cache a lu ou écrit en dernier ; s'il a changé (un autre onglet, une
+// synchronisation), le cache le FUSIONNE (la fusion des appareils : médailles, objets, objectifs, pièces additives…) avant toute lecture ou écriture : aucune écriture n'écrase plus
+// aveuglément la version d'un autre onglet. cacheScope : un cache n'est jamais fusionné avec le profil d'une autre portée (invité / compte) : il est relu.
+let lastRaw = null, cacheScope = null;
+const objOr = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : {});
+function normalize(p) {
+  p.loadout = sanitizeLoadout(p.loadout);
+  p.owned = objOr(p.owned);
+  p.medals = objOr(p.medals);
+  p.stats = { races: 0, earned: 0, ...objOr(p.stats) };
+  p.eggs = objOr(p.eggs);
+  if (!p.id) p.id = newPlayerId();
+  fromWallet(p);              // pièces : le portefeuille fait foi ; un profil d'avant 0.16.10 y est migré (ligne de base = son solde : le total ne change pas)
+  return p;
+}
+function write(quiet) {
+  setJSON('profile', cache, { quiet });
+  lastRaw = getRaw('profile');
+}
+// Le profil stocké a changé depuis notre dernière lecture : on le fusionne EN PLACE (les références gardées par l'appelant restent valables). Renvoie true si quelque chose a été repris.
+function absorb() {
+  const raw = getRaw('profile');
+  if (raw == null || raw === lastRaw) return false;
+  let ext = null;
+  try { ext = JSON.parse(raw); } catch { /* abîmé : on garde le nôtre */ }
+  lastRaw = raw;
+  if (!ext || typeof ext !== 'object' || Array.isArray(ext)) return false;
+  settle(cache, deviceId());                       // (ce que le code de cet onglet a changé sans l'écrire encore est d'abord porté à son compteur)
+  const merged = normalize(mergeProfile(cache, ext));
+  for (const k of Object.keys(cache)) if (!(k in merged)) delete cache[k];
+  Object.assign(cache, merged);
+  return true;
+}
 export function profile() {
+  if (cache && cacheScope !== getScope()) cache = null;          // (changement de portée sans reloadProfile : on relit, on ne mélange pas)
   if (!cache) {
     const raw = getJSON('profile', {});
-    cache = { ...DEFAULT(), ...(raw && typeof raw === 'object' ? raw : {}) };
-    cache.loadout = sanitizeLoadout(cache.loadout);
-    cache.owned = cache.owned && typeof cache.owned === 'object' ? cache.owned : {};
-    cache.medals = cache.medals && typeof cache.medals === 'object' ? cache.medals : {};
-    cache.stats = { races: 0, earned: 0, ...(cache.stats || {}) };
-    if (!cache.id) cache.id = newPlayerId();
-    fromWallet(cache);          // pièces : le portefeuille fait foi ; un profil d'avant 0.16.10 y est migré (ligne de base = son solde : le total ne change pas)
-    setJSON('profile', cache, { quiet: quietLoad });
-  }
+    cache = normalize({ ...DEFAULT(), ...(raw && typeof raw === 'object' ? raw : {}) });
+    cacheScope = getScope();
+    write(quietLoad);
+  } else absorb();
   return cache;
 }
 
-// (les pièces changées par le code de cet appareil depuis la dernière écriture sont portées à son compteur : wallet.settle)
+// (les pièces changées par le code de cet appareil depuis la dernière écriture sont portées à son compteur : wallet.settle ; la version d'un autre onglet est fusionnée d'abord)
 export function saveProfile() {
-  if (cache) { settle(cache, deviceId()); setJSON('profile', cache); }
+  if (!cache) return;
+  if (cacheScope !== getScope()) { cache = null; return; }
+  settle(cache, deviceId());
+  absorb();
+  write(false);
 }
+
+// Un autre onglet a écrit le profil (évènement « storage » du navigateur) : ce cache le fusionne tout de suite, et l'affichage peut suivre (onProfileChange).
+const changeListeners = new Set();
+export function onProfileChange(fn) { changeListeners.add(fn); return () => changeListeners.delete(fn); }
+export function storageEvent(e) {
+  if (!cache || !e || e.key !== scopedKey('profile')) return false;
+  if (!absorb()) return false;
+  for (const fn of changeListeners) { try { fn(cache); } catch { /* l'affichage ne casse rien */ } }
+  return true;
+}
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('storage', storageEvent);
 
 // Relit le profil depuis le stockage (après une restauration, une synchronisation, un changement de compte). Ne déclenche JAMAIS de synchronisation : elle écrit le profil remis en forme
 // sans prévenir le compte (TECH-007 : avant, chaque synchronisation réécrivait le profil, donc en relançait une 4 s plus tard, sans fin quand la restauration échouait).

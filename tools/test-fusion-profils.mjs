@@ -167,5 +167,66 @@ await test('import « Remplacer » garde son sens : tout est remplacé (y compri
   assert.equal(profile().xp, 5); assert.equal(profile().coins, 3); assert.equal(storage.getRecord('b-x-7').time, 12);
 });
 
+console.log('TECH-027 : deux onglets');
+await test('onglet 1 : achat + médaille cristal ; onglet 2 (chargé avant) : une course → l\'achat et la médaille sont conservés, rien n\'est remboursé', async () => {
+  boot('T1');
+  addCoins(1000);
+  const tab2 = await import('../js/profile.js?onglet=2');      // un second onglet : son propre cache du profil, le même stockage
+  tab2.reloadProfile();
+  const cost = itemCost('spoiler', 'gt');
+  assert.equal(buy([['spoiler', 'gt']]), true);                                     // onglet 1
+  const r1 = P.rewardCoins({ tier: 0, trackKey: 'b-a-1' });                        // onglet 1 : cristal
+  const r2 = tab2.rewardCoins({ tier: 3, trackKey: 'b-b-2' });                     // onglet 2 : bronze, avec son cache d'avant l'achat
+  const stored = storage.getJSON('profile');
+  assert.ok(stored.owned['spoiler:gt'], 'l\'objet acheté est toujours là');
+  assert.equal(stored.medals['b-a-1'], 0, 'la médaille cristal est toujours là'); assert.equal(stored.medals['b-b-2'], 3);
+  assert.equal(stored.coins, 1000 - cost + r1.coins + r2.coins, 'pièces : ni remboursement, ni gain perdu');
+  reloadProfile(); assert.equal(profile().coins, stored.coins);
+});
+
+await test('évènement « storage » : l\'autre onglet reprend tout de suite la version écrite ailleurs (affichage à jour), sans rien perdre de la sienne', async () => {
+  boot('T2');
+  const tab2 = await import('../js/profile.js?onglet=3');
+  tab2.reloadProfile();
+  const seen = [];
+  const off = tab2.onProfileChange((p) => seen.push(p.coins));
+  addCoins(70);                                                        // onglet 1
+  assert.equal(tab2.storageEvent({ key: 'autre.cle' }), false, 'une autre clé ne déclenche rien');
+  assert.equal(tab2.storageEvent({ key: storage.scopedKey('profile') }), true);
+  assert.deepEqual(seen, [70]); assert.equal(tab2.profile().coins, 70);
+  off();
+});
+await test('400 parties à deux onglets entrelacés au hasard (gains, achats, médailles, évènements « storage ») : rien de perdu, rien de remboursé, pièces exactes', async () => {
+  const tabB = await import('../js/profile.js?onglet=4');
+  const items = [['spoiler', 'gt'], ['spoiler', 'duck'], ['led', 'cyan'], ['wheels', 'neon']];
+  for (let g = 1; g <= 400; g++) {
+    let x = g * 2654435761 >>> 0; const rnd = () => (x = (x * 1664525 + 1013904223) >>> 0) / 4294967296;
+    boot('TF' + (g % 7)); storage.setScope('fuzz' + g); reloadProfile(); tabB.reloadProfile();
+    const tabs = [P, tabB];
+    let gained = 0, spent = 0; const bought = new Set(), medals = {};
+    for (let i = 0; i < 25; i++) {
+      const t = tabs[Math.floor(rnd() * 2)], r = rnd();
+      if (r < 0.4) { const n = 1 + Math.floor(rnd() * 200); t.addCoins(n); gained += n; }
+      else if (r < 0.6) { const it = items[Math.floor(rnd() * items.length)], k = it.join(':'); const p = t.profile(); if (!p.owned[k] && p.coins >= itemCost(...it) && t.buy([it])) { bought.add(k); spent += itemCost(...it); } }
+      else if (r < 0.85) { const k = 'b-t' + Math.floor(rnd() * 3), tier = Math.floor(rnd() * 4); const rw = t.rewardCoins({ tier, trackKey: k }); gained += rw.coins; medals[k] = Math.min(medals[k] ?? 9, tier); }
+      else if (rnd() < 0.5) tabs[1 - tabs.indexOf(t)].storageEvent({ key: storage.scopedKey('profile') });
+    }
+    const st = storage.getJSON('profile');
+    assert.equal(st.coins, gained - spent, `partie ${g} : pièces ${st.coins}, attendu ${gained} − ${spent}`);
+    for (const k of bought) assert.ok(st.owned[k], `partie ${g} : ${k} perdu`);
+    for (const [k, t] of Object.entries(medals)) assert.equal(st.medals[k], t, `partie ${g} : médaille ${k}`);
+  }
+  storage.setScope('');
+});
+await test('un cache n\'est jamais fusionné avec le profil d\'une AUTRE portée (invité / compte) : changement de portée sans reloadProfile → relu, rien de mélangé', () => {
+  boot('T3');
+  addCoins(40);                                              // invité
+  storage.setScope('compte-x');
+  assert.equal(profile().coins, 0, 'le compte n\'a pas les pièces de l\'invité');
+  addCoins(5);
+  storage.setScope('');
+  assert.equal(profile().coins, 40, 'l\'invité n\'a pas reçu celles du compte');
+});
+
 await finish('Toutes les reproductions de la fusion passent.');
 process.exit(0);
