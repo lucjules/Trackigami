@@ -114,5 +114,17 @@ await test('titre et premières arrivées du jour différents sur A et B : ils c
   const titleB = profile().title; await on(A); assert.equal(profile().title, titleB, 'même titre partout');
 });
 
+console.log('TECH-077 : valeur de médaille invalide');
+const { mergeProfile } = await import('../js/cloudsave.js');
+test('une valeur de médaille invalide est ignorée : jamais convertie en cristal (0)', () => {
+  for (const junk of ['x', null, -1, 7, 1.5, NaN, {}, [], '']) {
+    const m = mergeProfile({ id: 'A', medals: { k: junk, j: 2 } }, { id: 'B', medals: { j: 3 } });
+    assert.notEqual(m.medals.k, 0, 'valeur ' + JSON.stringify(junk) + ' devenue cristal');
+    assert.equal(m.medals.j, 2);
+    const n = mergeProfile({ id: 'A', medals: { k: junk } }, { id: 'B', medals: { k: 2 } });
+    assert.equal(n.medals.k, 2, 'la valeur valide de l\'autre côté est gardée (' + JSON.stringify(junk) + ')');
+  }
+});
+
 await finish('Toutes les reproductions de la fusion passent.');
 process.exit(0);

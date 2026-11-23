@@ -144,6 +144,22 @@ test('avec un ANCIEN client dans la partie (2 000 scénarios) : jamais plus de p
   console.log(`       (scénarios où des gains de l'ancien client ne sont pas comptés : ${lost} / 2000 — attendu, l'ancienne règle les perdait aussi)`);
 });
 
+console.log('Médailles abîmées (TECH-077)');
+test('5 000 paires de médailles avec des valeurs abîmées : le résultat est toujours le meilleur niveau VALIDE des deux côtés, ou rien ; jamais un cristal inventé', () => {
+  const rnd = lcg(4242), JUNK = ['x', '', null, -1, 4, 1.5, NaN, true, false, [], {}, '0', '2', undefined];
+  const val = () => (rnd() < 0.5 ? Math.floor(rnd() * 4) : JUNK[Math.floor(rnd() * JUNK.length)]);
+  const valid = (t) => typeof t === 'number' && Number.isInteger(t) && t >= 0 && t <= 3;
+  for (let i = 0; i < 5000; i++) {
+    const a = { id: 'X', medals: { k: val(), j: val() } }, b = { id: 'X', medals: { k: val() } };
+    const m = mergeProfile(a, b);
+    for (const key of ['k', 'j']) {
+      const ok = [a.medals[key], b.medals[key]].filter(valid);
+      if (ok.length) assert.equal(m.medals[key], Math.min(...ok), `#${i} ${key} : ${JSON.stringify([a.medals[key], b.medals[key]])}`);
+      else assert.ok(!(key in m.medals), `#${i} ${key} : ${JSON.stringify([a.medals[key], b.medals[key]])} → ${JSON.stringify(m.medals[key])}`);
+    }
+  }
+});
+
 console.log('Migration d\'un profil d\'avant le modèle additif');
 test('un ancien profil (pièces, objets achetés, cadeaux) est migré SANS changement de total ; deux copies divergentes suivent l\'ancienne règle sans jamais déduire un cadeau', () => {
   const old = { id: 'X', coins: 1234, owned: { [BUYABLE[1]]: 1, 'led:rainbow': 1, [EXCL[0]]: 1 }, eggs: { konami: 1 } };

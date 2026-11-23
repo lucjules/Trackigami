@@ -41,6 +41,7 @@ export function fromCloud(data) {
 
 const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : {});
 const num = (x) => (Number.isFinite(+x) ? +x : 0);
+const validTier = (t) => typeof t === 'number' && Number.isInteger(t) && t >= 0 && t <= 3;      // niveau de médaille : 0 cristal, 1 or, 2 argent, 3 bronze
 
 function mergeRecord(a, b) {
   if (!a) return b;
@@ -78,8 +79,13 @@ export function mergeProfile(local, remote) {
   if (!Object.keys(a).length) return { ...b };
   if (!Object.keys(b).length) return { ...a };
   const owned = { ...obj(a.owned), ...obj(b.owned) };
-  const medals = { ...obj(b.medals) };
-  for (const [k, tier] of Object.entries(obj(a.medals))) medals[k] = k in medals ? Math.min(num(tier), num(medals[k])) : tier;   // 0 = cristal : le plus petit est le meilleur
+  // Médailles : le meilleur niveau (0 = cristal : le plus petit). Une valeur invalide (abîmée, d'un autre format) est IGNORÉE (TECH-077) : avant, num() en faisait 0, c'est-à-dire cristal.
+  const ma = obj(a.medals), mb = obj(b.medals);
+  const medals = {};
+  for (const k of new Set([...Object.keys(ma), ...Object.keys(mb)])) {
+    const t = [ma[k], mb[k]].filter(validTier);
+    if (t.length) medals[k] = Math.min(...t);
+  }
   const eggs = { ...obj(b.eggs), ...obj(a.eggs) };
   const shards = { ...obj(b.shards), ...obj(a.shards) };
   const stats = { ...obj(b.stats), ...obj(a.stats), races: Math.max(num(a.stats && a.stats.races), num(b.stats && b.stats.races)), earned: Math.max(num(a.stats && a.stats.earned), num(b.stats && b.stats.earned)) };
