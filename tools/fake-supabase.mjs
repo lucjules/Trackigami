@@ -1,5 +1,5 @@
 // Faux navigateur (un « appareil » = un localStorage + un sessionStorage) et faux Supabase (Auth + REST) en mémoire, pour les tests du client (comptes, cloud).
-// Extrait de test-account.mjs : refreshStatus simule une panne du serveur (500, 429) au renouvellement de session.
+// Extrait de test-account.mjs : refreshStatus simule une panne du serveur (500, 429) au renouvellement de session ; delay, une sauvegarde lente.
 
 // ---- Faux navigateur : un « appareil » = un localStorage + un sessionStorage ------------------------------------
 class Store {
@@ -21,7 +21,7 @@ export function device(name) {
 device('A');
 
 // ---- Faux Supabase ----------------------------------------------------------------------------------------------
-export const srv = { users: new Map(), tokens: new Map(), refresh: new Map(), saves: new Map(), accounts: new Map(), players: new Map(), calls: [], refreshFails: false, refreshStatus: 0, offline: false, beforeNextPatch: null, n: 0 };
+export const srv = { users: new Map(), tokens: new Map(), refresh: new Map(), saves: new Map(), accounts: new Map(), players: new Map(), calls: [], refreshFails: false, refreshStatus: 0, offline: false, beforeNextPatch: null, n: 0, delay: {} };
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 export function session(user) {
   const at = 'at' + ++srv.n, rt = 'rt' + ++srv.n;
@@ -35,6 +35,8 @@ globalThis.fetch = async (url, init = {}) => {
   const auth = (init.headers || {}).Authorization;
   const user = auth ? srv.tokens.get(auth.replace('Bearer ', '')) : null;
   srv.calls.push({ method, path, body });
+  // Latence simulée par méthode sur la sauvegarde (srv.delay = { GET: ms, PATCH: ms }) : avec un temps virtuel, une « synchronisation de 6 s » sans attendre.
+  if (path === '/rest/v1/cloud_saves' && srv.delay[method]) await new Promise((r) => setTimeout(r, srv.delay[method]));
   if (path === '/auth/v1/signup') {
     if (body.email) {
       if (srv.users.has(body.email)) return json(422, { error_code: 'user_already_exists', msg: 'User already registered' });

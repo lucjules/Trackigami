@@ -62,6 +62,7 @@ class Account {
     this._timer = null;
     this._running = null;
     this._dirty = false;
+    this._gen = 0;
     this._wired = false;
   }
 
@@ -222,6 +223,7 @@ class Account {
   scheduleSync(delay = 4000) {
     if (!this.state) return;
     this._dirty = true;
+    this._gen++;                 // génération des écritures : une synchronisation sait si quelque chose a été écrit PENDANT qu'elle tournait (TECH-023)
     clearTimeout(this._timer);
     this._timer = setTimeout(() => { this.sync().catch(() => {}); }, delay);
   }
@@ -232,10 +234,16 @@ class Account {
     if (this._running) return this._running;
     clearTimeout(this._timer);
     this.status = 'syncing';
+    // Une écriture faite PENDANT la synchronisation (après sa lecture du stockage local) n'en fait pas partie : avant (TECH-023), sa minuterie rappelait sync(), qui renvoyait la
+    // promesse en cours, puis _dirty repassait à faux : la modification n'atteignait le cloud qu'à la prochaine écriture. Si la génération a bougé, on relance tout de suite, une fois.
+    const gen = this._gen;
     this._running = this._doSync()
-      .then((r) => { this.status = 'ok'; this.lastSync = Date.now(); this.lastError = ''; this._dirty = false; return r; })
+      .then((r) => { this.status = 'ok'; this.lastSync = Date.now(); this.lastError = ''; if (this._gen === gen) this._dirty = false; return r; })
       .catch((e) => { this.status = e.code === 'offline' ? 'offline' : 'error'; this.lastError = e.message; throw e; })
-      .finally(() => { this._running = null; this._notify(); });
+      .finally(() => {
+        this._running = null; this._notify();
+        if (this.state && this._gen !== gen && this.status === 'ok') { clearTimeout(this._timer); this.sync().catch(() => {}); }
+      });
     return this._running;
   }
 

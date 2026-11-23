@@ -228,5 +228,52 @@ await test('un cache n\'est jamais fusionné avec le profil d\'une AUTRE portée
   assert.equal(profile().coins, 40, 'l\'invité n\'a pas reçu celles du compte');
 });
 
+console.log('TECH-023 : écriture pendant une synchronisation');
+const { setImmediate } = await import('node:timers');
+const flush = async () => { for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r)); };
+async function advance(ms) {
+  const end = clock.now + ms;
+  await flush();
+  for (;;) {
+    const next = [...timers.values()].filter((t) => t.at <= end).sort((a, b) => a.at - b.at || a.id - b.id)[0];
+    if (!next) break;
+    timers.delete(next.id); clock.now = Math.max(clock.now, next.at);
+    try { next.fn(); } catch { /* sans importance */ }
+    await flush();
+  }
+  clock.now = end;
+}
+await test('1 000 ◆ gagnés pendant une synchronisation de 6 s : envoyés dans la foulée', async () => {
+  const [A] = await twoDevices();
+  await on(A); await account.sync();
+  addCoins(5); account.scheduleSync(10);
+  srv.delay = { PATCH: 6000 };
+  await advance(1000);                     // la synchronisation est en cours (PATCH lent)
+  assert.equal(account.status, 'syncing');
+  addCoins(1000);                          // une course gagnée pendant ce temps
+  await advance(20_000);
+  srv.delay = {};
+  assert.equal(cloudOf().profile.coins, 1005, 'les 1 000 ◆ sont arrivés dans le cloud');
+  assert.equal(account._dirty, false); assert.equal(timers.size, 0);
+});
+
+await test('sans écriture pendant la synchronisation : une seule lecture, aucune relance ; une écriture pendant la relance en provoque une autre, jamais de boucle', async () => {
+  const [A] = await twoDevices();
+  await on(A); await account.sync();
+  srv.calls.length = 0;
+  addCoins(1); account.scheduleSync(10);
+  await advance(20_000);
+  assert.equal(srv.calls.filter((c) => c.method === 'GET' && c.path === '/rest/v1/cloud_saves').length, 1, 'une seule lecture');
+  srv.calls.length = 0; srv.delay = { PATCH: 3000 };
+  addCoins(1); account.scheduleSync(10);
+  await advance(1000); addCoins(10);              // pendant la 1re
+  await advance(4500); addCoins(100);             // pendant la relance
+  await advance(30_000);
+  srv.delay = {};
+  assert.equal(cloudOf().profile.coins, 1 + 1 + 10 + 100);
+  assert.ok(srv.calls.filter((c) => c.method === 'GET' && c.path === '/rest/v1/cloud_saves').length <= 4, 'nombre de synchronisations borné');
+  assert.equal(timers.size, 0); assert.equal(account._dirty, false);
+});
+
 await finish('Toutes les reproductions de la fusion passent.');
 process.exit(0);
