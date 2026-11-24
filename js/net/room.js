@@ -4,20 +4,25 @@
 //   Supabase Realtime : annuaire des joueurs (présence) et échange des offres WebRTC, rien d'autre ;
 //   WebRTC (canal « ctl », fiable)  : prêt, circuit choisi, départ, arrivée, ping ;
 //   WebRTC (canal « state », rapide): la position de chaque voiture, 20 fois par seconde.
-// Le salon n'a ni serveur de jeu ni hôte autoritaire : l'« hôte » (le créateur, ou à défaut l'identifiant le plus petit)
-// ne fait que choisir le circuit et donner le départ. Chacun pilote sa voiture et en est seul juge.
+// Le salon n'a ni serveur de jeu ni hôte autoritaire : l'« hôte » ne fait que choisir le circuit et donner le départ. Chacun pilote sa voiture et en
+// est seul juge. Qui est l'hôte (TECH-010, TECH-040) : le premier PRÉSENT dans l'ordre d'arrivée de la salle (le créateur, puis les arrivants dans l'ordre où
+// l'hôte les a vus prouver leur identité). L'ordre est tenu par l'hôte et envoyé à chacun (order) ; chaque membre le recalcule lui-même et refuse un ordre
+// qui ferait passer l'expéditeur devant un joueur dont la place est encore gardée. Le drapeau host de la présence n'est plus qu'une indication : il ne donne
+// aucun droit. Un hôte absent (place gardée) est remplacé, le temps de son absence, par le suivant présent ; revenu avec son secret, il reprend la main.
 //
 // Deux modes, au choix de l'hôte :
 //   LIBRE      : chacun court à son rythme sur le même circuit, recommence quand il veut (R) ; le tableau garde le meilleur temps de chacun ;
 //   CHAMPIONNAT (« manche ») : plusieurs circuits à la suite (championship.js), départ commun sur une grille, points par place, classement général.
-//     L'hôte ne fait que donner les départs et clore chaque manche ; son rôle passe à l'identifiant le plus petit s'il part (l'état du championnat est
-//     copié chez tous les joueurs). Messages fiables : cup (le championnat) · round (départ de la manche n) · finish{rn} (mon temps) · rend (manche close,
+//     L'hôte ne fait que donner les départs et clore chaque manche ; son rôle passe au suivant dans l'ordre d'arrivée s'il part ou s'absente (l'état du
+//     championnat est copié chez tous les joueurs). Messages fiables : cup (le championnat) · round (départ de la manche n) · finish{rn} (mon temps) · rend (manche close,
 //     temps de tous) · cupstop (l'hôte arrête). Une manche se clôt quand tous ont fini ou quitté, FINISH_GRACE_MS après la première arrivée, ou au plafond.
 // Époque de lancement (NET_VER 5, TRANS-05) : chaque lancement de l'hôte (course libre, championnat, « Course ») a un numéro e, croissant dans la salle ;
 //     start, track, live, cup, round, rend, cupstop et finish le portent, et un message d'une autre époque est ignoré. Le choix d'un circuit (track) ne lance
 //     JAMAIS : seul start (ou cup / round) lance. « Course en cours » n'est plus un état mémorisé : l'hôte annonce sa course libre réellement en cours (live),
 //     un arrivant qui ne l'a jamais courue la rejoint, un joueur revenu au salon n'y est pas renvoyé (voir supabase/MULTI.md, « Époque de lancement »).
 // Reconnexion (E16, NET_VER 4 ; voir resume.js) : hello (à l'ouverture d'une liaison) · bye (départ volontaire) · hostover (un nouvel hôte se marque).
+// Identité et ordre (phase 17, docs/MENACES-MULTIJOUEUR.md) : hi / hello (défi et preuve sur chaque liaison) · order (ordre d'arrivée, avec les engagements) ·
+//     orderq (demande de l'ordre, après une longue coupure) ; hostover porte l'ordre.
 //     Une coupure n'est pas un départ : la place est gardée RESUME_MS (« away »), le joueur coupé retente de rejoindre la salle avec le même identifiant.
 //     Les liaisons WebRTC ne dépendent pas de la signalisation (TECH-046) : quand seule la signalisation tombe, on continue de jouer ; une place n'est gardée
 //     que quand la LIAISON tombe aussi (canal fermé, ou silence malgré les pings : _checkLinks). Arrivées non reçues : renvoyées à la réouverture.
@@ -46,6 +51,14 @@ const OUTBOX_MAX = 16;                                             // messages f
 const PROOF_TIMEOUT_MS = 10000;                                    // une liaison dont l'autre ne prouve pas son identité dans ce délai est refaite (ou fermée)
 const INBOX_MAX = 64;                                              // messages reçus d'une liaison pas encore vérifiée : gardés, traités après la preuve
 const MAX_PROOF_FAILS = 3;                                         // preuves refusées de suite pour un même identifiant : on arrête de refaire sa liaison
+// Ordre d'arrivée (TECH-010) : un arrivant (ou un joueur revenu d'une longue coupure) adopte l'ordre que lui donne la majorité des membres vérifiés ; il le
+// tient pour acquis quand tous les présents l'ont donné, ou au bout de BOOT_MS. Un onglet rechargé qui revient avec son secret attend au plus INHERIT_MS
+// l'état de la salle (du joueur qui faisait l'intérim) avant de reprendre son rôle d'hôte. ORDER_SLACK_MS : marge entre les horloges des membres (une place
+// gardée depuis plus de RESUME_MS - ORDER_SLACK_MS peut déjà avoir été rendue chez l'hôte).
+const BOOT_MS = 5000;
+const INHERIT_MS = 4000;
+const ORDER_SLACK_MS = 5000;
+const MAX_ID_CHARS = 64;
 const validCommit = (c) => (typeof c === 'string' && COMMIT_RE.test(c) ? c : null);
 
 export const ROOM_RE = /^[A-HJ-NP-Z2-9]{6}$/;
@@ -81,6 +94,11 @@ export class Room extends Emitter {
     this.code = code; this.selfId = selfId; this.now = now; this.schedule = schedule;
     this._identitySaved = identity; this.ident = null; this._crypto = 0;
     this._pins = new Map();             // id → engagement prouvé (TECH-040) : gardé tant que la salle est ouverte, même après son départ (voir _onPeer)
+    // Ordre d'arrivée (TECH-010) : [id…] ; null tant qu'aucun membre ne me l'a donné (arrivant). _orderCommits : les engagements qu'il porte.
+    this._order = null; this._orderCommits = new Map(); this._settled = false; this._reports = new Map(); this._bootAt = null;
+    // Onglet rechargé (revenu avec son secret) : il ne reprend le rôle d'hôte qu'après avoir reçu l'état de la salle (ou INHERIT_MS après sa première liaison).
+    this._inheriting = !!identity; this._inheritUntil = null;
+    this._lastHostId = undefined;
     this.reconnecting = false;          // signalisation perdue : on retente de rejoindre la salle (resume.js)
     this._pendingFinish = null;         // championnat : mon arrivée { e, rn, steps } de la manche en cours, renvoyée à l'hôte si une liaison se rouvre (TECH-084 : de CE championnat seulement)
     this.makeSignaling = makeSignaling; this.makeMesh = makeMesh; this.getIce = getIce;
@@ -111,7 +129,8 @@ export class Room extends Emitter {
   static async create(opts) {
     for (let i = 0; i < 4; i++) {
       const room = new Room({ ...opts, code: opts.code || newRoomCode() });
-      room.meta.host = true;
+      room.meta.host = true; room._creating = true;
+      room._order = [room.selfId]; room._settled = true; room._inheriting = false;       // le créateur ouvre l'ordre d'arrivée
       try { await room._open(); }
       catch (e) { room._dispose(); if (e.code === 'taken' && !opts.code) continue; throw e; }
       return room;
@@ -144,19 +163,23 @@ export class Room extends Emitter {
     catch (e) { throw new RoomError(e.message || 'Connexion au serveur de salons impossible.', 'network'); }
 
     // Un invité qui arrive laisse un court instant à la liste des présents pour se remplir (réseau lent).
-    if (!this.meta.host) for (let i = 0; i < 15 && ![...sig.peers.values()].some((m) => m.host); i++) await new Promise((r) => setTimeout(r, 100));
+    if (!this._creating) for (let i = 0; i < 15 && !sig.peers.size; i++) await new Promise((r) => setTimeout(r, 100));
     const present = [...sig.peers.entries()];
-    const host = present.find(([, m]) => m.host);
-    if (this.meta.host) {
-      if (host) throw new RoomError('Ce code est déjà utilisé.', 'taken');
+    // TECH-010 : une salle existe tant que quelqu'un y est, même si personne n'est marqué hôte (hôte absent, ou qui recharge sa page). Le drapeau ne sert
+    // plus qu'à savoir quelle version la salle joue (à défaut, celle du plus ancien présent).
+    if (this._creating) {
+      if (present.length) throw new RoomError('Ce code est déjà utilisé.', 'taken');
     } else {
-      if (!host) throw new RoomError('Salle introuvable. Vérifie le code.', 'not-found');
+      if (!present.length) throw new RoomError('Salle introuvable. Vérifie le code.', 'not-found');
       if (present.length + 1 > MAX_PLAYERS) throw new RoomError(`Salle pleine (${MAX_PLAYERS} joueurs).`, 'full');
-      if (host[1].v !== PHYS_VER || host[1].net !== NET_VER) throw new RoomError('Version du jeu différente de celle de l\'hôte : recharge la page.', 'version');
+      const ref = (present.find(([, m]) => m && m.host) || present.slice().sort(([, a], [, b]) => ((a && a.t) || 0) - ((b && b.t) || 0))[0])[1] || {};
+      if (ref.v !== PHYS_VER || ref.net !== NET_VER) throw new RoomError('Version du jeu différente de celle de l\'hôte : recharge la page.', 'version');
     }
     for (const [id, meta] of present) this._onPeer(id, meta);
-    this._pingTimer = setInterval(() => { this._sweepLinks(); this._checkLinks(); this._pingAll(); this._expireAway(); }, 2000);
+    this._pingTimer = setInterval(() => { this._sweepLinks(); this._checkLinks(); this._pingAll(); this._expireAway(); this._checkHost(); }, 2000);
     this._cupTimer = setInterval(() => this._cupTick(), 400);
+    this._ready = true;
+    this._checkHost();
     this.emit('members');
   }
 
@@ -204,10 +227,11 @@ export class Room extends Emitter {
         return;
       }
       if (this.closed || this.signaling !== sig) { try { sig.leave(); } catch { /* fermé */ } return; }
-      // Un autre a pris la place d'hôte pendant l'absence (hostover) : on ne la reprend pas avec un état peut-être périmé.
-      if (this.meta.host && [...sig.peers.values()].some((m) => m && m.host)) { this.meta.host = false; sig.track(this.meta); }
       this.reconnecting = false;
-      for (const [id, meta] of sig.peers.entries()) this._onPeer(id, meta);
+      // Coupé assez longtemps pour que les autres aient pu rendre ma place (et l'hôte, retirer mon nom de l'ordre) : je reprends l'ordre de la salle (celui de
+      // la majorité des membres) avant de me croire hôte. Une coupure courte ne change rien : ma place (et mon rôle) m'ont été gardés.
+      if (this.now() - this._lostAt >= RESUME_MS - ORDER_SLACK_MS) this._unsettle();
+      for (const [id, meta] of sig.peers.entries()) this._onPeer(id, meta, null, true);
       // Ceux qu'on ne retrouve pas dans l'annuaire : on continue avec ceux dont la liaison est ouverte ; les autres sont absents depuis notre coupure.
       for (const m of [...this.members.values()]) {
         if (sig.peers.has(m.id)) continue;
@@ -217,6 +241,7 @@ export class Room extends Emitter {
       }
       this.emit('reconnected');
       this.emit('members');
+      this._checkHost();
     }, RETRY_MS[Math.min(i, RETRY_MS.length - 1)]);
   }
 
@@ -224,9 +249,10 @@ export class Room extends Emitter {
   _markAway(id, since = this.now()) {
     const m = this.members.get(id);
     if (!m) return;
-    if (m.link !== 'away') m.awaySince = since;
+    if (m.link !== 'away' && !m.returning) m.awaySince = since;
     m.link = 'away';
     this.mesh.removePeer(id);
+    this._checkHost();
   }
 
   // Liaison refaite à neuf (connexion neuve et nouvelle négociation).
@@ -294,24 +320,30 @@ export class Room extends Emitter {
     for (const id of [...links.keys()]) { const m = this.members.get(id); if (!m || m.link === 'incompatible' || m.link === 'away') this.mesh.removePeer(id); }
   }
 
+  // Places gardées échues. TECH-010 : un joueur revenu dans l'annuaire mais pas encore relié (preuve d'identité non faite) garde le délai de son absence : un
+  // retour sans liaison ne le remet pas à zéro. Rendue, sa place est perdue ; s'il est encore dans l'annuaire, il est repris comme un arrivant.
   _expireAway() {
     const now = this.now();
     if (this.reconnecting) return;                                   // c'est NOUS qui sommes coupés : on ne juge pas les autres
-    for (const m of [...this.members.values()]) if (m.link === 'away' && now - m.awaySince >= RESUME_MS) this._drop(m.id);
+    for (const m of [...this.members.values()]) {
+      if ((m.link === 'away' || m.returning) && m.awaySince != null && now - m.awaySince >= RESUME_MS) {
+        this._drop(m.id);
+        const meta = this.signaling && this.signaling.peers && this.signaling.peers.get(m.id);
+        if (meta && !this.members.has(m.id)) this._onPeer(m.id, meta);
+      }
+    }
   }
 
   // Départ définitif (au revoir, ou absence au-delà de RESUME_MS).
   _drop(id) {
     if (!this.members.has(id)) return;
-    const wasHost = this.isHost, hostBefore = this.hostId;
     this.members.delete(id);
     this.mesh.removePeer(id);
     this.buffers.delete(id);
+    this._unorder(id);
     this.emit('members');
     this.emit('left', id);
-    if (!wasHost && this.isHost) this._becomeHost();
-    // TECH-048 : un autre prend la place d'hôte (vu ici, quel que soit l'ordre de son « hostover ») : je lui donne mon état et mon arrivée en attente.
-    else if (!this.isHost && this.cup && this.hostId !== hostBefore) { this._sendCupSync(this.hostId); this._resendFinish(this.hostId); }
+    this._checkHost();
     this._cupTick();                 // un joueur qui part ne doit pas bloquer la manche (ni, si c'était l'hôte, la rendre orpheline)
     this._readmit();
   }
@@ -326,13 +358,142 @@ export class Room extends Emitter {
     }
   }
 
-  // Nouvel hôte (l'ancien est parti) : il se marque, pour que l'ancien, s'il revient, ne reprenne pas la main.
+  // Je deviens l'hôte (l'ancien est parti ou absent, ou je reviens à ma place) : je me marque dans la présence (indication pour les arrivants), j'annonce
+  // l'ordre d'arrivée (chacun vérifie que c'est bien à moi d'être l'hôte) et ma course libre en cours (ou rien).
   _becomeHost() {
     if (this.meta.host || this.closed) return;
     this.meta.host = true;
     try { this.signaling.track(this.meta); } catch { /* fermé */ }
-    this.mesh.sendCtl({ k: 'hostover' });
+    this.mesh.sendCtl({ k: 'hostover', o: this._orderPayload() });
+    this._sendLive();
     this.emit('hostover');
+  }
+
+  // Je ne suis plus l'hôte (l'hôte que je remplaçais est revenu, ou l'ordre de la salle me met après un autre) : je retire mon drapeau.
+  _resign() {
+    if (!this.meta.host || this.closed) return;
+    this.meta.host = false;
+    try { this.signaling.track(this.meta); } catch { /* fermé */ }
+    this.emit('members');
+  }
+
+  // TECH-010 : à chaque changement (arrivée, absence, retour, départ, ordre reçu), qui est l'hôte est recalculé ; le drapeau suit. Quand l'hôte change, je lui
+  // donne mon état du championnat et mon arrivée en attente (TECH-048).
+  _checkHost() {
+    if (this.closed || !this._ready) return;
+    // Seul dans la salle (tous partis), sans ordre tenu pour acquis : je suis l'hôte.
+    if (!this.members.size && !this.reconnecting && !this._settled) { this._order = [this.selfId]; this._settled = true; this._inheriting = false; }
+    const host = this.hostId, me = this.isHost;
+    if (me && !this.meta.host) this._becomeHost();
+    else if (!me && this.meta.host) this._resign();
+    if (host !== this._lastHostId) {
+      const before = this._lastHostId;
+      this._lastHostId = host;
+      if (!me && host && before !== undefined && this.cup) { this._sendCupSync(host); this._resendFinish(host); }
+      if (me) this._cupTick();
+      this.emit('members');
+    }
+  }
+
+  // ---- Ordre d'arrivée (TECH-010) ----------------------------------------------------------------------------------------
+  // Présent pour le rôle d'hôte : ni absent (place gardée), ni revenu sans preuve, ni d'une autre version. Pendant MA coupure, je ne juge pas les autres
+  // (comme pour leurs places : _expireAway) : un joueur coupé ne se croit pas hôte parce qu'il ne voit plus personne.
+  _presentForHost(id) {
+    if (id === this.selfId) return !this._inheritingNow();
+    const m = this.members.get(id);
+    return !!m && m.link !== 'incompatible' && !m.returning && (m.link !== 'away' || this.reconnecting);
+  }
+  _inheritingNow() { return this._inheriting && (this._inheritUntil == null || this.now() < this._inheritUntil); }
+  _orderPayload() { return (this._order || [this.selfId]).map((id) => [id, id === this.selfId ? (this.ident && this.ident.commit) || null : this._pins.get(id) || this._orderCommits.get(id) || null]); }
+  _orderCommit(id) { return this._orderCommits.get(id) || null; }
+
+  // Un ordre reçu : [[id, engagement]…], borné ; null s'il est invalide.
+  _cleanOrder(o) {
+    if (!Array.isArray(o) || !o.length || o.length > MAX_PLAYERS * 4) return null;
+    const seen = new Set(), out = [];
+    for (const e of o) {
+      const id = Array.isArray(e) ? e[0] : e;
+      if (typeof id !== 'string' || !id || id.length > MAX_ID_CHARS || seen.has(id)) return null;
+      seen.add(id); out.push([id, Array.isArray(e) ? validCommit(e[1]) : null]);
+    }
+    return out;
+  }
+
+  _setOrder(o) {
+    this._order = o.map((e) => e[0]);
+    for (const [id, c] of o) if (c && id !== this.selfId && !this._pins.has(id)) this._orderCommits.set(id, c);
+    if (!this._order.includes(this.selfId)) this._order.push(this.selfId);
+  }
+
+  // Un joueur vient de prouver son identité : s'il n'est pas dans l'ordre, il y entre à la fin (l'hôte l'annonce à tous).
+  // Il y prend sa place d'ARRIVÉE (l'ordre dans lequel je l'ai vu apparaître dans la salle, rien que je ne mesure moi-même : ni son horloge, ni son identifiant),
+  // pas celle où sa preuve a fini d'être calculée : une signature lente ne fait pas perdre son rang.
+  _enorder(id) {
+    if (!this._order) this._order = [this.selfId];
+    if (this._order.includes(id)) return;
+    const rank = new Map([...this.members.keys()].map((x, i) => [x, i]));
+    const at = this._order.findIndex((x) => rank.has(x) && rank.get(x) > rank.get(id));
+    if (at < 0) this._order.push(id); else this._order.splice(at, 0, id);
+    if (this.isHost) this.mesh.sendCtl({ k: 'order', o: this._orderPayload() });
+  }
+  _unorder(id) {
+    if (!this._order || !this._order.includes(id)) return;
+    this._order = this._order.filter((x) => x !== id);
+    if (this.isHost) this.mesh.sendCtl({ k: 'order', o: this._orderPayload() });
+  }
+
+  // Ordre reçu d'un membre vérifié. Arrivant : c'est un avis (voir _bootstrap). Sinon, seul celui que JE tiens pour l'hôte peut me le donner, et seulement s'il
+  // ne passe pas devant un joueur dont je garde encore la place (un client modifié qui ferait l'intérim ne peut pas évincer l'hôte absent).
+  _onOrder(from, d) {
+    const o = this._cleanOrder(d.o);
+    if (!o) return;
+    if (!this._settled) { this._reports.set(from, o); this._bootstrap(); return; }
+    if (from !== this.hostId || !this._orderAcceptable(o.map((e) => e[0]), from)) return;
+    this._setOrder(o);
+    this._checkHost();
+  }
+
+  _orderAcceptable(next, from) {
+    const mine = this._order || [], at = next.indexOf(from);
+    if (at < 0) return false;
+    const now = this.now();
+    for (const id of mine) {
+      if (id === from) break;
+      if (id === this.selfId) return false;                         // (je suis avant lui : c'est moi l'hôte)
+      const m = this.members.get(id);
+      if (!m) continue;                                              // parti pour moi aussi
+      if ((m.link === 'away' || m.returning) && m.awaySince != null && now - m.awaySince >= RESUME_MS - ORDER_SLACK_MS) continue;    // place presque rendue
+      const j = next.indexOf(id);
+      if (j < 0 || j > at) return false;
+    }
+    return true;
+  }
+
+  // Arrivant (ou retour d'une longue coupure) : l'ordre adopté est celui que donnent le plus de membres vérifiés (à égalité, celui dont l'hôte, selon lui,
+  // l'a donné lui-même). Il est tenu pour acquis quand tous les présents qu'il nomme l'ont donné, ou au bout de BOOT_MS.
+  _bootstrap() {
+    if (this._bootAt == null) this._bootAt = this.now();
+    const votes = new Map();
+    for (const [from, o] of this._reports) {
+      const key = JSON.stringify(o.map((e) => e[0]));
+      const v = votes.get(key) || { o, n: 0, own: false };
+      v.n++;
+      if (o.map((e) => e[0]).find((id) => id === from || this._presentForHost(id)) === from) v.own = true;
+      votes.set(key, v);
+    }
+    let best = null;
+    for (const v of votes.values()) if (!best || v.n > best.n || (v.n === best.n && v.own && !best.own)) best = v;
+    if (!best) return;
+    this._setOrder(best.o);
+    const missing = this._order.some((id) => id !== this.selfId && this._presentForHost(id) && !this._reports.has(id));
+    if (!missing) this._settle();
+    this._checkHost();
+  }
+  _settle() { if (this._settled) return; this._settled = true; this._reports.clear(); this._bootAt = null; this._checkHost(); }
+  _checkBoot() { if (!this._settled && this._bootAt != null && this.now() - this._bootAt >= BOOT_MS) this._settle(); }
+  _unsettle() {
+    this._settled = false; this._reports.clear(); this._bootAt = this.now();
+    this.mesh.sendCtl({ k: 'orderq' });                             // (les liaisons restées ouvertes ne refont pas leur preuve : on leur demande leur ordre)
   }
 
   _dispose() {
@@ -353,22 +514,25 @@ export class Room extends Emitter {
   // ---- Membres -------------------------------------------------------------------------------------------------------
   get trackId() { return this.track ? this.track.id : null; }
 
+  // L'hôte : le premier présent dans l'ordre d'arrivée (TECH-010). Absent (place gardée), pas encore revenu (preuve non faite) ou d'une autre version : on passe
+  // au suivant. null tant que je n'ai aucun ordre (arrivant à qui personne n'a encore répondu) : personne n'a alors d'autorité sur moi.
   get hostId() {
-    const flagged = [...this.members.values()].filter((m) => m.host);
-    if (this.meta.host) flagged.push({ id: this.selfId });
-    if (flagged.length) return flagged.map((m) => m.id).sort()[0];
-    return [this.selfId, ...this.members.keys()].sort()[0];        // l'hôte est parti : l'identifiant le plus petit prend la suite
+    if (!this._order) return null;
+    for (const id of this._order) if (this._presentForHost(id)) return id;
+    for (const id of this._order) if (id !== this.selfId && this.members.has(id) && this.members.get(id).link !== 'incompatible') return id;    // (onglet rechargé seul avec des absents)
+    return this.selfId;
   }
-  get isHost() { return this.hostId === this.selfId; }
+  get isHost() { return this._settled && this.hostId === this.selfId; }
   get list() { return [{ id: this.selfId, ...this.meta, self: true, link: 'self', rtt: 0 }, ...this.members.values()]; }
 
-  _onPeer(id, meta, info = null) {
+  // rejoin : je reviens moi-même d'une coupure ; ceux que j'avais marqués absents PENDANT ma coupure ne l'étaient pas (leur liaison est seulement à refaire).
+  _onPeer(id, meta, info = null, rejoin = false) {
     if (id === this.selfId || !meta) return;
     const prev = this.members.get(id);
     // TECH-040 : un joueur que j'ai déjà vu prouver son identité garde CET engagement, pour toute la vie de la salle (même parti : son identifiant ne sert
     // qu'à lui ; un joueur qui revient sans son secret a de toute façon un identifiant neuf). Une connexion de l'annuaire qui annonce son identifiant avec un
     // autre engagement (client modifié) ne change rien : on prend la connexion qui porte le bon engagement s'il y en a une, sinon on l'ignore.
-    const pin = (prev && prev.commit) || this._pins.get(id);
+    const pin = (prev && prev.commit) || this._pins.get(id) || this._orderCommit(id);
     if (pin && validCommit(meta.c) !== pin) {
       const good = this._metasOf(id).filter((x) => x && x.c === pin).pop();
       if (!good) return;
@@ -384,7 +548,9 @@ export class Room extends Emitter {
       listed: true, heardAt: prev ? prev.heardAt : 0, unanswered: prev ? prev.unanswered : 0, outbox: prev ? prev.outbox : [], sentLog: prev ? prev.sentLog : [],
       commit: prev ? prev.commit : null, nonce: prev && !back ? prev.nonce : null, inbox: prev && !back ? prev.inbox : [], provingSince: prev ? prev.provingSince : 0,
       proofFails: prev ? prev.proofFails || 0 : 0, returning: !!(prev && (back || prev.returning)), awaySince: prev ? prev.awaySince : undefined };
+    if (rejoin && prev && prev.awaySince != null && prev.awaySince >= this._lostAt) { m.returning = false; m.awaySince = null; }
     this.members.set(id, m);
+    if (back) this._checkHost();
     if (m.v === PHYS_VER && m.net === NET_VER && !this.closed) {        // un joueur d'une autre version ne peut pas courir avec nous
       if (m.link === 'incompatible') m.link = 'connecting';
       // Il a rouvert sa signalisation (nouvelle connexion) et notre liaison n'est pas ouverte : l'initiateur la refait (l'autre attend son offre).
@@ -428,6 +594,8 @@ export class Room extends Emitter {
   // L'autre a prouvé son identité sur cette liaison : on lui envoie ce qu'un joueur relié doit savoir (état de la salle, arrivées, meilleurs temps).
   _onProved(id) {
     {
+      // L'ordre d'arrivée d'abord (un arrivant en a besoin pour savoir qui est l'hôte, avant l'état de la salle que l'hôte envoie ensuite).
+      if (this._settled && this._order) this.mesh.sendCtl({ k: 'order', o: this._orderPayload() }, id);
       // Mon arrivée de la manche, annoncée pendant une coupure : renvoyée à l'hôte (il l'ignore s'il l'a déjà).
       if (id === this.hostId) this._resendFinish(id);
       if (this.isHost && this.rules) this.mesh.sendCtl({ k: 'rules', r: this.rules }, id);        // les règles d'abord : elles s'appliquent au circuit qui suit
@@ -473,10 +641,15 @@ export class Room extends Emitter {
       case 'hello': break;
       case 'bye': this._drop(from); break;
       case 'hostover':
-        // Nouvel hôte (TECH-048) : il a peut-être manqué une clôture ou des arrivées ; chacun lui donne son état et sa propre arrivée en attente.
+        // Nouvel hôte : il ne l'est pour moi que s'il l'est selon MOI (ordre d'arrivée). Il a peut-être manqué une clôture ou des arrivées (TECH-048) : je lui
+        // donne mon état et ma propre arrivée en attente.
+        // (Mon état, je le donne même si je ne le tiens pas encore pour l'hôte : son « au revoir » peut me parvenir après ; cela ne lui donne aucun droit.)
+        if (data.o) this._onOrder(from, data);
         if (this.cup && !this.isHost) { this._sendCupSync(from); this._resendFinish(from); }
         this.emit('members');
         break;
+      case 'order': this._onOrder(from, data); break;
+      case 'orderq': if (this._settled && this._order) this.mesh.sendCtl({ k: 'order', o: this._orderPayload() }, from); break;
       case 'cupsync': this._onCupSync(from, data); break;
       case 'pong': {
         const rtt = this.now() - (this._pings && this._pings.get(from + ':' + data.id));
@@ -492,7 +665,7 @@ export class Room extends Emitter {
         this.emit('track');
         break;
       }
-      case 'live': this._onLive(from, data); break;
+      case 'live': this._onLive(from, data); if (from === this.hostId) this._inherited(); break;
       case 'rules': if (from === this.hostId) { this.rules = isDefaultRules(data.r) ? null : sanitizeRules(data.r); this.emit('rules'); } break;
       case 'tcode': this._onCodeChunk(from, data); break;
       case 'start': {
@@ -505,7 +678,7 @@ export class Room extends Emitter {
         this._begin(e, this.track, Math.max(500, Math.min(15000, +data.startIn || START_DELAY_MS)) - (m ? m.rtt / 2 : 0));
         break;
       }
-      case 'cup': this._onCup(from, data); break;
+      case 'cup': this._onCup(from, data); if (from === this.hostId) this._inherited(); break;
       case 'round': this._onRound(from, data); break;
       case 'rend': if (from === this.hostId && this._sameEpoch(data)) this._onRoundEnd(data.n | 0, data.times && typeof data.times === 'object' ? data.times : {}, +data.nextIn || 0); break;
       case 'cupstop': if (from === this.hostId && this.cup && this._sameEpoch(data)) this._cupStopped(); break;
@@ -678,17 +851,26 @@ export class Room extends Emitter {
       .catch(() => {}).finally(() => { this._crypto--; });
   }
 
+  // TECH-010 : ce qu'un joueur relié doit savoir lui est envoyé AVANT qu'il ne compte comme présent : un hôte qui revient (onglet rechargé) reçoit ainsi l'état de
+  // la salle de celui qui faisait l'intérim, qui ne lui passe la main qu'ensuite (_checkHost).
   _proved(id, commit, d) {
     const m = this.members.get(id);
-    m.commit = commit; m.proofFails = 0; m.returning = false; m.awaySince = null;
-    this._pins.set(id, commit);
+    m.commit = commit; m.proofFails = 0;
+    this._pins.set(id, commit); this._orderCommits.delete(id);
     this._see(d.e);
-    m.link = 'open'; m.everOpen = true; m.heardAt = this.now(); m.unanswered = 0; m.sentLog = [];
+    if (this._inheriting && this._inheritUntil == null) this._inheritUntil = this.now() + INHERIT_MS;
     this._onProved(id);
+    m.returning = false; m.awaySince = null;
+    m.link = 'open'; m.everOpen = true; m.heardAt = this.now(); m.unanswered = 0; m.sentLog = [];
+    this._enorder(id);
     const q = m.inbox || []; m.inbox = [];
     for (const [kind, data] of q) this._onMessage(id, kind, data);       // ce qu'il a envoyé avant sa preuve, dans l'ordre
+    this._checkHost();
     this.emit('members');
   }
+
+  // Onglet rechargé : l'état de la salle est arrivé de l'hôte par intérim (ou le délai est passé) ; je reprends ma place dans l'ordre, rôle d'hôte compris.
+  _inherited() { if (!this._inheriting) return; this._inheriting = false; this._checkHost(); }
 
   // Preuve refusée ou absente : la liaison n'est pas la sienne (client modifié qui prend son identifiant, ou relais). Elle est fermée ; si le vrai joueur est
   // encore là, sa liaison est refaite (au plus MAX_PROOF_FAILS fois de suite) ; s'il était absent, sa place reste gardée pour lui.
@@ -702,6 +884,7 @@ export class Room extends Emitter {
     if (m.proofFails <= MAX_PROOF_FAILS && m.listed !== false && this._listedGood(id)) { m.link = 'connecting'; this.mesh.addPeer(id); }
     else if (m.returning || m.everOpen) { if (m.link !== 'away' && !m.returning) m.awaySince = this.now(); m.link = 'away'; }
     else m.link = 'failed';
+    this._checkHost();
     this.emit('members');
   }
 
@@ -973,7 +1156,7 @@ export class Room extends Emitter {
 
   // TECH-048 : état de mon championnat, envoyé à l'hôte quand j'en sais plus que lui (clôture qu'il a manquée, nouvel hôte, second « rend » plus pauvre).
   _sendCupSync(to = this.hostId) {
-    if (!this.cup || to === this.selfId) return;
+    if (!this.cup || !to || to === this.selfId) return;
     this.mesh.sendCtl({ k: 'cupsync', e: this.epoch, cup: this.cup.toJSON(), state: this._cupStateJSON() }, to);
   }
 
@@ -1045,7 +1228,7 @@ export class Room extends Emitter {
 
   // Horloge du championnat (toutes les 400 ms, et à chaque arrivée / départ) : seul l'hôte décide de clore une manche et d'en lancer une autre.
   _cupTick() {
-    if (!this.closed) this._expireAway();
+    if (!this.closed) { this._expireAway(); this._checkBoot(); if (this._inheriting && !this._inheritingNow()) this._inherited(); }
     const st = this.cupState, cup = this.cup;
     // (signalisation coupée : l'hôte continue de conduire la manche tant qu'il a des liaisons ouvertes ; les joueurs dont la liaison est tombée sont absents)
     if (!cup || !st || this.closed || !this.isHost || (this.reconnecting && !this._openCount())) return;

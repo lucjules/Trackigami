@@ -13,7 +13,7 @@ import { RESUME_MS, RETRY_MS } from '../js/net/resume.js';
 import { RaceLogic } from '../js/raceLogic.js';
 import { Track } from '../js/track.js';
 import { PHYS_VER, NET_VER } from '../js/version.js';
-import { test, finish, precondition, bugConnu } from './harness.mjs';
+import { test, finish, precondition } from './harness.mjs';
 import { VirtualClock, FakeRealtime, FakeRTCNet } from './fake-realtime.mjs';
 import { PublicDirectory, LOBBY_CODE } from '../js/net/directory.js';
 import { createIceLoader } from '../js/net/ice.js';
@@ -278,7 +278,7 @@ function fakeRoomEnv() {
     const reg = peers.get(code) || peers.set(code, new Map()).get(code);
     const sig = new Emitter(); sig.peers = new Map(); sig.sentTo = []; sig.id = id;
     sig.join = async (meta) => { sig.meta = meta; for (const [oid, o] of reg) { sig.peers.set(oid, o.meta); } reg.set(id, sig); for (const [oid, o] of reg) if (oid !== id) { o.peers.set(id, meta); o.emit('join', id, meta); } };
-    sig.track = (meta) => { sig.meta = meta; for (const [oid, o] of reg) if (oid !== id) { o.peers.set(id, meta); o.emit('meta', id, meta); } };
+    sig.track = (meta) => { sig.meta = meta; if (reg.get(id) !== sig) return; for (const [oid, o] of reg) if (oid !== id) { o.peers.set(id, meta); o.emit('meta', id, meta); } };      // (signalisation fermée : rien ne part)
     sig.send = () => true;
     sig.leave = () => { reg.delete(id); for (const o of reg.values()) { o.peers.delete(id); o.emit('leave', id); } };
     return sig;
@@ -286,7 +286,13 @@ function fakeRoomEnv() {
   const meshes = [];
   // (TECH-040) une liaison n'est crue qu'après la preuve d'identité : linkAll pose des liaisons établies (comme le ferait une vraie poignée de main),
   // proveLink joue celle d'un nouvel arrivant (il signe le défi que la salle lui a envoyé).
-  const linkAll = (...rs) => { for (const r of rs) for (const m of r.members.values()) m.link = 'open'; };
+  // (TECH-010) … et l'ordre d'arrivée que la poignée de main donne : l'hôte y ajoute chaque arrivant, chacun le reçoit.
+  const linkAll = (...rs) => {
+    for (const r of rs) for (const m of r.members.values()) m.link = 'open';
+    const host = rs.find((r) => r._settled && r.hostId === r.selfId) || rs[0];
+    for (const r of rs) if (r !== host && !host._order.includes(r.selfId)) host._order.push(r.selfId);
+    for (const r of rs) if (r !== host) { r._setOrder(host._orderPayload()); r._settled = true; r._checkHost(); }
+  };
   const proveLink = async (room, id) => {
     const ident = await createIdentity();
     room.members.get(id).commit = ident.commit;
@@ -353,7 +359,7 @@ await test('salon (0.13.1) : voiture annoncée et filtrée, prêt compté, mode 
   const g = host.members.get(guest.selfId);
   assert.deepEqual(g.car, { body: 'kart', color: '#36e9ff' }, 'clés et valeurs douteuses retirées');
   assert.deepEqual(cleanCarMeta('pas un objet'), null); assert.deepEqual(cleanCarMeta([1, 2]), null);
-  for (const m of [host, guest]) for (const x of m.members.values()) x.link = 'open';
+  env.linkAll(host, guest);
   assert.deepEqual(host.readyCount(), { ready: 0, total: 2 });
   guest.setReady(true);
   assert.deepEqual(host.readyCount(), { ready: 1, total: 2 });
@@ -460,7 +466,8 @@ await test('chaque joueur garde son meilleur temps et son nombre d\'essais ; un 
   assert.deepEqual(room.mesh.ctl.at(-1), [{ k: 'hi', n: room.members.get('z').nonce }, 'z'], 'sa liaison s\'ouvre : d\'abord le défi d\'identité (TECH-040)');
   await env.proveLink(room, 'z');
   assert.equal(room.members.get('z').link, 'open', 'il a prouvé son identité');
-  assert.deepEqual(room.mesh.ctl.at(-1), [{ k: 'finish', e, t, steps: 4600, sync: true }, 'z'], 'puis il reçoit mon meilleur temps');
+  assert.deepEqual(room.mesh.ctl.filter((c) => c[1] === 'z').at(-1), [{ k: 'finish', e, t, steps: 4600, sync: true }, 'z'], 'puis il reçoit mon meilleur temps');
+  assert.deepEqual(room.mesh.ctl.at(-1)[0], { k: 'order', o: [[room.selfId, room.ident.commit], ['z', room.members.get('z').commit]] }, 'et l\'hôte annonce à tous l\'ordre d\'arrivée, où il entre à la fin (TECH-010)');
   room.leave();
 });
 await test('retour au salon : propre à ce joueur, les autres ne sont pas interrompus', async () => {
@@ -501,7 +508,7 @@ await test('circuit envoyé par l\'hôte (code de circuit) : morceaux, assemblag
   // nouvel arrivant : l'hôte renvoie circuit ET morceaux
   host.mesh.ctl.length = 0; host.members.set('n', { id: 'n', name: 'N', link: 'connecting', rtt: 0 }); host._onLink('n', 'open');
   await env.proveLink(host, 'n');
-  assert.deepEqual(host.mesh.ctl.map((c) => c[0].k + (c[1] ? '>' + c[1] : '')), ['hi>n', 'track>n', 'tcode>n', 'tcode>n', 'tcode>n', 'live>n'], 'défi d\'identité (TECH-040), puis, une fois l\'arrivant vérifié, circuit et morceaux, puis l\'état de la course libre');
+  assert.deepEqual(host.mesh.ctl.map((c) => c[0].k + (c[1] ? '>' + c[1] : '')), ['hi>n', 'order>n', 'track>n', 'tcode>n', 'tcode>n', 'tcode>n', 'live>n', 'order'], 'défi d\'identité (TECH-040), puis, une fois l\'arrivant vérifié, l\'ordre d\'arrivée (TECH-010), circuit et morceaux, l\'état de la course libre ; enfin l\'ordre où il entre, à tous');
   host.leave(); g.leave();
 });
 await test('paquets d\'état : anti-inondation', async () => {
@@ -917,10 +924,10 @@ await test('deux lancements rapprochés (TECH-049, circuit lent puis intégré) 
   assert.deepEqual(played, ['b-vite', 'b-quatre']);
 });
 
-console.log('Hôte, identité (phase 17 ; défauts reproduits avant correction)');
+console.log('Hôte, identité (phase 17 ; reproduits avant la correction, devenus tests de régression)');
 const CUP2 = [{ id: 'b-un-a1', name: 'Un' }, { id: 'b-deux-b2', name: 'Deux' }];
 const allLinked = (w, rs) => rs.every((a) => rs.every((b) => a === b || w.linked(a, b)));
-await bugConnu('TECH-010', () => scenario(async (w) => {
+await test('hôte coupé moins de 20 s : manche close à temps, drapeau republié, salle rejoignable (TECH-010)', () => scenario(async (w) => {
   w.rt.ghostMs = 2000;                                             // (le serveur retire vite une connexion morte : l'absente n'est plus dans l'annuaire)
   const ana = await w.host('ana'), bea = await w.join('bea'), cid = await w.join('cid');
   await w.clock.advance(3000);
@@ -936,8 +943,8 @@ await bugConnu('TECH-010', () => scenario(async (w) => {
   assert.ok([bea, cid].some((r) => r.isHost && r.meta.host), 'un successeur se marque hôte (drapeau republié)');
   const dan = await w.tryJoin('dan');
   assert.ok(!(dan instanceof Error), 'la salle reste rejoignable pendant l\'absence de l\'hôte : ' + (dan && dan.message));
-}), 'hôte coupé moins de 20 s : manche close à temps, drapeau republié, salle rejoignable');
-await bugConnu('TECH-010', () => scenario(async (w) => {
+}));
+await test('hôte qui recharge et rejoint avec son secret : salle trouvée, rôle retrouvé (TECH-010)', () => scenario(async (w) => {
   const ana = await w.host('ana'), bea = await w.join('bea');
   await w.clock.advance(3000);
   precondition(w.linked(ana, bea), 'reliés');
@@ -949,8 +956,8 @@ await bugConnu('TECH-010', () => scenario(async (w) => {
   await w.clock.advance(4000);
   assert.equal(back.isHost, true, 'il retrouve son rôle d\'hôte'); assert.equal(bea.hostId, 'ana');
   assert.ok(w.linked(back, bea), 'relié');
-}), 'hôte qui recharge et rejoint avec son secret : salle trouvée, rôle retrouvé');
-await bugConnu('TECH-010', () => scenario(async (w) => {
+}));
+await test('retour non relié : le délai d\'absence n\'est pas remis à zéro (TECH-010)', () => scenario(async (w) => {
   const ana = await w.host('ana'), bea = await w.join('bea');
   await w.clock.advance(3000);
   let leftAt = null; bea.on('left', (id) => { if (id === 'ana' && leftAt == null) leftAt = w.clock.now(); });
@@ -963,8 +970,8 @@ await bugConnu('TECH-010', () => scenario(async (w) => {
   await w.tryJoin('ana', 'ABC234', { selfId: 'ana', token: ana.token, identity: saved });
   await w.clock.advance(20000);
   assert.ok(leftAt != null && leftAt - t0 <= RESUME_MS + 3000, 'un retour non relié ne remet pas à zéro le délai d\'absence : place rendue ' + (leftAt == null ? 'jamais' : Math.round((leftAt - t0) / 1000) + ' s') + ' après la coupure');
-}), 'retour non relié : le délai d\'absence n\'est pas remis à zéro');
-await bugConnu('TECH-010', () => scenario(async (w) => {
+}));
+await test('le successeur qui devient hôte republie le drapeau ; un arrivant est accepté (TECH-010)', () => scenario(async (w) => {
   // L'hôte (zed) n'a PAS le plus petit identifiant : abe le prend « par défaut » quand zed s'en va.
   const zed = await w.host('zed'), abe = await w.join('abe'), cid = await w.join('cid');
   await w.clock.advance(3000);
@@ -979,21 +986,23 @@ await bugConnu('TECH-010', () => scenario(async (w) => {
   assert.equal(hosts[0].meta.host, true, 'il republie le drapeau d\'hôte');
   const dan = await w.tryJoin('dan');
   assert.ok(!(dan instanceof Error), 'un arrivant est accepté : ' + (dan && dan.message));
-}), 'le successeur qui devient hôte republie le drapeau ; un arrivant est accepté');
-await bugConnu('TECH-040', () => scenario(async (w) => {
+}));
+await test('client modifié annonçant host: true : refusé (TECH-040)', () => scenario(async (w) => {
   const ana = await w.host('ana'), bea = await w.join('bea');
   await w.clock.advance(3000);
   ana.selectTrack({ id: 'b-un-a1', name: 'Un' });
   const evil = await w.join('aaa');                                // un client modifié, au plus petit identifiant…
+  evil._checkHost = () => {}; evil._resign = () => {};              // (un client modifié ne se corrige pas lui-même)
   evil.meta.host = true; evil.signaling.track(evil.meta);          // … se déclare hôte dans la présence
   await w.clock.advance(3000);
   evil.mesh.sendCtl({ k: 'start', e: 99, trackId: 'b-un-a1', name: 'Un', startIn: 1000 });
   evil.mesh.sendCtl({ k: 'rules', r: { g0: 40 } });
   await w.clock.advance(1000);
+  precondition(bea.members.get('aaa') && bea.members.get('aaa').host === true, 'le drapeau « host: true » de l\'imposteur est bien dans la présence');
   assert.notEqual(bea.hostId, 'aaa', 'se déclarer hôte ne fait pas l\'hôte');
   assert.equal(bea.state, 'lobby', 'son « départ » est refusé'); assert.equal(bea.rules, null, 'ses règles aussi');
   assert.equal(ana.isHost, true);
-}), 'client modifié annonçant host: true : refusé');
+}));
 await test('hello de remplacement sans le secret (TECH-040) : la place d\'un absent n\'est pas rendue ; avec son secret, le vrai joueur la retrouve', () => scenario(async (w) => {
   w.rt.ghostMs = 2000;
   const ana = await w.host('ana'), bea = await w.join('bea'); await w.join('cid');
@@ -1019,6 +1028,80 @@ await test('hello de remplacement sans le secret (TECH-040) : la place d\'un abs
   back.reportFinish(4321); await w.clock.advance(500);
   assert.equal(ana.results.has('bea'), true, 'son arrivée compte');
   assert.ok(w.linked(back, ana), 'reliée à l\'hôte');
+}));
+
+await test('arrivant (TECH-010) : le premier avis reçu n\'est pas cru d\'office ; la majorité des membres vérifiés l\'emporte, et il est tenu pour acquis quand tous ont répondu', async () => {
+  const env = fakeRoomEnv();
+  const opts = (name, id) => ({ name, selfId: id, makeSignaling: ({ code, selfId }) => env.make(selfId, code), makeMesh: env.makeMesh });
+  const ana = await Room.create({ ...opts('Ana', 'ana'), code: 'MAJ234' });
+  const bea = await Room.join('MAJ234', opts('Bea', 'bea')), cid = await Room.join('MAJ234', opts('Cid', 'cid'));
+  const dan = await Room.join('MAJ234', opts('Dan', 'dan'));
+  try {
+    for (const m of dan.members.values()) m.link = 'open';
+    precondition(dan.hostId === null && dan._settled === false, 'avant tout avis, personne n\'a d\'autorité sur l\'arrivant');
+    dan._onOrder('cid', { o: [['cid', null], ['ana', null], ['bea', null]] });          // le menteur parle le premier
+    assert.equal(dan.isHost, false, 'un arrivant ne se croit jamais hôte avant d\'avoir tout entendu');
+    dan._onOrder('ana', { o: [['ana', null], ['bea', null], ['cid', null]] });
+    assert.equal(dan._settled, false, 'Bea n\'a pas encore répondu');
+    dan._onOrder('bea', { o: [['ana', null], ['bea', null], ['cid', null]] });
+    assert.deepEqual(dan._order.slice(0, 3), ['ana', 'bea', 'cid'], 'deux avis contre un');
+    assert.equal(dan.hostId, 'ana'); assert.equal(dan._settled, true, 'tous les membres ont répondu');
+    dan._onOrder('cid', { o: [['cid', null], ['ana', null], ['bea', null]] });          // un avis tardif du menteur : sans effet
+    assert.equal(dan.hostId, 'ana');
+  } finally { for (const r of [ana, bea, cid, dan]) r.leave(); }
+});
+await test('deux salons en même temps (TECH-010, TECH-040) : chacun a son hôte, son ordre et ses identités ; rien ne passe de l\'un à l\'autre', () => scenario(async (w) => {
+  const ana = await w.host('ana', 'AAA234'), bob = await w.host('bob', 'BBB234');
+  const bea = await w.join('bea', 'AAA234'), cid = await w.join('cid', 'BBB234');
+  await w.clock.advance(3000);
+  precondition(w.linked(ana, bea) && w.linked(bob, cid), 'chaque salon est relié');
+  assert.deepEqual([ana.hostId, bea.hostId, bob.hostId, cid.hostId], ['ana', 'ana', 'bob', 'bob']);
+  assert.equal(ana.members.has('bob') || ana.members.has('cid') || bob.members.has('ana') || bob.members.has('bea'), false, 'aucun joueur de l\'autre salon');
+  // L'hôte du premier salon s'en va : son salon passe à Bea, l'autre salon ne bouge pas.
+  ana.leave(); await w.clock.advance(1000);
+  assert.equal(bea.isHost, true, 'Bea prend la suite dans son salon'); assert.equal(bea.meta.host, true);
+  assert.deepEqual([bob.hostId, cid.hostId], ['bob', 'bob'], 'l\'autre salon n\'a rien vu');
+  assert.equal(cid.isHost, false);
+  // Un message de contrôle du premier salon ne ressemble à rien dans le second.
+  assert.ok(pres(w, 'BBB234').has('bob') && !pres(w, 'BBB234').has('ana'));
+}));
+await test('ordre d\'arrivée (TECH-010) : un membre qui se met en tête de l\'ordre, ou qui parle au nom de l\'hôte, n\'évince personne', () => scenario(async (w) => {
+  const ana = await w.host('ana'), bea = await w.join('bea'), cid = await w.join('cid');
+  await w.clock.advance(3000);
+  precondition(allLinked(w, [ana, bea, cid]) && ana.hostId === 'ana', 'trois joueurs reliés, Ana hôte');
+  const before = JSON.stringify(bea._order);
+  // Cid (client modifié) se met en tête de l'ordre, avec de vraies identités (celles qu'il a vues) : il n'est pas l'hôte, donc on ne le croit pas.
+  const forged = { k: 'order', o: [['cid', cid.ident.commit], ['ana', ana.ident.commit], ['bea', bea.ident.commit]] };
+  cid.mesh.sendCtl(forged); cid.mesh.sendCtl({ k: 'hostover', o: forged.o });
+  await w.clock.advance(1000);
+  assert.equal(bea.hostId, 'ana', 'l\'ordre de Cid n\'est pas cru'); assert.equal(ana.hostId, 'ana'); assert.equal(JSON.stringify(bea._order), before);
+  assert.equal(cid.isHost, false, 'et Cid ne se croit pas hôte non plus');
+  // Cid annonce host: true dans la présence et envoie un départ : rien.
+  cid._checkHost = () => {}; cid._resign = () => {};                 // (un client modifié ne se corrige pas lui-même)
+  cid.meta.host = true; cid.signaling.track(cid.meta);
+  cid.mesh.sendCtl({ k: 'start', e: 9, trackId: 'b-un-a1', startIn: 1000 }); cid.mesh.sendCtl({ k: 'rules', r: { g0: 40 } });
+  await w.clock.advance(1000);
+  assert.equal(bea.state, 'lobby', 'pas de départ'); assert.equal(bea.rules, null); assert.equal(bea.hostId, 'ana');
+  // Ana (la vraie hôte) est coupée : Bea, la suivante dans l'ordre, fait l'intérim ; Cid, qui n'est que le troisième, ne peut pas la devancer.
+  w.rt.ghostMs = 2000; w.rt.cut('ana', 60000); w.rtc.cut('ana');
+  await w.clock.advance(12000);
+  assert.equal(bea.hostId, 'bea', 'Bea fait l\'intérim'); assert.equal(cid.hostId, 'bea', 'Cid le voit de la même façon');
+  const lie = { k: 'order', o: [['cid', cid.ident.commit], ['bea', bea.ident.commit], ['ana', ana.ident.commit]] };
+  cid.mesh.sendCtl(lie); await w.clock.advance(1000);
+  assert.equal(bea.hostId, 'bea', 'pendant l\'intérim, l\'ordre de Cid (qui passe devant Bea) est refusé'); assert.equal(bea.isHost, true);
+}));
+await test('arrivant (TECH-010) : l\'ordre d\'arrivée est celui de la majorité des membres vérifiés, pas celui d\'un menteur ; une salle à deux ne peut pas se défendre', () => scenario(async (w) => {
+  const ana = await w.host('ana'), bea = await w.join('bea'), cid = await w.join('cid');
+  await w.clock.advance(3000);
+  precondition(allLinked(w, [ana, bea, cid]), 'trois joueurs reliés');
+  // Cid ment aux arrivants : il se donne le rôle d'hôte dans l'ordre qu'il leur envoie.
+  const real = cid._orderPayload;
+  cid._orderPayload = function () { return [['cid', this.ident.commit], ...real.call(this).filter((e) => e[0] !== 'cid')]; };
+  const dan = await w.join('dan');
+  await w.clock.advance(8000);
+  assert.equal(dan.hostId, 'ana', 'l\'arrivant croit la majorité (Ana et Bea), pas Cid');
+  assert.deepEqual(dan._order.slice(0, 3), ['ana', 'bea', 'cid']);
+  assert.equal(dan.isHost, false); assert.ok(w.linked(dan, ana));
 }));
 
 await finish('Tous les tests réseau passent.');

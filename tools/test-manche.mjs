@@ -236,7 +236,7 @@ function lan(ids, { code = 'ABC234' } = {}) {
       if (cut.has(id) || sigCut.has(id)) throw new Error('réseau coupé');
       sig.meta = meta; for (const [oid, o] of reg) sig.peers.set(oid, o.meta); reg.set(id, sig); for (const [oid, o] of reg) if (oid !== id) { o.peers.set(id, meta); o.emit('join', id, meta); }
     };
-    sig.track = (meta) => { sig.meta = meta; for (const [oid, o] of reg) if (oid !== id) { o.peers.set(id, meta); o.emit('meta', id, meta); } };
+    sig.track = (meta) => { sig.meta = meta; if (reg.get(id) !== sig) return; for (const [oid, o] of reg) if (oid !== id) { o.peers.set(id, meta); o.emit('meta', id, meta); } };      // (signalisation fermée : rien ne part)
     sig.send = () => true;
     sig.leave = () => { reg.delete(id); for (const o of reg.values()) { o.peers.delete(id); o.emit('leave', id); } };
     return sig;
@@ -251,7 +251,7 @@ function lan(ids, { code = 'ABC234' } = {}) {
     },
     setSignaling() {},
   });
-  const opts = (name, selfId) => ({ name, selfId, code, makeSignaling: ({ selfId: s }) => sigFor(s), makeMesh, now: () => clock.t, schedule: (fn, ms) => timers.push({ fn, at: clock.t + ms }) });
+  const opts = (name, selfId, identity = null) => ({ name, selfId, code, ...(identity ? { identity } : {}), makeSignaling: ({ selfId: s }) => sigFor(s), makeMesh, now: () => clock.t, schedule: (fn, ms) => timers.push({ fn, at: clock.t + ms }) });
   // Les preuves d'identité (TECH-040, Web Crypto) sont asynchrones : on attend qu'aucune salle n'en ait plus en cours.
   // (en temps réel, pas en tours de boucle : sous la charge de « npm test », une signature peut prendre bien plus de tours)
   const settle = async () => {
@@ -304,7 +304,7 @@ function lan(ids, { code = 'ABC234' } = {}) {
     r.on('start', (e) => ev.start.push(e)); r.on('cupround', (e) => ev.round.push(e)); r.on('cupstop', () => ev.stop++); r.on('cupwait', (e) => ev.wait.push(e)); r.on('cup', () => ev.cup++);
     // (une course commencée se termine par une arrivée, et le joueur revient au salon : comme l'interface le fait)
   };
-  env.add = async (name, id) => { const r = rooms.length ? await Room.join(code, opts(name, id)) : await Room.create(opts(name, id)); rooms.push(r); spy(r); return r; };
+  env.add = async (name, id, identity = null) => { const r = rooms.length ? await Room.join(code, opts(name, id, identity)) : await Room.create(opts(name, id, identity)); rooms.push(r); spy(r); return r; };
   env.end = () => { for (const r of rooms) r.leave(); };
   return env;
 }
@@ -415,15 +415,17 @@ await test('coupure trop longue : au-delà de 20 s la place est rendue, la manch
   assert.equal(b.closed, true, 'Ben, toujours coupé, a fini par sortir');
   env.end();
 });
-await test('l\'hôte coupé trop longtemps : le suivant prend la suite et se marque (hostover) ; l\'ancien, revenu, ne reprend pas la main ; le championnat se termine', async () => {
+await test('l\'hôte coupé trop longtemps : le suivant fait l\'intérim dès la coupure et se marque (hostover) ; l\'ancien, revenu après 20 s, ne reprend pas la main ; le championnat se termine', async () => {
   const env = lan(); const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
   await env.open(); a.startCup({ rounds: ROUNDS });
   const retry = a.schedule; a.schedule = () => {};          // Ana reste coupée sans abandonner (ses tentatives sont mises de côté)
   env.cut('a');
   b.reportFinish(4000); c.reportFinish(4200);
-  assert.equal(b.isHost, false, 'pendant la coupure, Ana reste l\'hôte (place gardée)');
+  // TECH-010 : pendant l'absence d'Ana (place gardée), Ben, le suivant dans l'ordre d'arrivée, fait l'intérim : la manche n'attend pas la fin de ses 20 s.
+  assert.equal(b.isHost, true, 'pendant la coupure, Ben (le suivant dans l\'ordre d\'arrivée) fait l\'intérim'); assert.equal(c.hostId, 'b');
+  assert.equal(b.meta.host, true, 'il se marque hôte (drapeau republié)');
   await env.advance(RESUME_MS + 400);
-  assert.equal(b.isHost, true); assert.equal(b.meta.host, true, 'le nouvel hôte se marque');
+  assert.equal(b.isHost, true); assert.equal(b.meta.host, true, 'Ana partie pour de bon : Ben reste l\'hôte');
   assert.equal(env.events.b.round.length, 1, 'il clôt la manche');
   env.heal('a'); a.schedule = retry; a._retry(0);           // Ana revient après coup
   await env.advance(RETRY_MS[0] + 100);
@@ -440,6 +442,28 @@ await test('l\'hôte coupé trop longtemps : le suivant prend la suite et se mar
   assert.deepEqual(c.cup.standings().map((r) => r.id), ['b', 'c', 'a']);
   assert.deepEqual(a.cup.standings(), c.cup.standings(), 'le même classement chez l\'ancien hôte');
   env.end();
+});
+await test('hôte qui recharge sa page en pleine manche (TECH-010) : le suivant fait l\'intérim et clôt à temps ; revenu avec son secret, l\'hôte reprend le rôle et l\'état du championnat ; une seule manche suivante', async () => {
+  const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
+  await env.open(); a.startCup({ rounds: ROUNDS });
+  a.reportFinish(3900);
+  const key = a.resumeInfo().key;                                  // (ce que son onglet garde)
+  env.cut('a'); a._dispose();                                      // l\'onglet d\'Ana se ferme sans « au revoir » ; elle recharge
+  b.reportFinish(4000); c.reportFinish(4100);
+  await env.advance(1500);
+  assert.equal(b.isHost, true, 'Ben fait l\'intérim'); assert.equal(c.hostId, 'b');
+  assert.equal(env.events.b.round.length, 1, 'la manche est close à temps (Ana a fini avant de partir, sa place n\'est pas attendue)');
+  assert.equal(b.cup.results[0].times.a, 3900, 'son temps, annoncé avant sa coupure, compte');
+  env.heal('a');
+  const a2 = await env.add('Ana', 'a', key);                       // elle revient : même identifiant, même secret
+  await env.open(); await env.advance(1500);
+  assert.equal(a2.isHost, true, 'revenue avec son secret, elle reprend le rôle'); assert.equal(b.isHost, false); assert.equal(b.hostId, 'a'); assert.equal(c.hostId, 'a');
+  assert.equal(b.meta.host, false, 'Ben retire son drapeau'); assert.equal(a2.meta.host, true);
+  assert.equal(a2.cup.played, 1, 'elle a l\'état du championnat (manche close pendant l\'intérim)');
+  await env.advance(RESULTS_MS + 500);
+  assert.deepEqual([env.events.a.start.length, env.events.b.start.length, env.events.c.start.length], [1, 2, 2], 'la manche 1 part une seule fois pour chacun (Ana revenue : la sienne ; Ben et Cléo : la deuxième)');
+  assert.equal(env.events.b.start[1].cup.n, 1, 'la manche 1 part (une fois)');
+  } finally { env.end(); }
 });
 await test('signalisation de l\'hôte coupée en pleine manche (TECH-046) : ses liaisons marchent, personne n\'est « absent », il clôt la manche', async () => {
   const env = lan(); const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
