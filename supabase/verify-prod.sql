@@ -260,6 +260,50 @@ checks as (
               else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.track_binds v join public.track_binds b on b.track_key = split_part(v.track_key, ''~'', 1) where v.track_key like ''%~%'' and v.strong <> b.strong', false, true, '')))[1]::text end,
          'info'
   union all
+  -- ---- 4 septies. étape 21 (code de secours, COMPLETE-003) : tables fermées, droits des fonctions, pgcrypto ------------------------------------------------
+  select 140, 'étape 21 : recovery_codes, recovery_throttle, recovery_log présentes, RLS activée, aucun droit pour anon ni authenticated', 'fermées',
+         case when to_regclass('public.recovery_codes') is null or to_regclass('public.recovery_throttle') is null or to_regclass('public.recovery_log') is null then 'absentes'
+              when exists (select 1 from pg_class c where c.oid in (to_regclass('public.recovery_codes'), to_regclass('public.recovery_throttle'), to_regclass('public.recovery_log'))
+                           and (not c.relrowsecurity or has_table_privilege('anon', c.oid, 'select,insert,update,delete') or has_table_privilege('authenticated', c.oid, 'select,insert,update,delete'))) then 'OUVERTES'
+              else 'fermées' end,
+         case when to_regclass('public.recovery_codes') is null or to_regclass('public.recovery_throttle') is null or to_regclass('public.recovery_log') is null then 'MANQUE'
+              when exists (select 1 from pg_class c where c.oid in (to_regclass('public.recovery_codes'), to_regclass('public.recovery_throttle'), to_regclass('public.recovery_log'))
+                           and (not c.relrowsecurity or has_table_privilege('anon', c.oid, 'select,insert,update,delete') or has_table_privilege('authenticated', c.oid, 'select,insert,update,delete'))) then 'ÉCART'
+              else 'ok' end
+  union all
+  select 141, 'étape 21 : recovery_begin / finish / abort / purge réservées au serveur ; recovery_code_new / status aux sessions (jamais anon)', 'conformes',
+         case when to_regprocedure('public.recovery_begin(text,text,text)') is null or to_regprocedure('public.recovery_finish(uuid,uuid)') is null or to_regprocedure('public.recovery_abort(uuid,uuid)') is null
+                   or to_regprocedure('public.recovery_purge()') is null or to_regprocedure('public.recovery_code_new()') is null or to_regprocedure('public.recovery_status()') is null then 'fonctions absentes'
+              when has_function_privilege('anon', 'public.recovery_begin(text,text,text)', 'execute') or has_function_privilege('authenticated', 'public.recovery_begin(text,text,text)', 'execute')
+                   or has_function_privilege('anon', 'public.recovery_finish(uuid,uuid)', 'execute') or has_function_privilege('authenticated', 'public.recovery_finish(uuid,uuid)', 'execute')
+                   or has_function_privilege('anon', 'public.recovery_abort(uuid,uuid)', 'execute') or has_function_privilege('authenticated', 'public.recovery_abort(uuid,uuid)', 'execute')
+                   or has_function_privilege('anon', 'public.recovery_purge()', 'execute') or has_function_privilege('authenticated', 'public.recovery_purge()', 'execute')
+                   or has_function_privilege('anon', 'public.recovery_code_new()', 'execute') or has_function_privilege('anon', 'public.recovery_status()', 'execute')
+                   or not has_function_privilege('authenticated', 'public.recovery_code_new()', 'execute') or not has_function_privilege('authenticated', 'public.recovery_status()', 'execute')
+                   or not has_function_privilege('service_role', 'public.recovery_begin(text,text,text)', 'execute') then 'droits non conformes'
+              else 'conformes' end,
+         case when to_regprocedure('public.recovery_begin(text,text,text)') is null or to_regprocedure('public.recovery_finish(uuid,uuid)') is null or to_regprocedure('public.recovery_abort(uuid,uuid)') is null
+                   or to_regprocedure('public.recovery_purge()') is null or to_regprocedure('public.recovery_code_new()') is null or to_regprocedure('public.recovery_status()') is null then 'MANQUE'
+              when has_function_privilege('anon', 'public.recovery_begin(text,text,text)', 'execute') or has_function_privilege('authenticated', 'public.recovery_begin(text,text,text)', 'execute')
+                   or has_function_privilege('anon', 'public.recovery_finish(uuid,uuid)', 'execute') or has_function_privilege('authenticated', 'public.recovery_finish(uuid,uuid)', 'execute')
+                   or has_function_privilege('anon', 'public.recovery_abort(uuid,uuid)', 'execute') or has_function_privilege('authenticated', 'public.recovery_abort(uuid,uuid)', 'execute')
+                   or has_function_privilege('anon', 'public.recovery_purge()', 'execute') or has_function_privilege('authenticated', 'public.recovery_purge()', 'execute')
+                   or has_function_privilege('anon', 'public.recovery_code_new()', 'execute') or has_function_privilege('anon', 'public.recovery_status()', 'execute')
+                   or not has_function_privilege('authenticated', 'public.recovery_code_new()', 'execute') or not has_function_privilege('authenticated', 'public.recovery_status()', 'execute')
+                   or not has_function_privilege('service_role', 'public.recovery_begin(text,text,text)', 'execute') then 'ÉCART'
+              else 'ok' end
+  union all
+  select 142, 'étape 21 : pgcrypto dans le schéma extensions (crypt, gen_salt, gen_random_bytes, digest)', 'présent',
+         case when to_regprocedure('extensions.crypt(text,text)') is null or to_regprocedure('extensions.gen_salt(text,integer)') is null
+                   or to_regprocedure('extensions.gen_random_bytes(integer)') is null or to_regprocedure('extensions.digest(text,text)') is null then 'absent' else 'présent' end,
+         case when to_regprocedure('extensions.crypt(text,text)') is null or to_regprocedure('extensions.gen_salt(text,integer)') is null
+                   or to_regprocedure('extensions.gen_random_bytes(integer)') is null or to_regprocedure('extensions.digest(text,text)') is null then 'MANQUE' else 'ok' end
+  union all
+  select 143, 'étape 21 : comptes sans code de secours valable (anciens comptes, ou code déjà servi : le jeu propose d''en créer un)', 'info',
+         case when to_regclass('public.recovery_codes') is null then 'table absente'
+              else (xpath('/row/c/text()', query_to_xml('select (select count(*) from public.accounts a where not exists (select 1 from public.recovery_codes c where c.user_id = a.user_id and c.code_hash is not null)) || '' sur '' || (select count(*) from public.accounts) as c', false, true, '')))[1]::text end,
+         'info'
+  union all
   -- ---- 5. renseignements ---------------------------------------------------------------------------------------------------------------------
   select 70, 'circuits publiés dont le temps auteur n''est PAS vérifié (publiés avant l''étape 15)', 'info',
          case when exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'tracks' and column_name = 'author_verified')

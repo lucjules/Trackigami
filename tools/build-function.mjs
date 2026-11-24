@@ -1,4 +1,4 @@
-// Génère supabase/functions/<fonction>/index.ts pour chaque fonction serveur (submit-score, ice) : un fichier AUTONOME (aucun import),
+// Génère supabase/functions/<fonction>/index.ts pour chaque fonction serveur (submit-score, ice, account-recovery) : un fichier AUTONOME (aucun import),
 // car Supabase refuse d'importer du code depuis un site quelconque au déploiement.
 // Regroupe server.ts + le code du jeu nécessaire (pour submit-score : js/verify.js et ses dépendances).
 // Utilise Deno (installé à la demande via npm) : node tools/build-function.mjs
@@ -13,8 +13,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const FUNCTIONS = {
   'submit-score': '« submit-score »',
   ice: '« ice » (serveurs STUN/TURN du multijoueur)',
+  'account-recovery': '« account-recovery » (récupération d\'un compte avec son code de secours)',
 };
-const STAMPED = new Set(['submit-score']);      // l'empreinte de build (tools/build-stamp.mjs) est publiée par le GET d'état de submit-score : tools/check-deployed.mjs la compare
+const STAMPED = new Set(['submit-score', 'account-recovery']);      // l'empreinte de build (tools/build-stamp.mjs) est publiée par le GET d'état de ces deux fonctions : tools/check-deployed.mjs la compare
 for (const [name, title] of Object.entries(FUNCTIONS)) {
   const dir = join(root, 'supabase/functions', name);
   const out = join(mkdtempSync(join(tmpdir(), 'ct-fn-')), 'bundle.js');

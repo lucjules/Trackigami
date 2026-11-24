@@ -3,6 +3,7 @@
 import { profile, exportCode, parseCode, applySave } from '../profile.js';
 import { $, esc } from '../dom.js';
 import { account } from '../account.js';
+import { openChangePassword, fillRecoveryBlock } from '../accountUi.js';
 import { loadSettings, getRecord, medalTime, formatTime } from '../storage.js';
 import { medalFor } from '../medals.js';
 import { medalIcon } from '../ui.js';
@@ -219,10 +220,12 @@ export const profileMethods = {
     box.innerHTML = `<div class="meta">Compte · <b>${esc(account.username)}</b> · sauvegarde cloud <span id="acct-st"></span></div>
       <div class="row">
         <button class="btn" data-a="sync">Synchroniser maintenant</button>
+        <button class="btn" data-a="pw">Changer le mot de passe</button>
         <button class="btn" data-a="out">Se déconnecter</button>
         <button class="btn danger" data-a="del">Supprimer le compte</button>
       </div>
-      <div class="meta" id="acct-note"></div>`;
+      <div class="meta" id="acct-note"></div>
+      <div id="acct-recovery"></div>`;
     const st = box.querySelector('#acct-st'), note = box.querySelector('#acct-note');
     // (la note : copie locale allégée faute de place, TECH-007 ; en erreur, le message d'erreur dit déjà tout)
     const paint = () => { st.textContent = label(); note.textContent = account.status === 'ok' ? account.note : ''; };
@@ -231,6 +234,9 @@ export const profileMethods = {
       paint(); st.textContent = 'synchronisation…';
       account.sync().then(() => { paint(); this.ui.flash('Sauvegarde synchronisée'); }, (e) => { paint(); this.ui.flash(e.message); });
     };
+    box.querySelector('[data-a="pw"]').onclick = () => openChangePassword(this.ui);
+    // Code de secours (COMPLETE-003) : proposé aux comptes qui n'en ont pas (comptes d'avant l'étape SQL 21, ou code déjà servi), jamais imposé ; invisible tant que le serveur ne le sait pas.
+    fillRecoveryBlock(box.querySelector('#acct-recovery'), this.ui).catch(() => { /* hors ligne : rien à proposer */ });
     box.querySelector('[data-a="out"]').onclick = async () => {
       this.ui.flash('Déconnexion…');
       await account.signOut();

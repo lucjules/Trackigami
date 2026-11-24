@@ -33,8 +33,9 @@ Supabase lève aussi cette vérification. Aucun e-mail n'est jamais envoyé à c
 - **Sauvegarde** (`cloud_saves`) : lisible et modifiable par son seul propriétaire (RLS). Chaque écriture porte un numéro
   de version : le jeu ne peut pas écraser une version qu'il n'a pas lue (deux appareils : lecture, fusion, nouvel essai).
 - La clé `service_role` ne doit jamais figurer dans le jeu. Le jeu n'utilise que la clé publique.
-- **Pas d'e-mail, donc pas de récupération de mot de passe** : l'écran de création de compte le dit clairement.
-  Un mot de passe perdu = compte inaccessible (on peut en créer un autre).
+- **Pas d'e-mail** : la récupération par courriel de Supabase Auth est impossible (le pseudo n'est pas une adresse). Depuis 0.16.13 (COMPLETE-003),
+  un compte se récupère avec son **code de secours** (section « Changer et récupérer son mot de passe » plus bas) ; sans ce code, un mot de passe
+  perdu reste un compte inaccessible.
 - Limites d'essais : celles de Supabase Auth (page *Authentication > Rate Limits*). Rien de plus n'est ajouté ici.
 - **Phase 5 (0.9.64)** : les droits réels de chaque table et fonction sont éprouvés par attaque (`tools/test-securite-sql.sh` : un joueur ne lit, ne modifie ni ne supprime les données d'un autre, y compris
   en visant leur identifiant) ; réglages à vérifier côté Supabase (longueur minimale du mot de passe **8**, **CAPTCHA** sur les connexions anonymes et les inscriptions, *Allow anonymous sign-ins* activé,
@@ -165,4 +166,71 @@ Rien n'est modifié automatiquement : on ne peut pas prouver, côté serveur, qu
 - Un joueur qui s'est inscrit avec une ancienne version SANS se déconnecter depuis a encore la session de son ancien invité sur son appareil
   (seule la déconnexion l'effaçait) : un rattachement futur pourrait s'appuyer sur cette preuve de possession (fonction serveur à concevoir,
   hors de cette version). Pour un joueur déjà déconnecté, l'ancienne session est perdue : aucune action automatique n'est possible.
+
+
+## Changer et récupérer son mot de passe (COMPLETE-003, décision D-6 : pas de courriel)
+
+### Modèle de menaces (écrit avant le code ; chaque ligne est vérifiée par un test)
+
+Ce qu'on protège : l'accès au compte (sauvegarde cloud, circuits publiés, temps). Ce qui permet de le reprendre sans le mot de passe : le **code de secours**
+(16 caractères tirés par `gen_random_bytes` de pgcrypto, alphabet de 32 signes : 80 bits d'aléa), remis UNE fois à l'inscription, régénérable.
+
+| # | Menace | Défense | Vérifié par |
+|---|---|---|---|
+| M1 | **Énumération de pseudos** : la récupération répond autrement (texte, statut, en-têtes, durée) quand le pseudo n'existe pas, n'a pas de code, ou est verrouillé | Une seule réponse d'échec (même statut, même corps, mêmes en-têtes) ; durée plancher identique pour toute réponse ; la base calcule un bcrypt AUSSI pour un pseudo inconnu, sans code ou verrouillé ; le compteur d'échecs est tenu pour le pseudo SAISI, qu'il existe ou non (un pseudo inconnu se verrouille pareil) | `tools/test-recovery-handler.mjs` (réponses octet pour octet, durées), `tools/test-etape21-sql.sh` (même résultat, même ligne de limitation, bcrypt dans tous les cas) |
+| M2 | **Force brute du code** | 80 bits d'aléa ; bcrypt (coût 10) ; **5 échecs par pseudo → verrou de 15 min** ; **20 échecs par adresse et par heure → 1 h** ; **300 essais par 10 min au total** ; compteurs EN BASE (un rechargement de page, un autre onglet ou une autre instance de la fonction ne les remettent pas à zéro) ; essais simultanés sur un même pseudo SÉRIALISÉS (verrou de ligne : pas de « 5 essais en parallèle comptés comme 1 ») ; frein en mémoire de la fonction en plus | SQL : verrou après 5 échecs (même le bon code est alors refusé), adresse, plafond global, sessions simultanées ; fonction : verrouillage après N échecs |
+| M3 | **Rejeu** : réutiliser un code déjà servi, deux requêtes simultanées avec le bon code, sessions d'un voleur qui restent ouvertes | Code à **usage unique** (son haché est effacé quand le nouveau mot de passe est posé) ; **réservation à jeton** pendant la pose (une seule des requêtes simultanées passe) ; un nouveau code **invalide l'ancien** ; les **sessions existantes sont révoquées** (`auth.sessions`, jetons de renouvellement) | SQL : second usage refusé, régénération, deux sessions simultanées, sessions supprimées ; fonction : second usage refusé |
+| M4 | **Fuite** (base, journaux, messages d'erreur) | La base ne garde que `bcrypt(SHA-256(code))` (contrainte : seul un haché bcrypt est accepté) ; le code n'est JAMAIS un paramètre SQL (la fonction serveur en calcule l'empreinte SHA-256 avant d'appeler la base) ; adresse IP gardée sous forme d'empreinte SHA-256 ; journal minimal (date, compte s'il existe, issue) ; la fonction ne journalise ni corps, ni code, ni mot de passe ; erreurs génériques ; aucun code dans le stockage du navigateur (affiché une fois, en mémoire seulement) | SQL : recherche du code en clair et de son empreinte dans toutes les tables ; fonction : journaux capturés ; client : stockage local après affichage |
+| M5 | **Session volée → code régénéré** (prise de contrôle durable) | Créer ou régénérer un code exige une authentification PAR MOT DE PASSE de moins de 10 min (revendication `amr` du jeton, posée par Supabase Auth) ; le jeu redemande le mot de passe | SQL : refus sans `amr` récent, avec un `amr` ancien, pour un invité, sans session |
+| M6 | **Blocage ciblé** (verrouiller la récupération d'un autre en essayant son pseudo) | Verrou temporaire seulement (15 min) ; il ne touche ni la connexion normale ni le jeu | (risque accepté, documenté) |
+| M7 | **Abus de la fonction** (taille, cadence, processeur) | Corps ≤ 2 Ko lu par morceaux ; frein par adresse en mémoire ; plafond global en base (borne les bcrypt) ; base indisponible → 503 (jamais « ouvert ») | fonction : 413, 429, 503 |
+
+**Risques résiduels (non couverts)** : un jeton d'ACCÈS déjà émis reste valable jusqu'à son expiration (1 h par défaut de Supabase) : seuls les jetons de
+renouvellement et les sessions sont révoqués ; l'adresse vient de `x-forwarded-for` (première valeur), que la plateforme renseigne mais qu'on ne peut
+pas prouver ici infalsifiable : la limite par pseudo et le plafond global tiennent sans elle ; quelqu'un qui a le code ET le pseudo prend le compte
+(c'est la définition du code : à garder comme un mot de passe).
+
+### Fonctionnement (0.16.13)
+
+- **Changer son mot de passe** (Garage › Compte › *Changer le mot de passe*) : le mot de passe ACTUEL est redemandé (re-authentification : une connexion neuve par mot de passe, jugée par Supabase Auth ;
+  le jeu ne compare rien lui-même) ; le nouveau suit les règles de l'inscription (8 caractères au moins, 72 octets au plus, pas le pseudo : `js/accountRules.js`, partagées avec la fonction serveur) ;
+  puis `PUT /auth/v1/user` et `POST /auth/v1/logout?scope=others` : les autres appareils connectés au compte se reconnectent avec le nouveau mot de passe, celui-ci reste connecté.
+- **Code de secours** : créé à l'inscription (montré UNE fois sur l'écran d'accueil, case « J'ai noté mon code » exigée avant d'entrer ; fermer l'onglet avant demande une confirmation), régénérable
+  (Garage › Compte › *Régénérer mon code* : mot de passe redemandé, l'ancien code ne vaut plus rien). Format `XXXX-XXXX-XXXX-XXXX` (16 signes, 80 bits). Il n'est écrit nulle part : ni stockage de l'appareil,
+  ni journal ; la base n'en garde qu'un haché. Détail et défenses : modèle de menaces ci-dessus.
+- **Récupération** (accueil › Connexion › *J'ai perdu mon mot de passe*) : pseudo + code + nouveau mot de passe, SANS session. La fonction serveur `account-recovery` (`supabase/functions/account-recovery`)
+  transmet à la base le pseudo et l'EMPREINTE SHA-256 du code (jamais le code), obtient une réservation de deux minutes, pose le mot de passe par l'API d'administration d'Auth (c'est Auth qui le hache),
+  puis consomme le code et révoque les sessions du compte. On est ensuite connecté, et un NOUVEAU code est remis. Tout échec lié au pseudo ou au code (inconnu, mauvais code, sans code, verrouillé, mal formé)
+  donne la MÊME réponse (`400`, même corps, mêmes en-têtes) après la même durée plancher (1,5 s) ; seuls « trop d'essais pour cette adresse » (`429`) et « service indisponible » (`503`) diffèrent, et
+  ne dépendent pas du pseudo. Limites : 5 échecs par pseudo → verrou de 15 min ; 20 échecs par adresse et par heure → 1 h ; 300 essais par 10 minutes en tout ; 10 requêtes par minute et par adresse en mémoire.
+- **Comptes existants** : l'écran Garage › Compte regarde (`recovery_status`) si le compte a un code valable ; sinon il le propose (bloc « Pas de code de secours », bouton *Créer mon code de secours*, mot de passe
+  redemandé), à chaque passage tant qu'il manque, sans fenêtre forcée ni blocage du jeu. Serveur sans l'étape 21, ou hors ligne : rien n'est proposé. Un code servi (récupération) est remplacé tout de suite.
+
+### Installation du code de secours (dans cet ordre : SQL, fonction, site)
+
+1. **SQL, À LA MAIN** (Supabase › SQL Editor) : `supabase/etape21-recuperation.sql`, après les étapes 1 à 20 (pgcrypto doit être installé dans le schéma `extensions`, ce que fait Supabase par défaut ; l'étape le crée sinon).
+   Relançable, ne supprime rien. Puis `supabase/verify-prod.sql` : les lignes « étape 21 » à `ok` (la ligne d'info dit combien de comptes n'ont pas encore de code).
+2. **Fonction** `account-recovery` : `npm run build:function` puis `supabase/functions/account-recovery/index.ts` collé dans Edge Functions, ou le workflow `deploiement.yml` (qui la déploie après `submit-score`,
+   avant la barrière). Aucun secret à ajouter : `SUPABASE_URL` et `SUPABASE_SERVICE_ROLE_KEY` sont fournis par Supabase (la clé de service ne quitte jamais cette fonction) ; `ALLOWED_ORIGIN` est facultatif.
+   Déployée AVANT l'étape SQL, elle répond `503` à tout (jamais « ouvert ») : le jeu dit « service momentanément indisponible ».
+3. **Site** : publier le jeu 0.16.13. Sans les étapes 1 et 2, il fonctionne comme avant (le code de secours est simplement absent, rien n'est proposé).
+
+### À vérifier sur un VRAI projet (ce dépôt ne peut pas l'éprouver : rien de ceci n'a été constaté)
+
+Ne jamais copier un jeton ni un code dans un ticket, une capture ou un journal.
+
+1. **Revendication `amr`** : après une connexion par mot de passe, le jeton d'accès porte `amr: [{ method: "password", timestamp: <secondes> }]` (c'est ce que lit `recovery_code_new`). Sans elle, la création
+   du code est refusée à tous (« Mot de passe à confirmer ») : l'échec est sûr (fermé), mais la fonction est inutilisable. À constater : décoder la partie centrale d'un jeton obtenu par `POST /auth/v1/token?grant_type=password`.
+2. **Passerelle des fonctions** : `account-recovery` est appelée SANS session, avec la clé publique du jeu. Le workflow garde « Verify JWT » activé (un test l'exige) ; si la passerelle refuse la clé publique
+   (réponse `401 Invalid JWT` : le jeu dit « Le serveur a refusé la demande de récupération »), désactiver « Verify JWT » **pour cette seule fonction** dans le tableau de bord (Edge Functions › account-recovery),
+   ce qui ne retire aucune protection (la clé publique est dans la page ; la défense est le code et les limites) — ne pas passer `--no-verify-jwt` au workflow.
+3. **API d'administration** : `PUT /auth/v1/admin/users/{id}` avec `{ "password": … }` change bien le mot de passe ; un mot de passe refusé par Auth (faible, déjà divulgué) renvoie `422` (le jeu demande d’en choisir un autre,
+   le code reste valable).
+4. **Sessions révoquées** : après une récupération, le jeton de renouvellement d'une session ouverte AVANT est refusé (`recovery_finish` supprime `auth.sessions` ; si le rôle de la base n'a pas ce droit, la réponse
+   le journalise « ALERTE : sessions non révoquées » et le mot de passe est tout de même changé). Un jeton d'ACCÈS déjà émis reste valable jusqu'à son expiration (1 h par défaut).
+5. **`/auth/v1/logout?scope=others`** (changement de mot de passe) : l'autre appareil doit être déconnecté ; si le projet ne le gère pas, le mot de passe est quand même changé (l'erreur est ignorée).
+6. **Limites d'Auth** : chaque création / régénération de code et chaque changement de mot de passe fait une connexion de preuve (`/auth/v1/token`) : elle compte dans *Authentication › Rate Limits*.
+7. **`x-forwarded-for`** : la plateforme le renseigne-t-elle (une adresse par appel, la première étant celle du client) ? Sinon toutes les requêtes partagent le seau « inconnue » : la limite par adresse devient globale.
+8. **Essai de bout en bout** avec un compte de test : inscription (code montré), connexion ailleurs, changement de mot de passe, récupération avec le code (connecté, nouveau code montré), second usage du même code refusé,
+   6 mauvais essais : verrou ; puis supprimer le compte de test (*Supprimer le compte* ; son code part avec lui).
 

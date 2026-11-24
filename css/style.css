@@ -885,6 +885,18 @@ body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after 
 .wl-check a, .wl-legal a { color: var(--cyan); }
 .wl-legal { margin: 10px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
 #wl-submit { margin-top: 2px; width: 100%; justify-content: center; }
+.wl-forgot { margin: 2px 0 0; text-align: center; font-size: 13px; }
+.wl-forgot[hidden], .wl-recovery[hidden], .wl-tabs[hidden], #wl-form[hidden] { display: none; }
+.wl-recovery { display: flex; flex-direction: column; gap: 10px; text-align: left; }
+.wl-recovery h3 { margin: 0; font-size: 18px; text-align: center; }
+.wl-rc-row { display: flex; justify-content: center; }
+#wl-rc-go { width: 100%; justify-content: center; }
+/* Code de secours : lisible, sélectionnable d'un geste, jamais tronqué (il se note à la main). */
+.rc-code { display: block; margin: 4px 0; padding: 14px 10px; text-align: center; font: 700 22px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.08em; color: var(--text);
+  background: rgba(0, 0, 0, 0.35); border: 1px dashed var(--cyan); border-radius: 10px; user-select: all; overflow-wrap: anywhere; }
+.acct-form { display: flex; flex-direction: column; gap: 10px; text-align: left; }
+.acct-warn { border-left: 3px solid var(--bad); padding: 6px 10px; background: rgba(0, 0, 0, 0.18); border-radius: 0 8px 8px 0; }
+.acct-warn .row { margin-top: 6px; }
 #wl-submit:disabled { opacity: 0.6; cursor: wait; }
 .prof-account { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: rgba(0, 0, 0, 0.18); }
 .prof-account .row { margin-top: 8px; }

@@ -6,6 +6,7 @@
 //     périmée quand PHYS_VER n'a pas changé (les corrections de la phase 4 : temps non numérique, roulis d'obstacle dans la clé de classement, n'avaient pas changé PHYS_VER).
 //   - base : le schéma public exposé (racine PostgREST) contient-il les objets de l'étape SQL 15 (colonne tracks.author_verified, fonctions rate_check / submit_best / publish_track) ?
 //     Les fonctions réservées au service (revoke … from anon) ne figurent PAS dans ce schéma : leur absence ici est NORMALE, elle est notée « non exposé » et non comme un écart.
+//   - account-recovery (récupération de compte par code de secours, COMPLETE-003) : déployée ? (GET d'état sans session), action `recover` annoncée, EMPREINTE DE BUILD = celle de son index.ts du dépôt.
 //   - ice : le déploiement répond-il, et exige-t-il un jeton (401 sans jeton = fail-closed attendu) ?
 import { readFileSync } from 'node:fs';
 import { PHYS_VER } from '../js/version.js';
@@ -34,6 +35,21 @@ try {
     say(j.kind, `submit-score : ${j.msg}`);
   }
 } catch (e) { say('inconnu', 'submit-score : ' + e.message); }
+
+try {
+  const fh = { apikey: key, Authorization: `Bearer ${key}` };
+  const a = await get('/functions/v1/account-recovery', fh);
+  if (a.status === 404) say('ÉCART', 'account-recovery : fonction NON déployée (404) : sans elle, « J\'ai perdu mon mot de passe » échoue → la déployer (supabase/functions/account-recovery/index.ts, après l\'étape SQL 21)');
+  else if (a.status !== 200 || !a.body || a.body.service !== 'account-recovery') say('ÉCART', `account-recovery : le GET d'état répond ${a.status} (fonction absente ou inattendue)`);
+  else {
+    const acts = Array.isArray(a.body.actions) ? a.body.actions : [];
+    say(acts.includes('recover') ? 'ok' : 'ÉCART', `account-recovery : actions annoncées ${JSON.stringify(acts)} (recover attendue)`);
+    let repoFile = null;
+    try { repoFile = readFileSync(new URL('../supabase/functions/account-recovery/index.ts', import.meta.url), 'utf8'); } catch { /* fichier absent : verdict « inconnu » ci-dessous */ }
+    const j = judgeBuild(a.body.build, repoFile ? readStamp(repoFile) : null, 'account-recovery');
+    say(j.kind, `account-recovery : ${j.msg}`);
+  }
+} catch (e) { say('inconnu', 'account-recovery : ' + e.message); }
 
 try {
   const i = await fetch(url + '/functions/v1/ice', { method: 'POST', headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: '{}', signal: globalThis.AbortSignal.timeout(15000) }).then((r) => ({ status: r.status }));

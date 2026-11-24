@@ -75,6 +75,8 @@ function explain1(status, body, retryAfter = null) {
   if (body && body.code === '42P01' || /relation .* does not exist|Could not find the table/i.test(msg)) return new OnlineError('Base non prête (étape 1 SQL manquante).', 'no-schema');
   if (body && body.code === '23505') return new OnlineError('Ce circuit est déjà publié.', 'duplicate');
   if (body && body.code === 'PGRST202' || /Could not find the function/i.test(msg)) return new OnlineError('Fonction en ligne absente : une étape SQL n’est pas encore lancée sur le serveur.', 'no-sql-step');
+  // Refus 429 d'une fonction serveur dont le message dit « Trop de demandes » (account-recovery) : le délai du serveur est conservé (code « rate », retryAfter), comme pour submit-score.
+  if (status === 429 && /Trop de demandes/.test(msg)) return rateError(body, retryAfter, msg, 'Trop de demandes : réessaie dans un instant.');
   if (/compte est nécessaire|Aucun compte ne porte|propre pseudo|Trop de demandes|Liste d.amis pleine|Trop d.abonnements|On ne se suit pas|ses amis|Dix duels|tournoi|Tournoi|invalide \(circuits/.test(msg)) return new OnlineError(msg, 'social');
   if (status === 404 && body && body.code === 'NOT_FOUND' && /function/i.test(msg)) {
     return new OnlineError('Fonction « submit-score » introuvable sur le serveur.', 'no-function');

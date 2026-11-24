@@ -11,6 +11,8 @@ La vue d'ensemble (principes, déterminisme, flux d'une course) est dans [ARCHIT
 | `a11y.js` | Accessibilité (Trackigami Evolution, E22) : réduction des animations. Réglage `reduceMotion` : 'auto' suit le système (prefers-reduced-motion), 'on' réduit toujours, 'off' jamais. Réduites : transitions des écrans et des fenêtres coupées (classe body.reduce-motion, css/style.css), tremblements et effets de caméra du ressenti à zéro (race/camera.js). Rien ne change dans la course. |
 | `academy.js` | Académie : six leçons guidées, de très courts circuits qui apprennent UNE chose chacune (conduite, dérapage, mini-turbo, réception, plaque de transformation, obstacles), avec un objectif à réussir. Données et règles pures ; l'écran et le lancement sont dans app/academy.js. Aucune médaille, aucun record, aucune statistique : on s'entraîne. |
 | `account.js` | Comptes Trackigami : pseudo + mot de passe, sauvegarde cloud entre appareils. Les invités restent locaux. |
+| `accountRules.js` | Règles des comptes PARTAGÉES entre le jeu (js/account.js) et la fonction serveur « account-recovery » (supabase/functions/account-recovery) : pseudo, mot de passe, code de secours. |
+| `accountUi.js` | Fenêtres du COMPTE (Garage › Compte) : changer le mot de passe, créer / régénérer le code de secours, et le bloc d'état du code (COMPLETE-003). |
 | `aids.js` | Aides à la conduite (Trackigami Evolution, E22) et réglage de la réponse du volant. Elles agissent sur les COMMANDES, avant leur enregistrement : le replay, les fantômes et la vérification serveur rejouent les commandes effectives, sans relancer les aides (la course se rejoue à l'identique). Une course avec aides va dans la catégorie de record « assisté » (étiquette « as-1 », variants.js) : son propre classement, sans médailles ni pièces ; elle ne compte ni en saison, ni en duel, ni en tournoi. |
 | `ambiance.js` | Ambiance d'un circuit (0.9.18) : le MOMENT de la journée, la BRUME et la MUSIQUE, au choix de l'auteur, par-dessus le décor. Purement visuel et sonore : aucun effet sur la physique, les temps ni la signature du circuit (changer l'ambiance ne fait perdre ni la vérification ni les records). Module sans rendu : resolveAmbiance renvoie les réglages à appliquer à la scène (scenery.js). |
 | `audio.js` | Effets sonores synthétisés (Web Audio API). La musique est gérée à part (voir music.js). |
@@ -312,6 +314,13 @@ La vue d'ensemble (principes, déterminisme, flux d'une course) est dans [ARCHIT
 | `miniMap.js` | Mini-carte en course (0.15.0) : le circuit vu de dessus, nord en haut, avec la voiture du joueur, son fantôme et les adversaires. |
 | `traceChart.js` | Petites courbes sur un canvas (HUD d'entraînement, Replay Theater) : une fenêtre glissante de N valeurs par série, dessinée sans allocation. |
 | `trackMap.js` | Mini-carte d'un circuit, vue de dessus : un seul noyau de dessin pour les miniatures des cartes (editorTools.thumbnail) et la grande carte zoomable du Race Hub (createTrackMap). Marche pour TOUS les circuits, éditeur compris : elle dessine la ligne centrale de chaque pièce (centerlineWorld), pas track.path (qui n'existe que pour les circuits scriptés). |
+
+## `supabase/functions/account-recovery/`
+
+| Fichier | Rôle |
+| --- | --- |
+| `handler.js` | Trackigami : logique de la fonction serveur « account-recovery » (sans rien de propre à Deno : elle se teste sous Node, voir tools/test-recovery-handler.mjs). |
+| `server.ts` | Trackigami : fonction serveur « account-recovery » (Supabase Edge Function, Deno) : récupérer un compte avec son code de secours (COMPLETE-003, décision D-6 : pas de courriel). |
 
 ## `supabase/functions/ice/`
 

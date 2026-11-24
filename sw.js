@@ -1,7 +1,7 @@
 // Service worker généré par tools/gen-sw.mjs : ne pas modifier à la main.
 // Jeu hors ligne : les fichiers du jeu sont gardés en cache ; le réseau reste prioritaire
 // pour récupérer les mises à jour quand il est disponible.
-const CACHE = 'copytrack-e1a60c5f07';
+const CACHE = 'copytrack-b5ce5bc6f3';
 const FILES = [
   "./",
   "assets/fonts/OFL.txt",
@@ -20,6 +20,8 @@ const FILES = [
   "js/a11y.js",
   "js/academy.js",
   "js/account.js",
+  "js/accountRules.js",
+  "js/accountUi.js",
   "js/aids.js",
   "js/ambiance.js",
   "js/analysis/coach.js",
