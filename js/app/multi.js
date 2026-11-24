@@ -23,7 +23,7 @@ export const multiMethods = {
     const back = code ? loadResume(normalizeCode(code)) : null;
     const L = profile().loadout || {}, car = {};
     for (const k of ['body', 'color', 'color2', 'decalColor', 'spoiler', 'led', 'decal', 'ornament', 'wheels', 'finish', 'bike']) if (typeof L[k] === 'string') car[k] = L[k];      // (0.13.1) mon apparence, vue par les autres
-    return { name: this.settings.playerName, car, makeSignaling: (o) => defaultSignaling(o, this._tokenFn()), getIce: this._iceLoader, ...(back ? { selfId: back.selfId, token: back.token } : {}) };
+    return { name: this.settings.playerName, car, makeSignaling: (o) => defaultSignaling(o, this._tokenFn()), getIce: this._iceLoader, ...(back ? { selfId: back.selfId, identity: back.key } : {}) };      // (TECH-040 : la place ne revient qu'avec le secret de reprise)
   },
 
   _bindRoom(room) {
@@ -42,7 +42,7 @@ export const multiMethods = {
       else this.ui.flash('L\'hôte a arrêté le championnat.', 3);
     });
     // Reconnexion (E16) : la place est gardée 20 s ; la course continue pendant ce temps.
-    const keep = () => { if (!room.closed) saveResume({ code: room.code, selfId: room.selfId, token: room.token }); };
+    const keep = () => { const r = !room.closed && room.resumeInfo(); if (r) saveResume(r); };
     keep();
     room.on('members', keep);
     room.on('reconnecting', () => this.ui.flash('📶 Connexion perdue : reconnexion à la salle… (ta course continue)', 4));
@@ -240,7 +240,7 @@ export const multiMethods = {
     const msg = document.createElement('p');
     msg.className = 'mp-err'; msg.setAttribute('role', 'alert');
     right.append(modeRow, trackRow, preview, pick, msg, note);
-    const LINK = { self: '', open: '● connecté', connecting: '… connexion', failed: '✕ liaison impossible', closed: '✕ déconnecté', incompatible: '✕ autre version', away: '⏳ reconnexion' };
+    const LINK = { self: '', open: '● connecté', connecting: '… connexion', proving: '… connexion', failed: '✕ liaison impossible', closed: '✕ déconnecté', incompatible: '✕ autre version', away: '⏳ reconnexion' };
     const MODES = { race: 'Course', cup: 'Championnat', free: 'Course libre' };
     // Choix de l'hôte, gardés d'une ouverture du salon à l'autre : circuits ajoutés à la liste, mode, nombre de manches, sélection, collisions, salon public.
     const extra = this._mpExtra = Object.assign({ mine: [], community: [], mode: 'race', rounds: 3, pool: 'all', collisions: true, pub: false }, this._mpExtra);

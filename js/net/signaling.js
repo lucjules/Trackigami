@@ -186,6 +186,9 @@ export class SupabaseSignaling extends Emitter {
     if (added.length || JSON.stringify(prevMeta) !== JSON.stringify(meta)) this.emit('meta', key, meta, conn ? { conn: true } : undefined);
   }
 
+  // Métadonnées de toutes les connexions d'un joueur, de la plus ancienne à la plus récente (TECH-040 : choisir celle qui porte le bon engagement).
+  metasOf(id) { return (this._pres.get(id) || []).map((e) => e.meta); }
+
   track(meta) { this.meta = meta; this._send(this.topic, 'presence', { type: 'presence', event: 'track', payload: meta }); }
 
   send(to, data) {
@@ -296,6 +299,7 @@ export class LocalSignaling extends Emitter {
   }
   // hello d'un joueur déjà connu : il a rouvert sa signalisation (info.conn, comme une nouvelle connexion Realtime).
   _set(id, meta, hello = false) { const had = this.peers.has(id); this.peers.set(id, meta); if (had) this.emit('meta', id, meta, hello ? { conn: true } : undefined); else this.emit('join', id, meta); }
+  metasOf(id) { return this.peers.has(id) ? [this.peers.get(id)] : []; }
   track(meta) { this.meta = meta; this._post({ k: 'meta', id: this.selfId, meta }); }
   send(to, data) { return this._post({ k: 'signal', id: this.selfId, to, data }); }
   leave() { this._post({ k: 'bye', id: this.selfId }); this._end(); }

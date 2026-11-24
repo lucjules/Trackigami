@@ -48,9 +48,17 @@ export class VirtualClock {
     for (const t of this.timers.values()) if (t.at <= limit && (!best || t.at < best.at || (t.at === best.at && t.id < best.id))) best = t;
     return best;
   }
+  // busy() : du travail en cours HORS de l'horloge (ex. Web Crypto, identity.js) ; on l'attend entre deux minuteries, sans faire avancer le temps simulé.
+  async _settle() {
+    await flush();
+    // (en temps réel, pas en tours de boucle : sous la charge de « npm test », une signature peut prendre bien plus de tours)
+    const until = process.hrtime.bigint() + 20000000000n;
+    while (this.busy && this.busy() && process.hrtime.bigint() < until) await new Promise((r) => globalThis.setImmediate(r));
+    await flush();
+  }
   async advance(ms) {
     const end = this.t + Math.max(0, ms);
-    await flush();
+    await this._settle();
     for (let n = 0; ; n++) {
       if (n > 2_000_000) throw new Error('horloge virtuelle : minuteries sans fin');
       const t = this._next(end);
@@ -58,10 +66,10 @@ export class VirtualClock {
       this.t = Math.max(this.t, t.at);
       if (t.every) t.at += t.every; else this.timers.delete(t.id);
       try { t.fn(...t.args); } catch (e) { console.error(e); }
-      await flush();
+      await this._settle();
     }
     this.t = end;
-    await flush();
+    await this._settle();
   }
   // Fait avancer le temps par pas jusqu'à ce que la promesse se règle (au plus maxMs de temps simulé).
   async until(p, maxMs = 60000, step = 50) {

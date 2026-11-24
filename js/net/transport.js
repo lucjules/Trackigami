@@ -30,6 +30,10 @@
 //      - le non-initiateur qui reçoit une offre d'une AUTRE connexion de l'initiateur (autre empreinte DTLS) repart d'une connexion neuve ; une relance ICE
 //        (même empreinte) reste sur la sienne ;
 //      - l'initiateur dont l'offre reste sans réponse NEGOTIATION_MS renégocie avec une connexion neuve (MAX_NEGOTIATIONS fois au plus, puis « failed »).
+// 9. Descriptions signées (TECH-040). La signalisation est un canal public : n'importe qui peut y envoyer une offre ou une réponse au nom d'un joueur.
+//    Avec seal/vet (fournis par la salle), chaque offre et chaque réponse porte la signature de son auteur sur son empreinte DTLS (et, pour une réponse,
+//    sur celle de l'offre) ; une description dont la signature ne correspond pas à l'identité attendue est écartée AVANT d'ouvrir quoi que ce soit : un
+//    client modifié qui prend l'identifiant d'un autre ne lui vole pas sa négociation. La liaison ouverte est ensuite prouvée (room.js : hi / hello).
 import { CONFIG } from '../config.js';
 
 const ICE_SERVERS = CONFIG.iceServers;      // STUN par défaut ; un relais TURN s'ajoute dans js/config.js
@@ -68,8 +72,10 @@ export class PeerMesh {
   // présent dans l'annuaire de la signalisation.
   // getIce() : serveurs ICE à jour (ice.js : identifiants TURN à durée limitée, gardés jusqu'aux 3/4 de leur durée) ; redemandés à CHAQUE connexion neuve et
   // avant une relance ICE (TECH-050), pour qu'un arrivant tardif ou une reconnexion n'utilise pas des identifiants expirés.
-  constructor({ selfId, signaling, handlers, iceServers = ICE_SERVERS, getIce = null, isMember = null, RTC = globalThis.RTCPeerConnection }) {
-    this.selfId = selfId; this.signaling = signaling; this.h = handlers; this.ice = iceServers; this.getIce = getIce; this.RTC = RTC;
+  // seal(id, desc, peerDesc) → preuve (objet) à joindre à ma description ; vet(id, desc, preuve, myDesc) → vrai si la description vient bien de ce joueur
+  // (point 9 ci-dessus). Sans eux (tests du transport seul), les descriptions ne sont ni signées ni vérifiées.
+  constructor({ selfId, signaling, handlers, iceServers = ICE_SERVERS, getIce = null, isMember = null, seal = null, vet = null, RTC = globalThis.RTCPeerConnection }) {
+    this.selfId = selfId; this.signaling = signaling; this.h = handlers; this.ice = iceServers; this.getIce = getIce; this.RTC = RTC; this.seal = seal; this.vet = vet;
     this.isMember = isMember || ((id) => !!(this.signaling && this.signaling.peers && this.signaling.peers.has(id)));
     this.links = new Map();
     this.stats = { sent: 0, recv: 0, skipped: 0 };
@@ -111,6 +117,13 @@ export class PeerMesh {
   closeAll() { for (const id of [...this.links.keys()]) this.removePeer(id); }
 
   statusOf(id) { const l = this.links.get(id); return l ? l.status : null; }
+  // Empreintes DTLS de la liaison (la mienne, celle de l'autre) : la preuve d'identité les signe (TECH-040, identity.js) ; et son numéro de connexion.
+  fingerprints(id) {
+    const l = this.links.get(id), pc = l && l.pc;
+    if (!pc) return { local: '', remote: '' };
+    return { local: fingerprintOf(pc.localDescription && pc.localDescription.sdp) || '', remote: fingerprintOf(pc.remoteDescription && pc.remoteDescription.sdp) || l.remoteFp || '' };
+  }
+  linkGen(id) { const l = this.links.get(id); return l ? l.gen : -1; }
 
   // Les opérations d'une liaison (mise en place, messages de signalisation) se suivent une par une, dans l'ordre d'arrivée.
   _enqueue(link, fn) { const p = link.queue.then(fn).catch(() => { /* message invalide ou tardif : ignoré */ }); link.queue = p; return p; }
@@ -216,7 +229,9 @@ export class PeerMesh {
       if (!this._current(link, gen)) return;
       await link.pc.setLocalDescription(offer);
       if (!this._current(link, gen)) return;
-      const sent = this.signaling.send(link.id, { k: 'desc', d: descJSON(link.pc.localDescription) });
+      const local = descJSON(link.pc.localDescription), p = this.seal ? await this.seal(link.id, local, null) : null;
+      if (!this._current(link, gen)) return;
+      const sent = this.signaling.send(link.id, { k: 'desc', d: local, ...(p ? { p } : {}) });
       this._arm(link, gen, sent !== false);
     } catch { if (this._current(link, gen)) this._status(link, 'failed'); }
   }
@@ -247,9 +262,12 @@ export class PeerMesh {
   async _handle(link, data) {
     if (this.links.get(link.id) !== link || !link.pc) return;
     if (data.k === 'desc' && data.d && typeof data.d === 'object') {
-      const d = data.d, fp = fingerprintOf(d.sdp);
-      // Seul le non-initiateur reçoit des offres ; seul l'initiateur reçoit des réponses.
-      if (d.type === 'offer' && !link.initiator) {
+      const d = data.d, fp = fingerprintOf(d.sdp), gen = link.gen;
+      // Seul le non-initiateur reçoit des offres ; seul l'initiateur reçoit des réponses. Une description qui ne vient pas de ce joueur est écartée (point 9).
+      if ((d.type !== 'offer' && d.type !== 'answer') || (d.type === 'offer') === link.initiator) return;
+      if (this.vet && !(await this.vet(link.id, d, data.p, d.type === 'answer' ? descJSON(link.pc.localDescription) : null))) return;
+      if (!this._current(link, gen) || !link.pc) return;
+      if (d.type === 'offer') {
         // Une offre d'une AUTRE connexion de l'initiateur (il a refait la sienne) : on repart d'une connexion neuve. Même empreinte : relance ICE, même connexion.
         const same = link.remoteSet && (fp && link.remoteFp ? fp === link.remoteFp : link.status === 'open');
         if (link.remoteSet && !same) await this._setup(link);
@@ -259,8 +277,10 @@ export class PeerMesh {
         await this._flush(link);
         const answer = await link.pc.createAnswer();
         await link.pc.setLocalDescription(answer);
-        this.signaling.send(link.id, { k: 'desc', d: descJSON(link.pc.localDescription) });
-      } else if (d.type === 'answer' && link.initiator) {
+        const local = descJSON(link.pc.localDescription), p = this.seal ? await this.seal(link.id, local, d) : null;
+        if (this.links.get(link.id) !== link || !link.pc) return;
+        this.signaling.send(link.id, { k: 'desc', d: local, ...(p ? { p } : {}) });
+      } else {
         if (link.pc.signalingState && link.pc.signalingState !== 'have-local-offer') return;      // réponse périmée (à une offre d'avant)
         await link.pc.setRemoteDescription(d);
         link.remoteSet = true; link.remoteFp = fp;

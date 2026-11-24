@@ -7,7 +7,7 @@ import { POINTS, Championship, buildPlaylist, poolFor, liveOrder, pointsFor, MAX
 import { ProgressTracker, checkpointProgress, gridSpawn, GRID_COLS } from '../js/net/progress.js';
 import { softCollide, presentState, CAR_R, MAX_DV_STEP, MAX_LEAD_S } from '../js/net/collide.js';
 import { Room, FINISH_GRACE_MS, RESULTS_MS, MAX_ROUND_MS } from '../js/net/room.js';
-import { RESUME_MS, RETRY_MS, saveResume, loadResume, clearResume, newToken } from '../js/net/resume.js';
+import { RESUME_MS, RETRY_MS, saveResume, loadResume, clearResume } from '../js/net/resume.js';
 import { Emitter } from '../js/net/signaling.js';
 import { PublicDirectory, cleanListing, describeRoom } from '../js/net/directory.js';
 import { BUILTIN_TRACKS, buildBuiltin } from '../js/tracks.js';
@@ -252,8 +252,18 @@ function lan(ids, { code = 'ABC234' } = {}) {
     setSignaling() {},
   });
   const opts = (name, selfId) => ({ name, selfId, code, makeSignaling: ({ selfId: s }) => sigFor(s), makeMesh, now: () => clock.t, schedule: (fn, ms) => timers.push({ fn, at: clock.t + ms }) });
-  const open = () => { for (const r of rooms) for (const o of rooms) if (r !== o && !r.closed && !o.closed && !cut.has(r.selfId) && !cut.has(o.selfId) && r.members.has(o.selfId) && r.members.get(o.selfId).link !== 'away') r._onLink(o.selfId, 'open'); };
-  const env = { clock, rooms, open, events: {}, timers };
+  // Les preuves d'identité (TECH-040, Web Crypto) sont asynchrones : on attend qu'aucune salle n'en ait plus en cours.
+  // (en temps réel, pas en tours de boucle : sous la charge de « npm test », une signature peut prendre bien plus de tours)
+  const settle = async () => {
+    const until = process.hrtime.bigint() + 20000000000n;
+    for (let calm = 0; process.hrtime.bigint() < until;) {
+      await new Promise((r) => globalThis.setImmediate(r));
+      if (rooms.some((r) => r._crypto)) calm = 0; else if (++calm >= 3) return;
+    }
+    throw new Error('preuves d\'identité toujours en attente');
+  };
+  const open = async () => { for (const r of rooms) for (const o of rooms) if (r !== o && !r.closed && !o.closed && !cut.has(r.selfId) && !cut.has(o.selfId) && r.members.has(o.selfId) && r.members.get(o.selfId).link !== 'away') r._onLink(o.selfId, 'open'); await settle(); };
+  const env = { clock, rooms, open, settle, events: {}, timers };
   // Coupure réseau d'un joueur (sans « bye ») : il disparaît de l'annuaire des autres, sa signalisation se ferme chez lui, et ses liaisons de jeu tombent
   // aussi (plus rien ne passe : sendCtl ci-dessus). Depuis TECH-046, c'est la chute de la LIAISON (et non celle de l'annuaire) qui met une place en attente ;
   // le vrai transport la signale par la fermeture des canaux ou par le silence (Room._checkLinks) ; ce faux le dit tout de suite.
@@ -303,7 +313,7 @@ const ROUNDS = [{ id: 'b-un-a1', name: 'Un' }, { id: 'b-deux-b2', name: 'Deux' }
 console.log('Championnat : protocole du salon');
 await test('un championnat de bout en bout : départ commun sur la grille, arrivées, clôture, manche suivante, classement final', async () => {
   const env = lan(); const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
-  env.open();
+  await env.open();
   assert.equal(b.startCup({ rounds: ROUNDS }), false, 'un invité ne lance pas de championnat');
   assert.equal(a.startCup({ rounds: [] }), false); assert.equal(a.startCup({ rounds: [{ id: 'u:abc' }] }), false, 'pas de circuit à code ici');
   assert.equal(a.startCup({ rounds: ROUNDS, collisions: true }), true);
@@ -343,7 +353,7 @@ await test('un championnat de bout en bout : départ commun sur la grille, arriv
 });
 await test('un joueur qui quitte ne bloque pas la manche ; si c\'est l\'hôte, l\'identifiant le plus petit prend la suite et clôt', async () => {
   const env = lan(); const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
-  env.open(); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.startCup({ rounds: ROUNDS });
   c.leave();                                                               // Cléo part : plus rien à attendre d'elle
   b.reportFinish(4000);
   assert.equal(env.events.a.round.length, 0, 'Ana roule encore');
@@ -360,7 +370,7 @@ await test('un joueur qui quitte ne bloque pas la manche ; si c\'est l\'hôte, l
 console.log('Reconnexion (E16)');
 await test('coupure de 10 s en pleine manche : la place est gardée, la manche attend, l\'arrivée annoncée pendant la coupure compte, à sa place', async () => {
   const env = lan(); const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
-  env.open(); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.startCup({ rounds: ROUNDS });
   env.cut('b');
   assert.equal(b.reconnecting, true, 'Ben se sait coupé'); assert.equal(b.closed, false, 'il reste dans la salle, sa course continue');
   assert.equal(a.members.get('b').link, 'away', 'chez l\'hôte : « reconnexion », pas « parti »');
@@ -372,7 +382,7 @@ await test('coupure de 10 s en pleine manche : la place est gardée, la manche a
   env.heal('b');
   await env.advance(RETRY_MS[RETRY_MS.length - 1] + 200);
   assert.equal(b.reconnecting, false, 'Ben est revenu'); assert.equal(a.members.get('b').link, 'connecting');
-  env.open();                                                                  // les liaisons se refont : hello, état complet, arrivée renvoyée
+  await env.open();                                                                  // les liaisons se refont : hello, état complet, arrivée renvoyée
   const ev = env.events.a.round; assert.equal(ev.length, 1, 'la manche se clôt dès que l\'hôte a l\'arrivée de Ben');
   assert.deepEqual(ev[0].result.order, ['b', 'a', 'c'], 'Ben, plus rapide, gagne la manche malgré la coupure');
   assert.equal(env.events.b.round.length, 1, 'Ben reçoit la clôture comme les autres');
@@ -382,18 +392,18 @@ await test('coupure de 10 s en pleine manche : la place est gardée, la manche a
 });
 await test('l\'état renvoyé au retour complète les arrivées manquées, sans remettre la manche à zéro', async () => {
   const env = lan(); const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
-  env.open(); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.startCup({ rounds: ROUNDS });
   env.cut('c');
   b.reportFinish(4000);                                                        // Cléo ne le voit pas : elle est coupée
   assert.equal(c.cupState.finishes.has('b'), false);
-  env.heal('c'); await env.advance(RETRY_MS[0] + 50); env.open();
+  env.heal('c'); await env.advance(RETRY_MS[0] + 50); await env.open();
   assert.equal(c.cupState.finishes.get('b'), 4000, 'l\'arrivée de Ben est rattrapée');
   assert.equal(c.cupState.n, 0); assert.equal(env.events.c.start.length, 1);
   env.end();
 });
 await test('coupure trop longue : au-delà de 20 s la place est rendue, la manche se clôt sans lui ; lui sort de la salle', async () => {
   const env = lan(); const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
-  env.open(); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.startCup({ rounds: ROUNDS });
   env.cut('b');
   a.reportFinish(4100);
   await env.advance(RESUME_MS - 500);
@@ -407,7 +417,7 @@ await test('coupure trop longue : au-delà de 20 s la place est rendue, la manch
 });
 await test('l\'hôte coupé trop longtemps : le suivant prend la suite et se marque (hostover) ; l\'ancien, revenu, ne reprend pas la main ; le championnat se termine', async () => {
   const env = lan(); const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
-  env.open(); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.startCup({ rounds: ROUNDS });
   const retry = a.schedule; a.schedule = () => {};          // Ana reste coupée sans abandonner (ses tentatives sont mises de côté)
   env.cut('a');
   b.reportFinish(4000); c.reportFinish(4200);
@@ -418,7 +428,7 @@ await test('l\'hôte coupé trop longtemps : le suivant prend la suite et se mar
   env.heal('a'); a.schedule = retry; a._retry(0);           // Ana revient après coup
   await env.advance(RETRY_MS[0] + 100);
   assert.equal(a.reconnecting, false);
-  env.open();
+  await env.open();
   assert.equal(a.meta.host, false, 'revenue, Ana ne se dit plus hôte'); assert.equal(a.isHost, false); assert.equal(c.hostId, 'b'); assert.equal(a.hostId, 'b');
   assert.equal(a.cup.played, 1, 'elle reçoit le championnat du nouvel hôte (la manche close en son absence)');
   await env.advance(RESULTS_MS + 500);
@@ -433,7 +443,7 @@ await test('l\'hôte coupé trop longtemps : le suivant prend la suite et se mar
 });
 await test('signalisation de l\'hôte coupée en pleine manche (TECH-046) : ses liaisons marchent, personne n\'est « absent », il clôt la manche', async () => {
   const env = lan(); const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
-  env.open(); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.startCup({ rounds: ROUNDS });
   env.cutSignaling('a');
   assert.equal(a.reconnecting, true, 'Ana se sait sans signalisation');
   assert.equal(b.members.get('a').link, 'open', 'chez Ben, Ana reste reliée'); assert.equal(a.members.get('b').link, 'open', 'chez Ana, Ben aussi');
@@ -445,11 +455,14 @@ await test('signalisation de l\'hôte coupée en pleine manche (TECH-046) : ses 
   assert.equal(a.reconnecting, false, 'signalisation retrouvée'); assert.equal(b.members.get('a').link, 'open', 'liaison jamais refaite : elle n\'était pas tombée');
   env.end();
 });
-test('mémoire de la place (onglet rechargé) : identifiant et jeton gardés 20 s pour ce salon seulement', () => {
+test('mémoire de la place (onglet rechargé) : identifiant et secret de reprise gardés 20 s pour ce salon seulement (TECH-040)', () => {
   const mem = new Map(), store = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v), removeItem: (k) => mem.delete(k) };
-  const token = newToken(); assert.match(token, /^[0-9a-f]{16}$/);
-  saveResume({ code: 'ABC234', selfId: 'id-1', token }, store, 1000);
-  assert.deepEqual(loadResume('ABC234', store, 1000 + RESUME_MS - 1), { code: 'ABC234', selfId: 'id-1', token, at: 1000 });
+  const key = { pub: 'P'.repeat(120), jwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y', d: 'd' } };
+  saveResume({ code: 'ABC234', selfId: 'id-1', key }, store, 1000);
+  assert.deepEqual(loadResume('ABC234', store, 1000 + RESUME_MS - 1), { code: 'ABC234', selfId: 'id-1', key, at: 1000 });
+  saveResume({ code: 'ABC234', selfId: 'id-1', token: '0123456789abcdef' }, store, 1000);
+  assert.equal(loadResume('ABC234', store, 1100), null, 'l\'ancien format (jeton seul) ne rend plus de place');
+  saveResume({ code: 'ABC234', selfId: 'id-1', key }, store, 1000);
   assert.equal(loadResume('XYZ789', store, 1500), null, 'un autre salon');
   assert.equal(loadResume('ABC234', store, 1000 + RESUME_MS), null, 'trop tard');
   clearResume(store); assert.equal(loadResume('ABC234', store, 1100), null);
@@ -458,7 +471,7 @@ test('mémoire de la place (onglet rechargé) : identifiant et jeton gardés 20 
 
 await test('plafond : une manche qui ne se termine jamais est close au bout de 10 minutes', async () => {
   const env = lan(); const a = await env.add('Ana', 'a'); await env.add('Ben', 'b');
-  env.open(); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.startCup({ rounds: ROUNDS });
   env.clock.t += MAX_ROUND_MS + 4000; a._cupTick(); assert.equal(env.events.a.round.length, 0, 'dix minutes depuis le « GO », pas avant');
   env.clock.t += 1; a._cupTick();
   assert.deepEqual(env.events.a.round[0].result.points, { a: 0, b: 0 });
@@ -466,7 +479,7 @@ await test('plafond : une manche qui ne se termine jamais est close au bout de 1
 });
 await test('seul l\'hôte conduit le championnat : messages d\'un invité, mauvaise manche, joueur hors grille, temps absurdes ignorés', async () => {
   const env = lan(); const a = await env.add('Ana', 'a'); await env.add('Ben', 'b'); const c = await env.add('Cléo', 'c');
-  env.open(); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.startCup({ rounds: ROUNDS });
   const e = a.epoch;                                                            // (NET_VER 5 : les messages de course portent leur époque)
   const before = env.events.c.start.length;
   c._onMessage('b', 'ctl', { k: 'round', e, n: 1, roster: ['a', 'b', 'c'], names: {}, startIn: 4000 });
@@ -495,7 +508,7 @@ await test('seul l\'hôte conduit le championnat : messages d\'un invité, mauva
 });
 await test('un résultat manqué est rattrapé au départ suivant ; arrêter le championnat remet tout le monde au salon', async () => {
   const env = lan(); const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
-  env.open(); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.startCup({ rounds: ROUNDS });
   // Ben « manque » la clôture de la manche 0 (liaison coupée un instant) : le message « rend » ne lui parvient pas.
   const hear = b._onMessage.bind(b);
   b._onMessage = (from, kind, data) => (data && data.k === 'rend' ? undefined : hear(from, kind, data));
@@ -512,9 +525,9 @@ await test('un résultat manqué est rattrapé au départ suivant ; arrêter le 
 });
 await test('un arrivant en cours de championnat reçoit le championnat, suit la manche sans la courir, puis part à la suivante', async () => {
   const env = lan(); const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
-  env.open(); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.startCup({ rounds: ROUNDS });
   const d = await env.add('Dan', 'd');
-  env.open();                                                                // les liaisons s'ouvrent : l'hôte envoie le championnat à Dan
+  await env.open();                                                                // les liaisons s'ouvrent : l'hôte envoie le championnat à Dan
   assert.equal(d.cup.total, 2); assert.equal(d.cupState.phase, 'racing'); assert.deepEqual(d.cupState.roster, ['a', 'b']);
   assert.equal(env.events.d.start.length, 0, 'il ne démarre pas une manche déjà commencée');
   assert.equal(d.cupActive, true);
@@ -532,7 +545,7 @@ await test('un arrivant en cours de championnat reçoit le championnat, suit la 
 });
 await test('un départ libre de l\'hôte met fin au championnat ; en championnat, l\'arrivée en mode libre n\'est pas prise pour un temps de manche', async () => {
   const env = lan(); const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
-  env.open(); a.selectTrack({ id: 'b-un-a1', name: 'Un' }); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.selectTrack({ id: 'b-un-a1', name: 'Un' }); a.startCup({ rounds: ROUNDS });
   a.start();
   assert.equal(a.cup, null); assert.equal(b.cup, null, 'tout le monde est revenu en mode libre');
   env.end();
@@ -540,11 +553,11 @@ await test('un départ libre de l\'hôte met fin au championnat ; en championnat
 console.log('Règles de la partie (0.9.25)');
 await test('l\'hôte choisit des règles : elles arrivent validées à tous, y compris à un arrivant tardif ; un invité ne peut pas en imposer', async () => {
   const env = lan(); const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
-  env.open();
+  await env.open();
   b.setRules({ g0: 40 }); assert.equal(a.rules, null, 'un invité ne choisit pas les règles');
   a.setRules({ g0: 40, veh0: 'moto', obstacles: 'off', sameCars: 1, laps: 99, bogus: 1 });
   assert.deepEqual(b.rules, { laps: 5, g0: 40, veh0: 'moto', v0: -1, offroad: -1, obstacles: 'off', sameCars: 1 }, 'bornées et nettoyées à l\'arrivée');
-  const c = await env.add('Cléo', 'c'); env.open();
+  const c = await env.add('Cléo', 'c'); await env.open();
   assert.equal(c.rules && c.rules.g0, 40, 'un arrivant reçoit les règles');
   // un message hostile d'un invité est ignoré ; des règles par défaut les effacent
   b._onMessage('b', 'ctl', { k: 'rules', r: { g0: 250 } }); assert.equal(c.rules.g0, 40);
@@ -566,37 +579,37 @@ const lobbyAll = (rs) => { for (const r of rs) if (!r.closed) r.backToLobby(); }
 const starts = (env, ...ids) => ids.reduce((n, id) => n + env.events[id].start.length, 0);
 await test('course libre (TECH-008) : retour au salon, l\'hôte change de circuit : les invités restent au salon', async () => {
   const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
-  env.open();
+  await env.open();
   a.selectTrack(T1); a.start();
   precondition(b.state === 'racing' && c.state === 'racing', 'tout le monde court');
   lobbyAll([a, b, c]);
   const n0 = starts(env, 'b', 'c');
-  a.selectTrack(T2); a.selectTrack(T1); env.open();               // l'hôte parcourt la liste ; une liaison se rouvre
+  a.selectTrack(T2); a.selectTrack(T1); await env.open();               // l'hôte parcourt la liste ; une liaison se rouvre
   assert.equal(b.state, 'lobby'); assert.equal(c.state, 'lobby');
   assert.equal(starts(env, 'b', 'c'), n0, 'aucun départ sur un simple choix de circuit');
   } finally { env.end(); }
 });
 await test('après « Arrêter le championnat » (TECH-008), l\'hôte change de circuit : l\'invité reste au salon', async () => {
   const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
-  env.open();
+  await env.open();
   a.startCup({ rounds: ROUNDS });
   precondition(b.state === 'racing', 'Ben court la manche');
   a.stopCup(); lobbyAll([a, b]);
   const n0 = starts(env, 'b');
-  a.selectTrack(T2); env.open();
+  a.selectTrack(T2); await env.open();
   assert.equal(b.state, 'lobby'); assert.equal(starts(env, 'b'), n0, 'aucun départ après « Arrêter le championnat »');
   } finally { env.end(); }
 });
 await test('après une course unique terminée (TECH-008) : un arrivant n\'est pas lancé alors que tout le monde est au salon', async () => {
   const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
-  env.open();
+  await env.open();
   a.selectTrack(T1); a.start(); lobbyAll([a, b]);                  // une course libre a eu lieu
   a.startCup({ rounds: [T1] });                                    // puis une « Course » (championnat d'une manche), terminée
   a.reportFinish(4000); b.reportFinish(4100);
   precondition(a.cup.finished && b.cup.finished, 'course unique terminée');
   lobbyAll([a, b]);
   a.selectTrack(T2);
-  const d = await env.add('Dan', 'd'); env.open();                 // un arrivant, alors que tout le monde est au salon
+  const d = await env.add('Dan', 'd'); await env.open();                 // un arrivant, alors que tout le monde est au salon
   assert.equal(b.state, 'lobby', 'Ben reste au salon');
   assert.equal(d.state, 'lobby', 'l\'arrivant n\'est pas lancé : personne ne court');
   assert.equal(env.events.d.start.length, 0);
@@ -605,26 +618,26 @@ await test('après une course unique terminée (TECH-008) : un arrivant n\'est p
 
 await test('course libre (TECH-008) : un arrivant rejoint la course que l\'hôte court RÉELLEMENT ; revenu au salon, il n\'y est pas renvoyé et peut la rejoindre', async () => {
   const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
-  env.open();
+  await env.open();
   a.selectTrack(T1); a.start();
-  const d = await env.add('Dan', 'd'); env.open();
+  const d = await env.add('Dan', 'd'); await env.open();
   assert.equal(d.state, 'racing', 'l\'hôte court : l\'arrivant part, à son rythme');
   assert.equal(env.events.d.start.at(-1).startLocal, env.clock.t + 1500, 'départ dans 1,5 s');
   assert.equal(env.events.d.start.at(-1).e, a.epoch, 'sur le lancement en cours');
-  d.backToLobby(); env.open();
+  d.backToLobby(); await env.open();
   assert.equal(d.state, 'lobby', 'revenu au salon : une liaison qui se rouvre ne l\'y renvoie pas');
   assert.ok(d.hostLive && d.hostLive.track.id === T1.id, 'il sait que la course continue');
   assert.equal(d.joinLive(), true); assert.equal(d.state, 'racing', 'il la rejoint d\'un clic');
   a.backToLobby();
   assert.equal(d.hostLive, null, 'l\'hôte revenu au salon : plus de course « en cours »');
   assert.equal(d.state, 'racing', 'ceux qui courent ne sont pas interrompus'); assert.equal(b.state, 'racing');
-  const f = await env.add('Fay', 'f'); env.open();
+  const f = await env.add('Fay', 'f'); await env.open();
   assert.equal(f.state, 'lobby', 'un arrivant n\'est pas lancé quand l\'hôte est au salon');
   } finally { env.end(); }
 });
 await test('arrivée envoyée pendant un changement de circuit (TECH-042) : créditée à son lancement, pas au suivant', async () => {
   const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
-  env.open();
+  await env.open();
   a.selectTrack(T1); a.start();
   // L'arrivée de Ben (sur Un) est en vol vers Cléo quand l'hôte relance sur Deux.
   const held = [], hear = c._onMessage.bind(c);
@@ -637,19 +650,20 @@ await test('arrivée envoyée pendant un changement de circuit (TECH-042) : cré
 });
 await test('un arrivant garde les meilleurs temps synchronisés (TECH-042) quand l\'état de l\'hôte arrive après eux', async () => {
   const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
-  env.open();
+  await env.open();
   a.selectTrack(T1); a.start();
   b.reportFinish(4000);
   const d = await env.add('Dan', 'd');
-  b._onLink('d', 'open');                                          // la liaison Ben → Dan s'ouvre avant celle de l'hôte : le meilleur temps de Ben arrive d'abord
-  a._onLink('d', 'open'); c._onLink('d', 'open'); for (const r of [b, c, a]) d._onLink(r.selfId, 'open');
+  b._onLink('d', 'open'); d._onLink('b', 'open'); await env.settle();         // la liaison Ben → Dan s'ouvre avant celle de l'hôte : le meilleur temps de Ben arrive d'abord
+  a._onLink('d', 'open'); c._onLink('d', 'open'); for (const r of [c, a]) d._onLink(r.selfId, 'open');
+  await env.settle();
   assert.equal(d.results.get('b') && d.results.get('b').best, 4000, 'l\'arrivant garde le temps synchronisé, quel que soit l\'ordre des messages');
   } finally { env.end(); }
 });
 
 await test('joueur revenu après la clôture d\'une manche (TECH-047) : écran de résultats, course arrêtée', async () => {
   const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
-  env.open(); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.startCup({ rounds: ROUNDS });
   const retry = b.schedule; b.schedule = () => {};                 // Ben reste coupé (ses tentatives sont mises de côté)
   env.cut('b');
   a.reportFinish(4000); c.reportFinish(4100);
@@ -657,17 +671,17 @@ await test('joueur revenu après la clôture d\'une manche (TECH-047) : écran d
   precondition(env.events.a.round.length === 1, 'manche close chez l\'hôte');
   precondition(b.cupState && b.cupState.phase === 'racing' && env.events.b.round.length === 0, 'Ben, coupé, croit la manche en cours');
   env.heal('b'); b.schedule = retry; b._retry(0);
-  await env.advance(RETRY_MS[0] + 100); env.open();
+  await env.advance(RETRY_MS[0] + 100); await env.open();
   assert.equal(env.events.b.round.length, 1, 'Ben revenu voit la clôture (écran de résultats, course arrêtée)');
   assert.deepEqual(env.events.b.round[0].result.order, ['a', 'c', 'b']);
   assert.notEqual(b.cupState.phase, 'racing');
-  env.open();
+  await env.open();
   assert.equal(env.events.b.round.length, 1, 'un état renvoyé de nouveau ne refait pas l\'écran de résultats');
   } finally { env.end(); }
 });
 await test('joueur revenu (TECH-047) alors que la manche suivante a déjà commencé sans lui : résultats de sa manche, il suit la suivante, joue celle d\'après', async () => {
   const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
-  env.open(); a.startCup({ rounds: [...ROUNDS, { id: 'b-trois-c3', name: 'Trois' }] });
+  await env.open(); a.startCup({ rounds: [...ROUNDS, { id: 'b-trois-c3', name: 'Trois' }] });
   const retry = b.schedule; b.schedule = () => {};
   env.cut('b');
   a.reportFinish(4000); c.reportFinish(4100);
@@ -675,7 +689,7 @@ await test('joueur revenu (TECH-047) alors que la manche suivante a déjà comme
   await env.advance(RESULTS_MS + 500);                             // manche 1 partie sans lui
   precondition(a.cupState.phase === 'racing' && a.cupState.n === 1 && !a.cupState.roster.includes('b'), 'manche 1 en cours, sans Ben');
   env.heal('b'); b.schedule = retry; b._retry(0);
-  await env.advance(RETRY_MS[0] + 100); env.open();
+  await env.advance(RETRY_MS[0] + 100); await env.open();
   assert.equal(env.events.b.round.length, 1); assert.equal(env.events.b.round[0].n, 0, 'résultats de SA manche (la 0)');
   assert.deepEqual([b.cupState.phase, b.cupState.n, b.cupState.roster.includes('b')], ['racing', 1, false], 'il suit la manche 1 sans la courir');
   assert.equal(env.events.b.start.length, 1, 'aucun départ imposé dans une manche déjà commencée');
@@ -687,7 +701,7 @@ await test('joueur revenu (TECH-047) alors que la manche suivante a déjà comme
 
 await test('migration d\'hôte après une clôture manquée (TECH-048) : classements identiques chez tous, état le plus complet repris', async () => {
   const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
-  env.open(); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.startCup({ rounds: ROUNDS });
   // Ben manque l'arrivée d'Ana et la clôture de la manche (sa liaison avec Ana a sauté un instant).
   const hear = b._onMessage.bind(b);
   b._onMessage = (from, kind, data) => (from === 'a' && data && (data.k === 'finish' || data.k === 'rend') ? undefined : hear(from, kind, data));
@@ -699,6 +713,7 @@ await test('migration d\'hôte après une clôture manquée (TECH-048) : classem
   b._cupTick(); c._cupTick();
   const d = await env.add('Dan', 'd');
   for (const r of [b, c]) { r._onLink('d', 'open'); d._onLink(r.selfId, 'open'); }   // (seules les liaisons de l'arrivant s'ouvrent)
+  await env.settle();
   const st = (r) => JSON.stringify(r.cup.standings().map((x) => [x.id, x.points]));
   assert.equal(st(b), st(c), 'classements identiques chez Ben et Cléo');
   assert.equal(st(d), st(c), 'un arrivant copie le même classement');
@@ -708,7 +723,7 @@ await test('migration d\'hôte après une clôture manquée (TECH-048) : classem
 });
 await test('migration d\'hôte (TECH-048), état envoyé au nouvel hôte perdu : sa clôture plus pauvre n\'écrase rien et tout converge vers la plus complète', async () => {
   const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
-  env.open(); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.startCup({ rounds: ROUNDS });
   const hear = b._onMessage.bind(b);
   b._onMessage = (from, kind, data) => (from === 'a' && data && (data.k === 'finish' || data.k === 'rend') ? undefined : hear(from, kind, data));
   b.reportFinish(4100); c.reportFinish(4200); a.reportFinish(4000);
@@ -728,7 +743,7 @@ await test('migration d\'hôte (TECH-048), état envoyé au nouvel hôte perdu :
 });
 await test('migration d\'hôte (TECH-048) : un nouvel hôte qui relance une manche déjà partie ne refait partir personne', async () => {
   const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
-  env.open(); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.startCup({ rounds: ROUNDS });
   const n0 = env.events.b.start.length;
   b._onMessage('a', 'ctl', { k: 'round', e: b.epoch, n: 0, roster: ['a', 'b'], names: {}, startIn: 4000 });
   assert.equal(env.events.b.start.length, n0, 'manche 0 déjà en cours : pas de second départ');
@@ -752,32 +767,32 @@ test('résultats de manche versionnés (TECH-048) : une manche rangée ne fait q
 
 await test('arrêt puis nouveau championnat (TECH-084) : aucune arrivée rejouée', async () => {
   const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
-  env.open(); a.startCup({ rounds: ROUNDS });
+  await env.open(); a.startCup({ rounds: ROUNDS });
   const send = b.mesh.sendCtl; b.mesh.sendCtl = () => {};          // Ben finit la manche 0 pendant que sa liaison avec l'hôte est coupée
   b.reportFinish(3000);
   b.mesh.sendCtl = send;
   precondition(!a.cupState.finishes.has('b'), 'l\'hôte n\'a pas l\'arrivée de Ben');
   a.stopCup(); a.startCup({ rounds: ROUNDS });                     // arrêt, puis nouveau championnat
-  b._onLink('a', 'open');                                          // la liaison se rouvre : Ben renvoie ce qu'il avait en attente
+  b._onLink('a', 'open'); await env.settle();                     // la liaison se rouvre : Ben renvoie ce qu'il avait en attente
   assert.equal(a.cupState.finishes.has('b'), false, 'aucune arrivée de l\'ancien championnat rejouée dans le nouveau');
   // Témoin : dans le MÊME championnat, une arrivée faite pendant une coupure est bien renvoyée à la réouverture.
   b.mesh.sendCtl = () => {}; b.reportFinish(3500); b.mesh.sendCtl = send;
   precondition(!a.cupState.finishes.has('b'), 'l\'hôte n\'a pas encore l\'arrivée');
-  b._onLink('a', 'open');
+  b._onLink('a', 'open'); await env.settle();
   assert.equal(a.cupState.finishes.get('b'), 3500, 'renvoyée pour sa manche');
   // « Relancer un championnat » sans l'arrêter (revanche) : l'arrivée en attente ne passe pas non plus dans le nouveau.
   a.startCup({ rounds: ROUNDS });
   b.mesh.sendCtl = () => {}; precondition(b.reportFinish(3700) === true, 'Ben finit, liaison coupée'); b.mesh.sendCtl = send;
   a.startCup({ rounds: ROUNDS });
   precondition(b.cupState.phase === 'racing' && b.cupState.n === 0, 'Ben est sur la manche 0 du nouveau championnat');
-  b._onLink('a', 'open');
+  b._onLink('a', 'open'); await env.settle();
   assert.equal(a.cupState.finishes.has('b'), false, 'rien de rejoué après « Relancer »');
   } finally { env.end(); }
 });
 
 await test('classement général (TECH-085) : un joueur qui n\'a jamais couru en est absent', async () => {
   const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
-  env.open();
+  await env.open();
   a.members.get('c').link = 'failed';                              // Cléo n'est pas reliée à l'hôte : elle ne part pas sur la grille
   a.startCup({ rounds: ROUNDS });
   precondition(!a.cupState.roster.includes('c'), 'Cléo hors grille');
@@ -802,9 +817,9 @@ test('départage (TECH-085) : moyenne des places, qui n\'avantage pas celui qui 
 
 await test('arrivant pendant une « Course » (GAME-008) : circuit visible et « manche en cours, tu joueras la suivante »', async () => {
   const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
-  env.open();
+  await env.open();
   a.setMode('race'); a.selectTrack(T1); a.startCup({ rounds: [T1] });     // « Course » : un championnat d'une manche
-  const c = await env.add('Cléo', 'c'); env.open();                // Cléo arrive pendant la manche
+  const c = await env.add('Cléo', 'c'); await env.open();                // Cléo arrive pendant la manche
   assert.equal(c.state, 'lobby');
   assert.equal(c.track && c.track.id, T1.id, 'l\'arrivant voit le circuit');
   assert.equal(typeof c.lobbyStatus, 'function', 'état du salon pour l\'arrivant');
@@ -814,7 +829,7 @@ await test('arrivant pendant une « Course » (GAME-008) : circuit visible et «
   assert.equal(c.lobbyStatus(), null, 'plus de manche en cours');
   // Championnat de plusieurs manches : même chose, avec le numéro de la manche ; à la suivante, il est sur la grille.
   a.startCup({ rounds: ROUNDS });
-  const d = await env.add('Dan', 'd'); env.open();
+  const d = await env.add('Dan', 'd'); await env.open();
   assert.deepEqual(d.lobbyStatus(), { running: 'cup', n: 0, total: 2, track: 'Un', next: true });
   assert.equal(d.track && d.track.id, ROUNDS[0].id);
   a.reportFinish(4000); b.reportFinish(4100); c.reportFinish(4200);

@@ -7,7 +7,7 @@ import { packSnapshot, unpackSnapshot, SNAPSHOT_BYTES, F_FINISHED } from '../js/
 import { SnapshotBuffer } from '../js/net/interp.js';
 import { RemoteCar, darkness, FADE_NEAR, FADE_FAR, MAX_DARKEN } from '../js/remoteCar.js';
 import { SupabaseSignaling, Emitter, tokenExpiry } from '../js/net/signaling.js';
-import { PeerMesh } from '../js/net/transport.js';
+import { PeerMesh, fingerprintOf } from '../js/net/transport.js';
 import { Room, cleanCarMeta, newRoomCode, normalizeCode, ROOM_RE } from '../js/net/room.js';
 import { RESUME_MS, RETRY_MS } from '../js/net/resume.js';
 import { RaceLogic } from '../js/raceLogic.js';
@@ -17,6 +17,7 @@ import { test, finish, precondition, bugConnu } from './harness.mjs';
 import { VirtualClock, FakeRealtime, FakeRTCNet } from './fake-realtime.mjs';
 import { PublicDirectory, LOBBY_CODE } from '../js/net/directory.js';
 import { createIceLoader } from '../js/net/ice.js';
+import { createIdentity, prove, proofText, descText, identityBusy } from '../js/net/identity.js';
 
 const snap = (steps, x, o = {}) => ({ steps, flags: 0, tele: 0, vehicle: 'car', seq: steps, pos: { x, y: 1, z: 0 }, quat: new THREE.Quaternion(), vel: { x: 0, y: 0, z: 0 }, cp: 0, lap: 1, ...o });
 // Reçoit une suite de paquets (émetteur à 20 Hz) avec une latence fixe de 30 ms.
@@ -283,9 +284,67 @@ function fakeRoomEnv() {
     return sig;
   };
   const meshes = [];
+  // (TECH-040) une liaison n'est crue qu'après la preuve d'identité : linkAll pose des liaisons établies (comme le ferait une vraie poignée de main),
+  // proveLink joue celle d'un nouvel arrivant (il signe le défi que la salle lui a envoyé).
+  const linkAll = (...rs) => { for (const r of rs) for (const m of r.members.values()) m.link = 'open'; };
+  const proveLink = async (room, id) => {
+    const ident = await createIdentity();
+    room.members.get(id).commit = ident.commit;
+    const hi = room.mesh.ctl.filter((c) => c[1] === id && c[0].k === 'hi').at(-1)[0];
+    room._onMessage(id, 'ctl', { k: 'hello', pub: ident.pub, sig: await prove(ident, proofText({ room: room.code, signer: id, verifier: room.selfId, signerFp: '', verifierFp: '', nonce: hi.n })) });
+    while (identityBusy()) await new Promise((r) => globalThis.setImmediate(r));
+    await new Promise((r) => globalThis.setImmediate(r));
+  };
   const makeMesh = ({ selfId, handlers }) => { const m = { selfId, handlers, links: new Map(), ctl: [], state: [], addPeer(id) { this.added = (this.added || []).concat(id); }, removePeer() {}, closeAll() {}, sendCtl(msg, to) { this.ctl.push([msg, to]); }, broadcastState(b) { this.state.push(b); } }; meshes.push(m); return m; };
-  return { make, makeMesh, meshes };
+  return { make, makeMesh, meshes, linkAll, proveLink };
 }
+const settleCrypto = async () => { do { await new Promise((r) => globalThis.setImmediate(r)); } while (identityBusy()); await new Promise((r) => globalThis.setImmediate(r)); };
+await test('preuve rejouée (TECH-040) : sur une autre liaison, une seconde fois, dans une autre salle : refusée ; la bonne, acceptée', async () => {
+  const env = fakeRoomEnv();
+  const opts = (name, o = {}) => ({ name, ...o, makeSignaling: ({ code, selfId }) => env.make(selfId, code), makeMesh: env.makeMesh });
+  const ana = await Room.create({ ...opts('Ana'), code: 'REJ234' });
+  const cid = await Room.join('REJ234', opts('Cid'));
+  const other = await Room.create({ ...opts('Ana'), code: 'AUT234', selfId: ana.selfId });     // une autre salle où le même joueur est hôte
+  const bea = await createIdentity();
+  const meta = { name: 'Bea', v: PHYS_VER, net: NET_VER, c: bea.commit };
+  await env.make('bea', 'REJ234').join(meta); await env.make('bea', 'AUT234').join(meta);
+  try {
+    for (const r of [ana, cid, other]) r._onLink('bea', 'open');                      // la liaison s'ouvre : chacun envoie son défi
+    const nonceOf = (r) => r.mesh.ctl.filter((c) => c[1] === 'bea' && c[0].k === 'hi').at(-1)[0].n;
+    const hello = { k: 'hello', pub: bea.pub, sig: await prove(bea, proofText({ room: 'REJ234', signer: 'bea', verifier: ana.selfId, signerFp: '', verifierFp: '', nonce: nonceOf(ana) })) };
+    cid._onMessage('bea', 'ctl', hello); await settleCrypto();
+    assert.notEqual(cid.members.get('bea').link, 'open', 'la preuve faite pour Ana ne vaut pas auprès de Cid');
+    other.members.get('bea').nonce = nonceOf(ana);                                       // (même défi, pour ne tester que la salle)
+    other._onMessage('bea', 'ctl', hello); await settleCrypto();
+    assert.notEqual(other.members.get('bea').link, 'open', 'ni dans une autre salle');
+    ana._onMessage('bea', 'ctl', hello); await settleCrypto();
+    assert.equal(ana.members.get('bea').link, 'open', 'la bonne preuve, sur la bonne liaison : acceptée');
+    ana._onLink('bea', 'open');                                                          // nouvelle liaison (nouveau défi)
+    ana._onMessage('bea', 'ctl', hello); await settleCrypto();
+    assert.notEqual(ana.members.get('bea').link, 'open', 'la même preuve, une seconde fois : refusée');
+  } finally { ana.leave(); cid.leave(); other.leave(); }
+});
+await test('description WebRTC signée (TECH-040) : seule celle de l\'identité attendue est acceptée ; rejouée vers un autre, ou réponse à une autre offre : refusée', async () => {
+  const env = fakeRoomEnv();
+  const opts = (name) => ({ name, makeSignaling: ({ code, selfId }) => env.make(selfId, code), makeMesh: env.makeMesh });
+  const ana = await Room.create({ ...opts('Ana'), code: 'DES234' });
+  const cid = await Room.join('DES234', opts('Cid'));
+  const bea = await createIdentity(), evil = await createIdentity();
+  await env.make('bea', 'DES234').join({ name: 'Bea', v: PHYS_VER, net: NET_VER, c: bea.commit });
+  try {
+    const offer = { type: 'offer', sdp: 'v=0\r\na=fingerprint:sha-256 AA:01\r\n' }, answer = { type: 'answer', sdp: 'v=0\r\na=fingerprint:sha-256 BB:02\r\n' };
+    const mine = { type: 'offer', sdp: 'v=0\r\na=fingerprint:sha-256 CC:03\r\n' };
+    const seal = async (id, d, to, peer = '') => ({ pub: id.pub, sig: await prove(id, descText({ room: 'DES234', signer: 'bea', verifier: to, type: d.type, fp: fingerprintOf(d.sdp), peerFp: peer })) });
+    assert.equal(await ana._vetDesc('bea', offer, await seal(bea, offer, ana.selfId), null), true, 'offre de Bea, pour Ana');
+    assert.equal(await ana._vetDesc('bea', offer, await seal(evil, offer, ana.selfId), null), false, 'offre signée par une autre clé');
+    assert.equal(await ana._vetDesc('bea', offer, null, null), false, 'offre non signée');
+    assert.equal(await cid._vetDesc('bea', offer, await seal(bea, offer, ana.selfId), null), false, 'offre faite pour Ana, rejouée vers Cid');
+    assert.equal(await ana._vetDesc('bea', answer, await seal(bea, answer, ana.selfId, 'CC:03'), mine), true, 'réponse à MON offre');
+    assert.equal(await ana._vetDesc('bea', answer, await seal(bea, answer, ana.selfId, 'DD:04'), mine), false, 'réponse à une autre offre');
+    const sealed = await ana._sealDesc('bea', mine, null);
+    assert.deepEqual(Object.keys(sealed).sort(), ['pub', 'sig'], 'ma description porte ma clé publique et ma signature, rien d\'autre');
+  } finally { ana.leave(); cid.leave(); }
+});
 await test('salon (0.13.1) : voiture annoncée et filtrée, prêt compté, mode de l\'hôte vu par l\'invité, revanche demandée', async () => {
   const env = fakeRoomEnv();
   const opts = (name, car) => ({ name, car, makeSignaling: ({ code, selfId }) => env.make(selfId, code), makeMesh: env.makeMesh });
@@ -348,6 +407,7 @@ await test('le départ est donné par l\'hôte seulement, avec un délai commun'
   const opts = (name) => ({ name, makeSignaling: ({ code, selfId }) => env.make(selfId, code), makeMesh: env.makeMesh });
   const t = 1000; const now = () => t;
   const host = await Room.create({ ...opts('H'), code: 'ABC234', now }); const g = await Room.join('ABC234', { ...opts('G'), now });
+  env.linkAll(host, g);                                                          // (liaisons établies et vérifiées : TECH-040)
   let started = null; g.on('start', (e) => { started = e; });
   host.selectTrack({ id: 'b-1-xyz', name: 'Premiers Éclats' });
   assert.deepEqual(host.mesh.ctl.at(-1)[0], { k: 'track', e: 0, id: 'b-1-xyz', name: 'Premiers Éclats', sig: '' }, 'le choix du circuit, avec l\'époque courante (aucun lancement)');
@@ -371,6 +431,7 @@ await test('on peut rejoindre une salle où la course a déjà commencé : dépa
   const host = await Room.create({ ...opts('H'), code: 'ABC234', now });
   host.selectTrack({ id: 'b-1-xyz', name: 'T' }); host.start();
   const g = await Room.join('ABC234', { ...opts('G'), now });                  // plus de refus « course en cours »
+  env.linkAll(host, g);
   let st = null; g.on('start', (e) => { st = e; });
   g._onMessage(host.selfId, 'ctl', { k: 'live', e: host.epoch, on: true, trackId: 'b-1-xyz', name: 'T' });   // l'hôte annonce sa course en cours au nouvel arrivant
   assert.ok(st && st.startLocal === 5000 + 1500, 'départ dans 1,5 s, à son propre rythme');
@@ -396,7 +457,10 @@ await test('chaque joueur garde son meilleur temps et son nombre d\'essais ; un 
   // un nouvel arrivant reçoit mon meilleur temps
   room.members.set('z', { id: 'z', name: 'Zoé', link: 'connecting', rtt: 0 });
   room._onLink('z', 'open');
-  assert.deepEqual(room.mesh.ctl.at(-1), [{ k: 'finish', e, t, steps: 4600, sync: true }, 'z']);
+  assert.deepEqual(room.mesh.ctl.at(-1), [{ k: 'hi', n: room.members.get('z').nonce }, 'z'], 'sa liaison s\'ouvre : d\'abord le défi d\'identité (TECH-040)');
+  await env.proveLink(room, 'z');
+  assert.equal(room.members.get('z').link, 'open', 'il a prouvé son identité');
+  assert.deepEqual(room.mesh.ctl.at(-1), [{ k: 'finish', e, t, steps: 4600, sync: true }, 'z'], 'puis il reçoit mon meilleur temps');
   room.leave();
 });
 await test('retour au salon : propre à ce joueur, les autres ne sont pas interrompus', async () => {
@@ -415,6 +479,7 @@ await test('circuit envoyé par l\'hôte (code de circuit) : morceaux, assemblag
   const env = fakeRoomEnv();
   const opts = (name) => ({ name, makeSignaling: ({ code, selfId }) => env.make(selfId, code), makeMesh: env.makeMesh });
   const host = await Room.create({ ...opts('H'), code: 'ABC234' }); const g = await Room.join('ABC234', opts('G'));
+  env.linkAll(host, g);
   const code = 'SHW3:' + 'x'.repeat(29995);                                     // ~30 Ko : 3 morceaux de 12 Ko
   host.selectTrack({ id: 'u:abc', name: 'Mon circuit', sig: 'abc', code });
   const sent = host.mesh.ctl.map((c) => c[0]);
@@ -434,8 +499,9 @@ await test('circuit envoyé par l\'hôte (code de circuit) : morceaux, assemblag
   assert.throws(() => host.selectTrack({ id: 'u:big', name: 'x', code: 'y'.repeat(400001) }), (e) => e.code === 'too-big');
   await assert.rejects(() => g.waitForCode('u:jamais', 30), (e) => e.code === 'no-code');
   // nouvel arrivant : l'hôte renvoie circuit ET morceaux
-  host.mesh.ctl.length = 0; host.members.set('n', { id: 'n', name: 'N', link: 'open', rtt: 0 }); host._onLink('n', 'open');
-  assert.deepEqual(host.mesh.ctl.map((c) => c[0].k + (c[1] ? '>' + c[1] : '')), ['hello>n', 'track>n', 'tcode>n', 'tcode>n', 'tcode>n', 'live>n'], 'bonjour (E16), puis circuit et morceaux, puis l\'état de la course libre (NET_VER 5)');
+  host.mesh.ctl.length = 0; host.members.set('n', { id: 'n', name: 'N', link: 'connecting', rtt: 0 }); host._onLink('n', 'open');
+  await env.proveLink(host, 'n');
+  assert.deepEqual(host.mesh.ctl.map((c) => c[0].k + (c[1] ? '>' + c[1] : '')), ['hi>n', 'track>n', 'tcode>n', 'tcode>n', 'tcode>n', 'live>n'], 'défi d\'identité (TECH-040), puis, une fois l\'arrivant vérifié, circuit et morceaux, puis l\'état de la course libre');
   host.leave(); g.leave();
 });
 await test('paquets d\'état : anti-inondation', async () => {
@@ -443,6 +509,10 @@ await test('paquets d\'état : anti-inondation', async () => {
   const room = await Room.create({ name: 'H', code: 'ABC234', makeSignaling: ({ code, selfId }) => env.make(selfId, code), makeMesh: env.makeMesh, now: () => 5 });
   let n = 0; room.on('snapshot', () => n++);
   const ab = packSnapshot(snap(1, 0));
+  room._onMessage('intrus', 'state', ab); assert.equal(n, 0, 'paquet d\'un inconnu : ignoré (TECH-040)');
+  room.members.set('p', { id: 'p', name: 'Pierre', link: 'proving', rtt: 0 });
+  room._onMessage('p', 'state', ab); assert.equal(n, 0, 'paquet d\'une liaison pas encore vérifiée : ignoré');
+  room.members.get('p').link = 'open';
   for (let i = 0; i < 300; i++) room._onMessage('p', 'state', ab);
   assert.equal(n, 80, 'au plus 80 paquets par seconde et par joueur');
   room._onMessage('p', 'state', new ArrayBuffer(5)); assert.equal(n, 80);
@@ -467,6 +537,7 @@ const URL_RT = 'https://fake.supabase.co', KEY_RT = 'cle-publique';
 const topicOf = (code) => 'realtime:copytrack-room-' + code;
 async function scenario(fn, { rtc: rtcOpts = {} } = {}) {
   const clock = new VirtualClock(); const restore = clock.install();
+  clock.busy = identityBusy;                                       // (les preuves d'identité, Web Crypto, se font hors de l'horloge simulée : on les attend)
   const rt = new FakeRealtime(clock), rtc = new FakeRTCNet(clock, rtcOpts);
   const rooms = [];
   const sigOf = (client, o = {}) => ({ code, selfId, observe }) => new SupabaseSignaling({ code, selfId, observe, WebSocketImpl: rt.socket(client), url: URL_RT, key: KEY_RT, getToken: o.getToken || rt.tokenSource(client, o.ttl || 3600000) });
@@ -870,7 +941,7 @@ await bugConnu('TECH-010', () => scenario(async (w) => {
   const ana = await w.host('ana'), bea = await w.join('bea');
   await w.clock.advance(3000);
   precondition(w.linked(ana, bea), 'reliés');
-  const saved = ana.exportIdentity ? await ana.exportIdentity() : null;           // ce que l'onglet garde (sessionStorage) pour revenir
+  const saved = ana.resumeInfo ? ana.resumeInfo().key : null;                    // ce que l'onglet garde (sessionStorage) pour revenir
   ana._dispose();                                                  // Ana recharge sa page : l'onglet se ferme sans « au revoir »
   await w.clock.advance(4000);
   const back = await w.tryJoin('ana', 'ABC234', { selfId: 'ana', token: ana.token, identity: saved });
@@ -884,11 +955,12 @@ await bugConnu('TECH-010', () => scenario(async (w) => {
   await w.clock.advance(3000);
   let leftAt = null; bea.on('left', (id) => { if (id === 'ana' && leftAt == null) leftAt = w.clock.now(); });
   const t0 = w.clock.now();
+  const saved = ana.resumeInfo ? ana.resumeInfo().key : null;      // (son vrai secret : c'est bien elle qui revient)
   ana._dispose();                                                  // l'onglet de l'hôte se ferme
   await w.clock.advance(6000);
   precondition(bea.members.get('ana').link === 'away', 'Ana absente');
   w.rtc.cut('ana');                                                // elle revient, mais sa liaison ne s'ouvre jamais (retour non relié)
-  await w.tryJoin('ana', 'ABC234', { selfId: 'ana', token: ana.token });
+  await w.tryJoin('ana', 'ABC234', { selfId: 'ana', token: ana.token, identity: saved });
   await w.clock.advance(20000);
   assert.ok(leftAt != null && leftAt - t0 <= RESUME_MS + 3000, 'un retour non relié ne remet pas à zéro le délai d\'absence : place rendue ' + (leftAt == null ? 'jamais' : Math.round((leftAt - t0) / 1000) + ' s') + ' après la coupure');
 }), 'retour non relié : le délai d\'absence n\'est pas remis à zéro');
@@ -896,9 +968,11 @@ await bugConnu('TECH-010', () => scenario(async (w) => {
   // L'hôte (zed) n'a PAS le plus petit identifiant : abe le prend « par défaut » quand zed s'en va.
   const zed = await w.host('zed'), abe = await w.join('abe'), cid = await w.join('cid');
   await w.clock.advance(3000);
+  const saved = zed.resumeInfo ? zed.resumeInfo().key : null;
   zed._dispose();                                                  // l'hôte recharge…
   await w.clock.advance(2000);
-  await w.tryJoin('zed', 'ABC234', { selfId: 'zed', token: zed.token });      // … et revient sans son secret (onglet perdu) ; ou n'y parvient pas
+  const back = await w.tryJoin('zed', 'ABC234', { selfId: 'zed', token: zed.token, identity: saved });      // … et revient (avec son secret, s'il en a un)
+  if (!(back instanceof Error)) { back._dispose(); await w.clock.advance(500); }                                    // … puis s'en va pour de bon (onglet fermé)
   await w.clock.advance(RESUME_MS + 5000);
   const hosts = [abe, cid].filter((r) => r.isHost);
   assert.equal(hosts.length, 1, 'un hôte parmi ceux qui restaient');
@@ -920,20 +994,31 @@ await bugConnu('TECH-040', () => scenario(async (w) => {
   assert.equal(bea.state, 'lobby', 'son « départ » est refusé'); assert.equal(bea.rules, null, 'ses règles aussi');
   assert.equal(ana.isHost, true);
 }), 'client modifié annonçant host: true : refusé');
-await bugConnu('TECH-040', () => scenario(async (w) => {
+await test('hello de remplacement sans le secret (TECH-040) : la place d\'un absent n\'est pas rendue ; avec son secret, le vrai joueur la retrouve', () => scenario(async (w) => {
   w.rt.ghostMs = 2000;
-  const ana = await w.host('ana'); await w.join('bea'); await w.join('cid');
+  const ana = await w.host('ana'), bea = await w.join('bea'); await w.join('cid');
   await w.clock.advance(3000);
   ana.selectTrack({ id: 'b-un-a1', name: 'Un' }); ana.start(); await w.clock.advance(500);
+  const saved = bea.resumeInfo().key;                              // (ce que l'onglet de Bea garde pour revenir)
   w.rt.cut('bea', 60000); w.rtc.cut('bea');                        // Bea coupée : sa place est gardée 20 s
   await w.clock.advance(12000);
   precondition(ana.members.get('bea').link === 'away', 'place de Bea gardée');
   const evil = await w.tryJoin('mallory', 'ABC234', { selfId: 'bea', token: 'n-importe-quoi' });   // un client modifié prend l'identifiant de Bea
-  await w.clock.advance(4000);
+  await w.clock.advance(3000);
   if (!(evil instanceof Error)) evil.reportFinish(1000);
-  await w.clock.advance(1000);
+  await w.clock.advance(500);
   assert.notEqual(ana.members.get('bea') && ana.members.get('bea').link, 'open', 'sans le secret de Bea, sa place n\'est pas rendue');
   assert.equal(ana.results.has('bea'), false, 'aucune arrivée comptée pour Bea');
-}), 'hello de remplacement sans le secret : la place d\'un absent n\'est pas rendue');
+  // Bea recharge son onglet (une autre connexion) avant la fin de ses 20 s, avec son secret : sa place lui revient, le client modifié est toujours là.
+  bea._dispose();
+  const back = await w.tryJoin('bea-recharge', 'ABC234', { selfId: 'bea', identity: saved });
+  assert.ok(!(back instanceof Error), 'Bea revient : ' + (back && back.message));
+  await w.clock.advance(3000);
+  assert.equal(ana.members.get('bea').link, 'open', 'avec son secret, Bea retrouve sa place');
+  assert.equal(back.isHost, false); assert.equal(back.hostId, 'ana');
+  back.reportFinish(4321); await w.clock.advance(500);
+  assert.equal(ana.results.has('bea'), true, 'son arrivée compte');
+  assert.ok(w.linked(back, ana), 'reliée à l\'hôte');
+}));
 
 await finish('Tous les tests réseau passent.');

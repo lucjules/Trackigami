@@ -22,13 +22,14 @@
 //     Les liaisons WebRTC ne dépendent pas de la signalisation (TECH-046) : quand seule la signalisation tombe, on continue de jouer ; une place n'est gardée
 //     que quand la LIAISON tombe aussi (canal fermé, ou silence malgré les pings : _checkLinks). Arrivées non reçues : renvoyées à la réouverture.
 import { Emitter, SupabaseSignaling, LocalSignaling } from './signaling.js';
-import { PeerMesh } from './transport.js';
+import { PeerMesh, fingerprintOf } from './transport.js';
 import { packSnapshot, unpackSnapshot } from './snapshot.js';
 import { Championship, MAX_ROUNDS } from './championship.js';
 import { PHYS_VER, NET_VER } from '../version.js';
 import { sanitizeRules, isDefaultRules } from '../rules.js';
 import { MAX_RUN_STEPS, MAX_TRACK_CODE_CHARS } from '../constants.js';
-import { RESUME_MS, RETRY_MS, newToken } from './resume.js';
+import { RESUME_MS, RETRY_MS } from './resume.js';
+import { createIdentity, importIdentity, exportIdentity, proofText, descText, prove, checkProof, newNonce, COMMIT_RE, NONCE_RE, identityAvailable } from './identity.js';
 
 const ROOM_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';     // sans 0 / O / 1 / I : pas de confusion à la dictée
 export const MAX_PLAYERS = 8;
@@ -42,6 +43,10 @@ export const RESULTS_MS = 12000;                                   // championna
 // plus court (réseau qui saute quelques secondes) est rattrapé par la liaison elle-même : les messages fiables sont retransmis.
 export const LINK_SILENCE_MS = 10000;
 const OUTBOX_MAX = 16;                                             // messages fiables gardés par joueur, à renvoyer quand sa liaison se rouvre
+const PROOF_TIMEOUT_MS = 10000;                                    // une liaison dont l'autre ne prouve pas son identité dans ce délai est refaite (ou fermée)
+const INBOX_MAX = 64;                                              // messages reçus d'une liaison pas encore vérifiée : gardés, traités après la preuve
+const MAX_PROOF_FAILS = 3;                                         // preuves refusées de suite pour un même identifiant : on arrête de refaire sa liaison
+const validCommit = (c) => (typeof c === 'string' && COMMIT_RE.test(c) ? c : null);
 
 export const ROOM_RE = /^[A-HJ-NP-Z2-9]{6}$/;
 const LATE_START_MS = 1500;                                        // rejoindre une course libre déjà lancée : départ dans 1,5 s, à son rythme
@@ -70,14 +75,18 @@ export class RoomError extends Error {
 }
 
 export class Room extends Emitter {
-  constructor({ code, name, car = null, selfId = newPeerId(), token = newToken(), makeSignaling, makeMesh = null, getIce = null, now = () => performance.now(), schedule = (fn, ms) => setTimeout(fn, ms) }) {
+  // identity : la sauvegarde { pub, jwk } de mon identité (rechargement de l'onglet, resume.js) ; sans elle, une identité neuve est tirée (TECH-040).
+  constructor({ code, name, car = null, selfId = newPeerId(), identity = null, makeSignaling, makeMesh = null, getIce = null, now = () => performance.now(), schedule = (fn, ms) => setTimeout(fn, ms) }) {
     super();
-    this.code = code; this.selfId = selfId; this.now = now; this.token = token; this.schedule = schedule;
+    this.code = code; this.selfId = selfId; this.now = now; this.schedule = schedule;
+    this._identitySaved = identity; this.ident = null; this._crypto = 0;
+    this._pins = new Map();             // id → engagement prouvé (TECH-040) : gardé tant que la salle est ouverte, même après son départ (voir _onPeer)
     this.reconnecting = false;          // signalisation perdue : on retente de rejoindre la salle (resume.js)
     this._pendingFinish = null;         // championnat : mon arrivée { e, rn, steps } de la manche en cours, renvoyée à l'hôte si une liaison se rouvre (TECH-084 : de CE championnat seulement)
     this.makeSignaling = makeSignaling; this.makeMesh = makeMesh; this.getIce = getIce;
     // car : apparence de ma voiture (garage), want : ce que je demande après une course ('rematch' : une revanche), annoncés par la présence.
-    this.meta = { name: String(name).slice(0, 20), host: false, ready: false, racing: false, v: PHYS_VER, net: NET_VER, t: Date.now(), car: cleanCarMeta(car), want: null };
+    // c : l'engagement de mon identité (empreinte de ma clé publique), la seule chose publiée sur elle (TECH-040).
+    this.meta = { name: String(name).slice(0, 20), host: false, ready: false, racing: false, v: PHYS_VER, net: NET_VER, t: Date.now(), car: cleanCarMeta(car), want: null, c: null };
     this.members = new Map();           // id → { id, name, host, ready, racing, v, t, link, rtt, car, want }
     this.track = null;                  // circuit choisi : { id, name, sig } ; id = 'b-…' (intégré), 'c:<uuid>' (communauté), 'u:<signature>' (code envoyé par l'hôte)
     this.rules = null;                  // règles de la partie choisies par l'hôte (rules.js) ; null : aucune
@@ -119,6 +128,7 @@ export class Room extends Emitter {
   }
 
   async _open() {
+    await this._initIdentity();
     const sig = this.signaling = this.makeSignaling({ code: this.code, selfId: this.selfId });
     // Serveurs ICE (STUN + relais TURN à identifiants à durée limitée) : demandés tout de suite (sans bloquer l'ouverture), puis redemandés par le maillage à
     // chaque connexion neuve et à chaque relance (TECH-050) ; le chargeur (ice.js) ne refait la requête que lorsque leur durée est presque écoulée.
@@ -126,6 +136,7 @@ export class Room extends Emitter {
     this.mesh = (this.makeMesh || ((o) => new PeerMesh(o)))({
       selfId: this.selfId, signaling: sig, ...(this.getIce ? { getIce: this.getIce } : {}),
       isMember: (id) => this._accepts(id),
+      seal: (id, desc, peer) => this._sealDesc(id, desc, peer), vet: (id, desc, p, mine) => this._vetDesc(id, desc, p, mine),
       handlers: { onMessage: (id, kind, data) => this._onMessage(id, kind, data), onLink: (id, st) => this._onLink(id, st) },
     });
     this._wire(sig);
@@ -240,7 +251,10 @@ export class Room extends Emitter {
   // Vraie panne d'une liaison « ouverte » : plus rien reçu depuis LINK_SILENCE_MS malgré 3 pings (un ping reçoit toujours sa réponse, même d'un onglet caché).
   _checkLinks() {
     const now = this.now();
-    for (const m of [...this.members.values()]) if (m.link === 'open' && (m.unanswered || 0) >= 3 && now - (m.heardAt || 0) >= LINK_SILENCE_MS) this._linkDown(m.id);
+    for (const m of [...this.members.values()]) {
+      if (m.link === 'open' && (m.unanswered || 0) >= 3 && now - (m.heardAt || 0) >= LINK_SILENCE_MS) this._linkDown(m.id);
+      else if (m.link === 'proving' && !this._crypto && now - (m.provingSince || 0) >= PROOF_TIMEOUT_MS) this._proofFailed(m.id);      // l'autre ne prouve rien
+    }
   }
 
   _heard(id) { const m = this.members.get(id); if (m) { m.heardAt = this.now(); m.unanswered = 0; } }
@@ -351,14 +365,25 @@ export class Room extends Emitter {
   _onPeer(id, meta, info = null) {
     if (id === this.selfId || !meta) return;
     const prev = this.members.get(id);
+    // TECH-040 : un joueur que j'ai déjà vu prouver son identité garde CET engagement, pour toute la vie de la salle (même parti : son identifiant ne sert
+    // qu'à lui ; un joueur qui revient sans son secret a de toute façon un identifiant neuf). Une connexion de l'annuaire qui annonce son identifiant avec un
+    // autre engagement (client modifié) ne change rien : on prend la connexion qui porte le bon engagement s'il y en a une, sinon on l'ignore.
+    const pin = (prev && prev.commit) || this._pins.get(id);
+    if (pin && validCommit(meta.c) !== pin) {
+      const good = this._metasOf(id).filter((x) => x && x.c === pin).pop();
+      if (!good) return;
+      meta = good;
+    }
     // TECH-086 : 8 joueurs au plus, places gardées (absents) comprises. L'arrivant ne voit que l'annuaire (pas les absents) : ce sont les membres qui le
     // refusent (aucune liaison, aucune place sur la grille) ; il est admis dès qu'une place se libère. Un absent qui revient retrouve toujours la sienne.
     if (!prev && this.members.size + 1 >= MAX_PLAYERS) { this._refused.add(id); return; }
     this._refused.delete(id);
     const back = prev && prev.link === 'away';                     // retour d'un joueur coupé : sa liaison est à refaire
     if (back) this.mesh.removePeer(id);
-    const m = { id, name: String(meta.name || '?').slice(0, 20), host: !!meta.host, ready: !!meta.ready, car: cleanCarMeta(meta.car), want: meta.want === 'rematch' ? 'rematch' : null, mode: MODES.includes(meta.mode) ? meta.mode : null, racing: !!meta.racing, v: meta.v, net: meta.net, t: meta.t || 0, link: prev && !back ? prev.link : 'connecting', rtt: prev ? prev.rtt : 0, token: prev ? prev.token : null, everOpen: !!(prev && prev.everOpen),
-      listed: true, heardAt: prev ? prev.heardAt : 0, unanswered: prev ? prev.unanswered : 0, outbox: prev ? prev.outbox : [], sentLog: prev ? prev.sentLog : [] };
+    const m = { id, name: String(meta.name || '?').slice(0, 20), host: !!meta.host, ready: !!meta.ready, car: cleanCarMeta(meta.car), want: meta.want === 'rematch' ? 'rematch' : null, mode: MODES.includes(meta.mode) ? meta.mode : null, racing: !!meta.racing, v: meta.v, net: meta.net, t: meta.t || 0, link: prev && !back ? prev.link : 'connecting', rtt: prev ? prev.rtt : 0, everOpen: !!(prev && prev.everOpen),
+      listed: true, heardAt: prev ? prev.heardAt : 0, unanswered: prev ? prev.unanswered : 0, outbox: prev ? prev.outbox : [], sentLog: prev ? prev.sentLog : [],
+      commit: prev ? prev.commit : null, nonce: prev && !back ? prev.nonce : null, inbox: prev && !back ? prev.inbox : [], provingSince: prev ? prev.provingSince : 0,
+      proofFails: prev ? prev.proofFails || 0 : 0, returning: !!(prev && (back || prev.returning)), awaySince: prev ? prev.awaySince : undefined };
     this.members.set(id, m);
     if (m.v === PHYS_VER && m.net === NET_VER && !this.closed) {        // un joueur d'une autre version ne peut pas courir avec nous
       if (m.link === 'incompatible') m.link = 'connecting';
@@ -386,14 +411,23 @@ export class Room extends Emitter {
   _onLink(id, status) {
     const m = this.members.get(id);
     // Une liaison qui marchait se ferme (l'autre a fermé la sienne, ou elle est morte) : refaite, ou place gardée (TECH-046).
-    if (m && status === 'closed' && m.link === 'open') { this._linkDown(id); return; }
+    if (m && status === 'closed' && (m.link === 'open' || m.link === 'proving')) { this._linkDown(id); return; }
+    // Liaison ouverte : on ne la croit qu'après la preuve d'identité de l'autre (TECH-040). Chacun envoie son défi ; la suite est dans _onProved.
+    if (m && status === 'open' && m.link !== 'incompatible') {
+      m.link = 'proving'; m.provingSince = this.now(); m.nonce = newNonce(); m.inbox = [];
+      this.mesh.sendCtl({ k: 'hi', n: m.nonce }, id);
+      this.emit('members');
+      return;
+    }
     // Échec d'un joueur qui n'est plus dans l'annuaire : sa place est gardée (il revient : la liaison est refaite).
     if (m && status === 'failed' && m.listed === false && m.everOpen && m.link !== 'away') { this._markAway(id); this.emit('away', id); this.emit('members'); return; }
     if (m && !(m.link === 'away' && status !== 'open') && m.link !== 'incompatible') m.link = status;      // une liaison fermée d'un joueur coupé : il reste « en reconnexion »
-    if (m && status === 'open') { m.everOpen = true; m.heardAt = this.now(); m.unanswered = 0; m.sentLog = []; }
-    // L'hôte informe un nouvel arrivant du circuit choisi.
-    if (status === 'open') {
-      this.mesh.sendCtl({ k: 'hello', token: this.token, e: this._seenEpoch }, id);
+    this.emit('members');
+  }
+
+  // L'autre a prouvé son identité sur cette liaison : on lui envoie ce qu'un joueur relié doit savoir (état de la salle, arrivées, meilleurs temps).
+  _onProved(id) {
+    {
       // Mon arrivée de la manche, annoncée pendant une coupure : renvoyée à l'hôte (il l'ignore s'il l'a déjà).
       if (id === this.hostId) this._resendFinish(id);
       if (this.isHost && this.rules) this.mesh.sendCtl({ k: 'rules', r: this.rules }, id);        // les règles d'abord : elles s'appliquent au circuit qui suit
@@ -406,7 +440,6 @@ export class Room extends Emitter {
       const mine = this.results.get(this.selfId);
       if (mine && this.launch && this.launch.kind === 'free') this.mesh.sendCtl({ k: 'finish', e: this.epoch, t: this.launch.track.id, steps: mine.best, sync: true }, id);   // le nouvel arrivant voit mon meilleur temps
     }
-    this.emit('members');
   }
 
   setReady(ready) { this.meta.ready = !!ready; this.signaling.track(this.meta); this.emit('members'); }
@@ -422,11 +455,22 @@ export class Room extends Emitter {
   // ---- Messages fiables ----------------------------------------------------------------------------------------------
   _onMessage(from, kind, data) {
     this._heard(from);
-    if (kind === 'state') return this._onState(from, data);
     const m = this.members.get(from);
+    // TECH-040 : rien n'est cru d'une liaison dont l'autre n'a pas prouvé son identité. Avant la preuve : défi, preuve et ping seulement ; les messages de
+    // contrôle attendent (traités après la preuve, jetés si elle est refusée) ; les paquets d'état sont ignorés.
+    if (!m || m.link !== 'open') {
+      if (kind === 'state' || !m || !data || typeof data !== 'object') return;
+      if (data.k === 'hi') { this._onHi(from, data); return; }
+      if (data.k === 'hello') { this._onHello(from, data); return; }
+      if (data.k === 'ping') { this.mesh.sendCtl({ k: 'pong', id: data.id }, from); return; }
+      if (m.link === 'proving' && (m.inbox || (m.inbox = [])).length < INBOX_MAX) m.inbox.push([kind, data]);
+      return;
+    }
+    if (kind === 'state') return this._onState(from, data);
     switch (data.k) {
       case 'ping': this.mesh.sendCtl({ k: 'pong', id: data.id }, from); break;
-      case 'hello': if (m && typeof data.token === 'string' && data.token.length <= 32) m.token = data.token; this._see(data.e); break;
+      case 'hi': this._onHi(from, data); break;                    // (l'autre refait sa vérification : il a refait sa liaison)
+      case 'hello': break;
       case 'bye': this._drop(from); break;
       case 'hostover':
         // Nouvel hôte (TECH-048) : il a peut-être manqué une clôture ou des arrivées ; chacun lui donne son état et sa propre arrivée en attente.
@@ -550,6 +594,115 @@ export class Room extends Emitter {
     this.mesh.sendCtl({ k: 'start', e, trackId: this.track.id, name: this.track.name, sig: this.track.sig, startIn: START_DELAY_MS });
     this._begin(e, this.track, START_DELAY_MS);
     return true;
+  }
+
+  // ---- Identité (TECH-040 ; docs/MENACES-MULTIJOUEUR.md) -------------------------------------------------------------------------
+  // Mon secret de reprise (clé privée ECDSA) : relu de la sauvegarde de l'onglet, sinon tiré maintenant. Seul son engagement part dans la présence.
+  async _initIdentity() {
+    if (this.ident) return;
+    if (!identityAvailable()) throw new RoomError('Ce navigateur ne permet pas le multijoueur (page non sécurisée) : ouvre le jeu par son adresse https.', 'insecure');
+    this.ident = (this._identitySaved && await importIdentity(this._identitySaved)) || await createIdentity();
+    this._identitySaved = await exportIdentity(this.ident);
+    this.meta.c = this.ident.commit;
+  }
+
+  // Ce que l'onglet garde pour revenir après un rechargement (resume.js : sessionStorage seulement ; jamais affiché ni envoyé).
+  resumeInfo() { return this._identitySaved ? { code: this.code, selfId: this.selfId, key: this._identitySaved } : null; }
+
+  _fps(id) { const f = this.mesh && this.mesh.fingerprints ? this.mesh.fingerprints(id) : null; return { local: (f && f.local) || '', remote: (f && f.remote) || '' }; }
+  _gen(id) { return this.mesh && this.mesh.linkGen ? this.mesh.linkGen(id) : 0; }
+
+  _metasOf(id) {
+    const sig = this.signaling;
+    if (sig && sig.metasOf) return sig.metasOf(id);
+    const one = sig && sig.peers && sig.peers.get(id);
+    return one ? [one] : [];
+  }
+
+  // L'engagement attendu pour un joueur : celui qu'il a déjà prouvé (épinglé) ; sinon celui de sa plus ancienne connexion dans l'annuaire.
+  _expectedCommit(id) {
+    const m = this.members.get(id);
+    if (m && m.commit) return m.commit;
+    if (this._pins.has(id)) return this._pins.get(id);
+    for (const x of this._metasOf(id)) if (x && validCommit(x.c)) return x.c;
+    return null;
+  }
+
+  // Une connexion de l'annuaire porte-t-elle l'engagement attendu pour ce joueur ? (le vrai joueur est là)
+  _listedGood(id) { const c = this._expectedCommit(id); return !!c && this._metasOf(id).some((x) => x && x.c === c); }
+
+  // Descriptions WebRTC signées (transport.js, point 9) : je signe les miennes ; celles d'un autre ne sont appliquées que si elles viennent de son identité.
+  async _sealDesc(id, desc, peer) {
+    if (!this.ident || !desc) return null;
+    this._crypto++;
+    try {
+      const text = descText({ room: this.code, signer: this.selfId, verifier: id, type: desc.type, fp: fingerprintOf(desc.sdp), peerFp: peer ? fingerprintOf(peer.sdp) : '' });
+      return { pub: this.ident.pub, sig: await prove(this.ident, text) };
+    } finally { this._crypto--; }
+  }
+  async _vetDesc(id, desc, p, mine) {
+    const commit = this._expectedCommit(id);
+    if (!commit || !p || typeof p !== 'object') return false;
+    this._crypto++;
+    try {
+      const text = descText({ room: this.code, signer: id, verifier: this.selfId, type: desc.type, fp: fingerprintOf(desc.sdp), peerFp: mine ? fingerprintOf(mine.sdp) : '' });
+      return await checkProof({ pub: p.pub, sig: p.sig, text, commit });
+    } finally { this._crypto--; }
+  }
+
+  // Défi de l'autre : je le signe (salle, identifiants, empreintes DTLS de CETTE liaison) et je lui envoie ma preuve.
+  _onHi(from, d) {
+    if (!this.members.has(from) || typeof d.n !== 'string' || !NONCE_RE.test(d.n) || !this.ident) return;
+    const gen = this._gen(from), fps = this._fps(from);
+    this._crypto++;
+    prove(this.ident, proofText({ room: this.code, signer: this.selfId, verifier: from, signerFp: fps.local, verifierFp: fps.remote, nonce: d.n }))
+      .then((sig) => { if (!this.closed && this._gen(from) === gen) this.mesh.sendCtl({ k: 'hello', pub: this.ident.pub, sig, e: this._seenEpoch }, from); })
+      .catch(() => {}).finally(() => { this._crypto--; });
+  }
+
+  // Preuve de l'autre, sur mon défi : vérifiée contre l'engagement attendu. Valide : la liaison est la sienne (sa place lui est rendue, ses messages sont crus).
+  _onHello(from, d) {
+    const m = this.members.get(from);
+    if (!m || m.link !== 'proving' || !m.nonce) return;
+    const nonce = m.nonce, gen = this._gen(from), fps = this._fps(from), commit = this._expectedCommit(from);
+    m.nonce = null;                                                // (un défi ne sert qu'une fois)
+    if (!commit) { this._proofFailed(from); return; }
+    const text = proofText({ room: this.code, signer: from, verifier: this.selfId, signerFp: fps.remote, verifierFp: fps.local, nonce });
+    this._crypto++;
+    checkProof({ pub: d.pub, sig: d.sig, text, commit })
+      .then((ok) => {
+        const cur = this.members.get(from);
+        if (this.closed || !cur || cur.link !== 'proving' || this._gen(from) !== gen) return;
+        if (ok) this._proved(from, commit, d); else this._proofFailed(from);
+      })
+      .catch(() => {}).finally(() => { this._crypto--; });
+  }
+
+  _proved(id, commit, d) {
+    const m = this.members.get(id);
+    m.commit = commit; m.proofFails = 0; m.returning = false; m.awaySince = null;
+    this._pins.set(id, commit);
+    this._see(d.e);
+    m.link = 'open'; m.everOpen = true; m.heardAt = this.now(); m.unanswered = 0; m.sentLog = [];
+    this._onProved(id);
+    const q = m.inbox || []; m.inbox = [];
+    for (const [kind, data] of q) this._onMessage(id, kind, data);       // ce qu'il a envoyé avant sa preuve, dans l'ordre
+    this.emit('members');
+  }
+
+  // Preuve refusée ou absente : la liaison n'est pas la sienne (client modifié qui prend son identifiant, ou relais). Elle est fermée ; si le vrai joueur est
+  // encore là, sa liaison est refaite (au plus MAX_PROOF_FAILS fois de suite) ; s'il était absent, sa place reste gardée pour lui.
+  _proofFailed(id) {
+    const m = this.members.get(id);
+    if (!m) return;
+    m.inbox = []; m.nonce = null;
+    this.mesh.removePeer(id);
+    m.proofFails = (m.proofFails || 0) + 1;
+    // Le vrai joueur (le bon engagement) est dans l'annuaire : on refait la liaison ; sinon, s'il revenait, sa place reste gardée pour lui (délai inchangé).
+    if (m.proofFails <= MAX_PROOF_FAILS && m.listed !== false && this._listedGood(id)) { m.link = 'connecting'; this.mesh.addPeer(id); }
+    else if (m.returning || m.everOpen) { if (m.link !== 'away' && !m.returning) m.awaySince = this.now(); m.link = 'away'; }
+    else m.link = 'failed';
+    this.emit('members');
   }
 
   // ---- Époque de lancement (TRANS-05) -----------------------------------------------------------------------------------

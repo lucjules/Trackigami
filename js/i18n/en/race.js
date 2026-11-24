@@ -173,6 +173,7 @@ export default {
   'Salle refusée par le serveur': 'Room refused by the server',
   'Connexion fermée.': 'Connection closed.',
   'Connexion annulée.': 'Connection cancelled.',
+  'Ce navigateur ne permet pas le multijoueur (page non sécurisée) : ouvre le jeu par son adresse https.': 'This browser does not allow multiplayer here (insecure page): open the game from its https address.',
   'Connexion impossible.': 'Unable to connect.',
   'Connexion au serveur de salons perdue.': 'Connection to the room server lost.',
 };
