@@ -680,7 +680,7 @@ await test('joueur revenu (TECH-047) alors que la manche suivante a déjà comme
   } finally { env.end(); }
 });
 
-await bugConnu('TECH-048', async () => {
+await test('migration d\'hôte après une clôture manquée (TECH-048) : classements identiques chez tous, état le plus complet repris', async () => {
   const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
   env.open(); a.startCup({ rounds: ROUNDS });
   // Ben manque l'arrivée d'Ana et la clôture de la manche (sa liaison avec Ana a sauté un instant).
@@ -698,8 +698,52 @@ await bugConnu('TECH-048', async () => {
   assert.equal(st(b), st(c), 'classements identiques chez Ben et Cléo');
   assert.equal(st(d), st(c), 'un arrivant copie le même classement');
   for (const r of [b, c, d]) assert.equal(r.cup.results[0].times.a, 4000, 'l\'état le plus complet est repris (le temps d\'Ana compte) chez ' + r.selfId);
+  assert.equal(env.events.b.round.length, 1, 'le nouvel hôte voit la clôture qu\'il avait manquée');
   } finally { env.end(); }
-}, 'migration d\'hôte après une clôture manquée : classements identiques chez tous');
+});
+await test('migration d\'hôte (TECH-048), état envoyé au nouvel hôte perdu : sa clôture plus pauvre n\'écrase rien et tout converge vers la plus complète', async () => {
+  const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
+  env.open(); a.startCup({ rounds: ROUNDS });
+  const hear = b._onMessage.bind(b);
+  b._onMessage = (from, kind, data) => (from === 'a' && data && (data.k === 'finish' || data.k === 'rend') ? undefined : hear(from, kind, data));
+  b.reportFinish(4100); c.reportFinish(4200); a.reportFinish(4000);
+  b._onMessage = hear;
+  const send = c.mesh.sendCtl; let lost = 0;
+  c.mesh.sendCtl = function (msg, to) { if (msg.k === 'cupsync') { lost++; return []; } return send.call(this, msg, to); };       // tout ce que Cléo dit au nouvel hôte se perd
+  a.leave(); b._cupTick();
+  precondition(b.isHost && lost >= 1 && b.cup.results[0] && b.cup.results[0].times.a == null, 'Ben, nouvel hôte, a clos la manche sans le temps d\'Ana');
+  c.mesh.sendCtl = send;
+  // La clôture plus pauvre de Ben arrive chez Cléo, qui le reconnaît comme hôte :
+  c._onMessage('b', 'ctl', { k: 'rend', e: c.epoch, n: 0, times: { a: null, b: 4100, c: 4200 }, nextIn: RESULTS_MS });
+  const st = (r) => JSON.stringify(r.cup.standings().map((x) => [x.id, x.points]));
+  assert.equal(c.cup.results[0].times.a, 4000, 'ce « rend » plus pauvre n\'écrase pas le résultat de Cléo…');
+  assert.equal(b.cup.results[0].times.a, 4000, '… et Cléo, plus complète, le dit à l\'hôte : Ben reprend son résultat');
+  assert.equal(st(b), st(c), 'classements identiques');
+  } finally { env.end(); }
+});
+await test('migration d\'hôte (TECH-048) : un nouvel hôte qui relance une manche déjà partie ne refait partir personne', async () => {
+  const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
+  env.open(); a.startCup({ rounds: ROUNDS });
+  const n0 = env.events.b.start.length;
+  b._onMessage('a', 'ctl', { k: 'round', e: b.epoch, n: 0, roster: ['a', 'b'], names: {}, startIn: 4000 });
+  assert.equal(env.events.b.start.length, n0, 'manche 0 déjà en cours : pas de second départ');
+  } finally { env.end(); }
+});
+test('résultats de manche versionnés (TECH-048) : une manche rangée ne fait que s\'enrichir, dans n\'importe quel ordre', () => {
+  const mk = () => new Championship({ rounds: [{ id: 'b-1' }, { id: 'b-2' }] });
+  const full = { a: 4000, b: 4100, c: 4200 }, poor = { a: null, b: 4100, c: 4200 };
+  const x = mk(), y = mk();
+  x.scoreRound(0, full, ['a', 'b', 'c']); y.scoreRound(0, poor, ['a', 'b', 'c']);
+  assert.equal(x.mergeRound(0, poor, ['a', 'b', 'c']), false, 'plus pauvre : rien ne change');
+  assert.equal(y.mergeRound(0, full, ['a', 'b', 'c']), true, 'plus riche : complété');
+  assert.deepEqual(x.results[0], y.results[0], 'même résultat quel que soit l\'ordre');
+  assert.equal(x.mergeRound(0, { a: 1, b: 2, c: 3 }, ['a', 'b', 'c']), false, 'un temps connu n\'est jamais remplacé');
+  assert.equal(x.results[0].times.a, 4000);
+  assert.equal(x.mergeRound(0, { d: null }, ['d']), true, 'un joueur de la grille inconnu est ajouté (sans temps)'); assert.deepEqual(x.results[0].order, ['a', 'b', 'c', 'd']);
+  assert.equal(Championship.richer(x.results[0], y.results[0]), true); assert.equal(Championship.richer(y.results[0], x.results[0]), false);
+  assert.equal(x.mergeRound(1, { a: 5000 }, ['a']), true, 'la manche suivante se range normalement'); assert.equal(x.played, 2);
+  assert.equal(x.mergeRound(5, { a: 1 }, ['a']), false, 'une manche hors championnat : ignorée');
+});
 
 await test('arrêt puis nouveau championnat (TECH-084) : aucune arrivée rejouée', async () => {
   const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];

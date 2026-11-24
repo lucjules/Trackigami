@@ -289,13 +289,15 @@ export class Room extends Emitter {
   // Départ définitif (au revoir, ou absence au-delà de RESUME_MS).
   _drop(id) {
     if (!this.members.has(id)) return;
-    const wasHost = this.isHost;
+    const wasHost = this.isHost, hostBefore = this.hostId;
     this.members.delete(id);
     this.mesh.removePeer(id);
     this.buffers.delete(id);
     this.emit('members');
     this.emit('left', id);
     if (!wasHost && this.isHost) this._becomeHost();
+    // TECH-048 : un autre prend la place d'hôte (vu ici, quel que soit l'ordre de son « hostover ») : je lui donne mon état et mon arrivée en attente.
+    else if (!this.isHost && this.cup && this.hostId !== hostBefore) { this._sendCupSync(this.hostId); this._resendFinish(this.hostId); }
     this._cupTick();                 // un joueur qui part ne doit pas bloquer la manche (ni, si c'était l'hôte, la rendre orpheline)
     this._readmit();
   }
@@ -426,7 +428,12 @@ export class Room extends Emitter {
       case 'ping': this.mesh.sendCtl({ k: 'pong', id: data.id }, from); break;
       case 'hello': if (m && typeof data.token === 'string' && data.token.length <= 32) m.token = data.token; this._see(data.e); break;
       case 'bye': this._drop(from); break;
-      case 'hostover': this.emit('members'); break;
+      case 'hostover':
+        // Nouvel hôte (TECH-048) : il a peut-être manqué une clôture ou des arrivées ; chacun lui donne son état et sa propre arrivée en attente.
+        if (this.cup && !this.isHost) { this._sendCupSync(from); this._resendFinish(from); }
+        this.emit('members');
+        break;
+      case 'cupsync': this._onCupSync(from, data); break;
       case 'pong': {
         const rtt = this.now() - (this._pings && this._pings.get(from + ':' + data.id));
         if (m && Number.isFinite(rtt) && rtt >= 0) m.rtt = m.rtt ? Math.min(m.rtt * 0.7 + rtt * 0.3, rtt * 3) : rtt;
@@ -770,19 +777,23 @@ export class Room extends Emitter {
       this.cup = Championship.from(d.cup);
       const s = this._cleanState(d.state);
       if (s) this._adoptPhase(s);
-    } else this._syncCup(Championship.from(d.cup), this._cleanState(d.state));
+    } else {
+      const s = this._cleanState(d.state);
+      if (this._syncCup(Championship.from(d.cup), s).richer) this._sendCupSync(from);       // l'hôte en sait moins que moi (TECH-048) : je le lui dis
+    }
     this.emit('cup');
     this.emit('members');
   }
 
   // Même championnat, état reçu d'un autre joueur : les résultats ne font que s'enrichir, les arrivées de la manche en cours se complètent, la phase ne
-  // fait qu'avancer. Renvoie { changed, moved }.
+  // fait qu'avancer. Renvoie { changed, moved, richer } (richer : j'ai encore quelque chose que l'autre n'a pas : il faut le lui dire).
   _syncCup(remote, s) {
     const cup = this.cup;
-    if (JSON.stringify(remote.rounds) !== JSON.stringify(cup.rounds)) return { changed: false, moved: false };
+    if (JSON.stringify(remote.rounds) !== JSON.stringify(cup.rounds)) return { changed: false, moved: false, richer: false };
     for (const [id, nm] of remote.names) if (!cup.names.has(id)) cup.setName(id, nm);
     let changed = false, moved = false;
-    for (const r of remote.results) if (cup.mergeRound(r.n, r.times, r.order)) changed = true;
+    const touched = new Set();
+    for (const r of remote.results) if (cup.mergeRound(r.n, r.times, r.order)) { changed = true; touched.add(r.n); }
     const mine = this.cupState;
     if (s && mine && s.phase === 'racing' && mine.phase === 'racing' && s.n === mine.n) {
       for (const [id, st] of s.finishes) if (!mine.finishes.has(id) && mine.roster.includes(id)) { this._noteFinish(id, st); changed = true; }
@@ -793,8 +804,23 @@ export class Room extends Emitter {
       const n = mine.n;
       this.cupState = { ...mine, phase: cup.finished ? 'done' : 'results', until: cup.finished ? 0 : this.now() + RESULTS_MS };
       this._emitRound(n); moved = true;
-    }
-    return { changed, moved };
+    } else if (mine && mine.phase !== 'racing' && touched.has(mine.n)) this._emitRound(mine.n);     // résultats affichés complétés : l'écran se met à jour
+    const richer = cup.results.length > remote.results.length || cup.results.some((r) => Championship.richer(r, remote.results[r.n]))
+      || (!!this.cupState && phaseRank(this.cupState) > phaseRank(s));
+    return { changed, moved, richer };
+  }
+
+  // TECH-048 : état de mon championnat, envoyé à l'hôte quand j'en sais plus que lui (clôture qu'il a manquée, nouvel hôte, second « rend » plus pauvre).
+  _sendCupSync(to = this.hostId) {
+    if (!this.cup || to === this.selfId) return;
+    this.mesh.sendCtl({ k: 'cupsync', e: this.epoch, cup: this.cup.toJSON(), state: this._cupStateJSON() }, to);
+  }
+
+  // L'hôte reçoit l'état d'un joueur : il prend l'état le plus complet (union des résultats, phase la plus avancée) et, s'il a changé, le renvoie à tous.
+  _onCupSync(from, d) {
+    if (!this.isHost || !this.cup || !this._sameEpoch(d) || !this.members.has(from) || !d.cup || typeof d.cup !== 'object') return;
+    const r = this._syncCup(Championship.from(d.cup), this._cleanState(d.state));
+    if (r.changed || r.moved) { this._sendCup(); this.emit('cup'); this.emit('members'); this._cupTick(); }
   }
 
   // L'état reçu est plus avancé que le mien. TECH-047 : si la manche que je courais a été close pendant mon absence, ma course est arrêtée et ses résultats
@@ -831,9 +857,10 @@ export class Room extends Emitter {
     const n = d.n | 0;
     // Un résultat manqué (liaison coupée un instant) est rattrapé avec celui que l'hôte joint au départ suivant.
     if (n > cup.played && d.prev && typeof d.prev === 'object' && (d.prev.n | 0) === cup.played) {
-      cup.scoreRound(d.prev.n | 0, d.prev.times || {}, Array.isArray(d.prev.order) ? d.prev.order : Object.keys(d.prev.times || {}));
+      cup.mergeRound(d.prev.n | 0, d.prev.times || {}, Array.isArray(d.prev.order) ? d.prev.order : Object.keys(d.prev.times || {}));
     }
     if (n !== cup.played || n >= cup.total || !Array.isArray(d.roster)) return;
+    if (this.cupState && this.cupState.phase === 'racing' && this.cupState.n === n) return;       // déjà partie (un nouvel hôte la relance) : on ne repart pas
     const roster = d.roster.filter((x) => typeof x === 'string').slice(0, MAX_PLAYERS);
     const m = this.members.get(from);
     this._beginRound(n, roster, d.names && typeof d.names === 'object' ? d.names : {}, Math.max(500, Math.min(15000, +d.startIn || START_DELAY_MS)) - (m ? m.rtt / 2 : 0));
@@ -879,6 +906,14 @@ export class Room extends Emitter {
 
   _onRoundEnd(n, times, nextIn) {
     const st = this.cupState, cup = this.cup;
+    if (cup && n < cup.played) {
+      // TECH-048 : manche déjà rangée (clôture d'un hôte précédent, ou second « rend » d'un nouvel hôte) : elle ne fait que s'enrichir, jamais un résultat
+      // plus pauvre n'écrase le mien ; si j'en sais plus, je le dis à l'hôte.
+      if (cup.mergeRound(n, times, Object.keys(times))) { if (st && st.phase !== 'racing' && st.n === n) this._emitRound(n); this.emit('cup'); }
+      const r = cup.results[n];
+      if (!this.isHost && r.order.some((id) => r.times[id] != null && !(+times[id] > 0))) this._sendCupSync();
+      return;
+    }
     if (!cup || !st || st.phase !== 'racing' || st.n !== n) return;
     this._pendingFinish = null;
     const clean = {};
