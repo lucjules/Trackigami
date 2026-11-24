@@ -33,8 +33,9 @@ Supabase lève aussi cette vérification. Aucun e-mail n'est jamais envoyé à c
 - **Sauvegarde** (`cloud_saves`) : lisible et modifiable par son seul propriétaire (RLS). Chaque écriture porte un numéro
   de version : le jeu ne peut pas écraser une version qu'il n'a pas lue (deux appareils : lecture, fusion, nouvel essai).
 - La clé `service_role` ne doit jamais figurer dans le jeu. Le jeu n'utilise que la clé publique.
-- **Pas d'e-mail, donc pas de récupération de mot de passe** : l'écran de création de compte le dit clairement.
-  Un mot de passe perdu = compte inaccessible (on peut en créer un autre).
+- **Pas d'e-mail** : la récupération par courriel de Supabase Auth est impossible (le pseudo n'est pas une adresse). Depuis 0.16.13 (COMPLETE-003),
+  un compte se récupère avec son **code de secours** (section « Changer et récupérer son mot de passe » plus bas) ; sans ce code, un mot de passe
+  perdu reste un compte inaccessible.
 - Limites d'essais : celles de Supabase Auth (page *Authentication > Rate Limits*). Rien de plus n'est ajouté ici.
 - **Phase 5 (0.9.64)** : les droits réels de chaque table et fonction sont éprouvés par attaque (`tools/test-securite-sql.sh` : un joueur ne lit, ne modifie ni ne supprime les données d'un autre, y compris
   en visant leur identifiant) ; réglages à vérifier côté Supabase (longueur minimale du mot de passe **8**, **CAPTCHA** sur les connexions anonymes et les inscriptions, *Allow anonymous sign-ins* activé,
@@ -166,3 +167,25 @@ Rien n'est modifié automatiquement : on ne peut pas prouver, côté serveur, qu
   (seule la déconnexion l'effaçait) : un rattachement futur pourrait s'appuyer sur cette preuve de possession (fonction serveur à concevoir,
   hors de cette version). Pour un joueur déjà déconnecté, l'ancienne session est perdue : aucune action automatique n'est possible.
 
+
+## Changer et récupérer son mot de passe (COMPLETE-003, décision D-6 : pas de courriel)
+
+### Modèle de menaces (écrit avant le code ; chaque ligne est vérifiée par un test)
+
+Ce qu'on protège : l'accès au compte (sauvegarde cloud, circuits publiés, temps). Ce qui permet de le reprendre sans le mot de passe : le **code de secours**
+(16 caractères tirés par `gen_random_bytes` de pgcrypto, alphabet de 32 signes : 80 bits d'aléa), remis UNE fois à l'inscription, régénérable.
+
+| # | Menace | Défense | Vérifié par |
+|---|---|---|---|
+| M1 | **Énumération de pseudos** : la récupération répond autrement (texte, statut, en-têtes, durée) quand le pseudo n'existe pas, n'a pas de code, ou est verrouillé | Une seule réponse d'échec (même statut, même corps, mêmes en-têtes) ; durée plancher identique pour toute réponse ; la base calcule un bcrypt AUSSI pour un pseudo inconnu, sans code ou verrouillé ; le compteur d'échecs est tenu pour le pseudo SAISI, qu'il existe ou non (un pseudo inconnu se verrouille pareil) | `tools/test-recovery-handler.mjs` (réponses octet pour octet, durées), `tools/test-etape21-sql.sh` (même résultat, même ligne de limitation, bcrypt dans tous les cas) |
+| M2 | **Force brute du code** | 80 bits d'aléa ; bcrypt (coût 10) ; **5 échecs par pseudo → verrou de 15 min** ; **20 échecs par adresse et par heure → 1 h** ; **300 essais par 10 min au total** ; compteurs EN BASE (un rechargement de page, un autre onglet ou une autre instance de la fonction ne les remettent pas à zéro) ; essais simultanés sur un même pseudo SÉRIALISÉS (verrou de ligne : pas de « 5 essais en parallèle comptés comme 1 ») ; frein en mémoire de la fonction en plus | SQL : verrou après 5 échecs (même le bon code est alors refusé), adresse, plafond global, sessions simultanées ; fonction : verrouillage après N échecs |
+| M3 | **Rejeu** : réutiliser un code déjà servi, deux requêtes simultanées avec le bon code, sessions d'un voleur qui restent ouvertes | Code à **usage unique** (son haché est effacé quand le nouveau mot de passe est posé) ; **réservation à jeton** pendant la pose (une seule des requêtes simultanées passe) ; un nouveau code **invalide l'ancien** ; les **sessions existantes sont révoquées** (`auth.sessions`, jetons de renouvellement) | SQL : second usage refusé, régénération, deux sessions simultanées, sessions supprimées ; fonction : second usage refusé |
+| M4 | **Fuite** (base, journaux, messages d'erreur) | La base ne garde que `bcrypt(SHA-256(code))` (contrainte : seul un haché bcrypt est accepté) ; le code n'est JAMAIS un paramètre SQL (la fonction serveur en calcule l'empreinte SHA-256 avant d'appeler la base) ; adresse IP gardée sous forme d'empreinte SHA-256 ; journal minimal (date, compte s'il existe, issue) ; la fonction ne journalise ni corps, ni code, ni mot de passe ; erreurs génériques ; aucun code dans le stockage du navigateur (affiché une fois, en mémoire seulement) | SQL : recherche du code en clair et de son empreinte dans toutes les tables ; fonction : journaux capturés ; client : stockage local après affichage |
+| M5 | **Session volée → code régénéré** (prise de contrôle durable) | Créer ou régénérer un code exige une authentification PAR MOT DE PASSE de moins de 10 min (revendication `amr` du jeton, posée par Supabase Auth) ; le jeu redemande le mot de passe | SQL : refus sans `amr` récent, avec un `amr` ancien, pour un invité, sans session |
+| M6 | **Blocage ciblé** (verrouiller la récupération d'un autre en essayant son pseudo) | Verrou temporaire seulement (15 min) ; il ne touche ni la connexion normale ni le jeu | (risque accepté, documenté) |
+| M7 | **Abus de la fonction** (taille, cadence, processeur) | Corps ≤ 2 Ko lu par morceaux ; frein par adresse en mémoire ; plafond global en base (borne les bcrypt) ; base indisponible → 503 (jamais « ouvert ») | fonction : 413, 429, 503 |
+
+**Risques résiduels (non couverts)** : un jeton d'ACCÈS déjà émis reste valable jusqu'à son expiration (1 h par défaut de Supabase) : seuls les jetons de
+renouvellement et les sessions sont révoqués ; l'adresse vient de `x-forwarded-for` (première valeur), que la plateforme renseigne mais qu'on ne peut
+pas prouver ici infalsifiable : la limite par pseudo et le plafond global tiennent sans elle ; quelqu'un qui a le code ET le pseudo prend le compte
+(c'est la définition du code : à garder comme un mot de passe).
