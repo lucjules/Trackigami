@@ -6,6 +6,14 @@ multijoueurs y sont liés. Une version qui change `PHYS_VER` impose de **redépl
 
 *Les nombres des sections anciennes (portées en cases, vitesses de saut…) sont ceux du monde de leur époque ; le monde est passé de cases de 24 m à 32 m en 0.9.11.*
 
+## Bêta 0.16.18 — multijoueur : créer et rejoindre un salon refonctionne (politique de sécurité de la page)
+
+**`PHYS_VER` reste 39, `NET_VER` reste 5** : aucun changement de physique ni de protocole. Aucune fonction serveur ni étape SQL.
+
+- **« Connexion au serveur de salons impossible. » à chaque création ou jonction de salon, sur tous les appareils** : la politique de sécurité de la page (`connect-src` d'`index.html`, depuis 0.9.64) n'autorisait le projet Supabase qu'en `https://` ; Chrome n'en déduit pas `wss://`, et le WebSocket de la signalisation (Supabase Realtime) était refusé avant même de partir (aucune trace côté Supabase). Le projet est maintenant cité en `https://` **et** en `wss://`. Les essais à plusieurs onglets passaient par la signalisation locale (`?net=local`) et ne l'avaient jamais vu.
+- **Tests** : `tools/test-securite-client.mjs` exige les deux origines ; `tools/test-browser.mjs` ouvre la vraie signalisation sous la vraie politique (aucun refus ; un autre serveur reste refusé). Les deux échouent sur la page d'avant. Essai réel contre le vrai Supabase Realtime (deux pages Chromium) : salon créé, rejoint, liaison WebRTC ouverte des deux côtés.
+- Hébergement personnalisé : `README.md`, `js/config.js` et `supabase/MULTI.md` disent de citer son projet en `https://` et en `wss://`.
+
 ## Bêta 0.16.17 — multijoueur : voitures distantes qui naissent, vivent et disparaissent avec les joueurs, collisions douces bornées et cohérentes, ressources libérées (TECH-009, TECH-041, TECH-043, TECH-083, TECH-087, TECH-088, TECH-089, LOT-8c)
 
 **`PHYS_VER` reste 39** (la consigne disait 38 : le dépôt est à 39 ; non modifié : la physique solo, les replays et le déterminisme ne changent pas, les collisions douces ne s'appliquent qu'en championnat). **`NET_VER` reste 5** : aucun format de message ne change (le numéro de séquence départage deux paquets du même pas, il était déjà dans le paquet). Aucune fonction serveur ni étape SQL.
