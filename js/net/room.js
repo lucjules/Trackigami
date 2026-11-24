@@ -164,6 +164,7 @@ export class Room extends Emitter {
         if (this.mesh.setSignaling) this.mesh.setSignaling(sig);       // avant join : les offres WebRTC des retrouvailles passent par la nouvelle signalisation
         await sig.join(this.meta);
       } catch {
+        try { sig.leave(); } catch { /* déjà fermée */ }          // tentative ratée : fermée (TECH-044 ; la signalisation le fait aussi d'elle-même)
         if (this.closed) return;
         if (i + 1 < RETRY_MS.length && this.now() - this._lostAt + RETRY_MS[i + 1] < RESUME_MS) { this._retry(i + 1); return; }
         this.emit('error', new RoomError(this._lostWhy || 'Connexion perdue.', 'closed'));

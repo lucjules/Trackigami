@@ -26,6 +26,8 @@ const TOKEN_MARGIN_MS = 90000;       // jeton du canal renouvelé dans sa derni�
 const TOKEN_RETRY_MS = 15000;        // pas encore de jeton neuf : on redemande un peu plus tard (tant qu'il n'a pas expiré)
 const LOST = 'Connexion au serveur de salons perdue.';
 
+const signalingError = (message, code) => Object.assign(new Error(message), { code });
+
 // Date d'expiration (ms) d'un jeton JWT, lue sans le vérifier (c'est le serveur qui juge) ; null s'il n'est pas lisible.
 export function tokenExpiry(token) {
   try {
@@ -69,42 +71,54 @@ export class SupabaseSignaling extends Emitter {
     return ref;
   }
 
+  // Rejoindre le canal. Une tentative qui échoue (délai, refus, fermeture) ou qu'on abandonne (leave pendant la jonction) FERME sa connexion
+  // (TECH-044) : une réponse tardive du serveur ne peut plus rien publier. Erreurs : code 'timeout' | 'refused' | 'network' | 'aborted'.
   async join(meta) {
     this.meta = meta;
+    if (this._ended) throw signalingError('Connexion annulée.', 'aborted');
     const token = this.getToken ? await this.getToken().catch(() => null) : null;
+    if (this._ended) throw signalingError('Connexion annulée.', 'aborted');       // abandonnée pendant l'attente du jeton (TECH-082) : rien n'est ouvert
     this.token = token || null;
     const wsUrl = this.url.replace(/^http/, 'ws') + '/realtime/v1/websocket?apikey=' + encodeURIComponent(this.key) + '&vsn=1.0.0';
     await new Promise((resolve, reject) => {
-      let done = false;
-      const fail = (m) => { if (!done) { done = true; reject(new Error(m)); } };
-      const timer = setTimeout(() => fail('Le serveur de salons ne répond pas.'), JOIN_TIMEOUT);
+      let settled = false, timer = null;
+      const fail = (msg, code = 'network') => {
+        if (settled) return;
+        settled = true; clearTimeout(timer); this._pending = null;
+        this._abort();
+        reject(signalingError(msg, code));
+      };
+      const done = () => { if (settled) return; settled = true; clearTimeout(timer); this._pending = null; resolve(); };
+      this._pending = fail;
+      timer = setTimeout(() => fail('Le serveur de salons ne répond pas.', 'timeout'), JOIN_TIMEOUT);
       let ws;
-      try { ws = new this.WS(wsUrl); } catch { clearTimeout(timer); fail('Connexion impossible.'); return; }
+      try { ws = new this.WS(wsUrl); } catch { fail('Connexion impossible.'); return; }
       this.ws = ws;
       ws.onopen = () => {
-        this._send(this.topic, 'phx_join', {
+        if (this._ended) return;
+        this._joinRef = this._send(this.topic, 'phx_join', {
           config: { broadcast: { self: false, ack: false }, presence: { key: this.selfId }, private: false },
           ...(token ? { access_token: token } : {}),
         });
       };
       ws.onmessage = (e) => {
+        if (this._ended) return;
         let m; try { m = JSON.parse(e.data); } catch { return; }
-        if (m.topic === this.topic && m.event === 'phx_reply' && !this.joined) {
-          clearTimeout(timer);
+        if (!this.joined && m.topic === this.topic && m.event === 'phx_reply' && m.ref != null && String(m.ref) === this._joinRef) {
           if (m.payload && m.payload.status === 'ok') {
             this.joined = true;
             if (!this.observe) this._send(this.topic, 'presence', { type: 'presence', event: 'track', payload: this.meta });
             this.hb = setInterval(() => this._beat(), this.heartbeatMs);
             this._scheduleToken();
-            // La liste des présents (presence_state) arrive juste après la réponse : on laisse un instant.
-            setTimeout(() => { if (!done) { done = true; resolve(); } }, 250);
-          } else fail('Salle refusée par le serveur' + (m.payload && m.payload.response && m.payload.response.reason ? ' (' + m.payload.response.reason + ')' : '.'));
+            // La liste des présents (presence_state) arrive juste après la réponse : on laisse un instant (une perte pendant ce temps fait échouer la jonction).
+            setTimeout(done, 250);
+          } else fail('Salle refusée par le serveur' + (m.payload && m.payload.response && m.payload.response.reason ? ' (' + String(m.payload.response.reason).slice(0, 80) + ')' : '.'), 'refused');
           return;
         }
         this._onMessage(m);
       };
-      ws.onerror = () => { clearTimeout(timer); fail('Connexion au serveur de salons impossible.'); };
-      ws.onclose = () => { clearTimeout(timer); fail('Connexion fermée.'); this._closed(LOST); };
+      ws.onerror = () => { if (this._pending) fail('Connexion au serveur de salons impossible.'); else this._closed(LOST); };
+      ws.onclose = () => { if (this._pending) fail('Connexion fermée.'); else this._closed(LOST); };
     });
   }
 
@@ -222,8 +236,20 @@ export class SupabaseSignaling extends Emitter {
     this.hb = this._hbWait = this._tokTimer = null; this._hbRef = null;
   }
 
+  // Fin d'une tentative ou d'une connexion : plus aucun minuteur, la connexion est fermée (après un au revoir si le canal était rejoint).
+  _abort() {
+    this._ended = true;
+    this._stop();
+    const ws = this.ws;
+    if (!ws) return;
+    if (this.joined) this._send(this.topic, 'phx_leave', {});
+    try { ws.close(); } catch { /* déjà fermé */ }
+  }
+
   // La connexion est perdue (fermée, en erreur, canal fermé par le serveur, battement sans réponse) : on la ferme pour de bon et on le dit.
+  // Pendant la jonction, c'est la jonction qui échoue (l'appelant n'a pas encore de connexion à perdre).
   _closed(reason) {
+    if (this._pending) { this._pending(reason); return; }
     if (this._ended) return;
     this._ended = true;
     this._stop();
@@ -231,12 +257,11 @@ export class SupabaseSignaling extends Emitter {
     this.emit('closed', reason);
   }
 
+  // Départ (ou abandon) : pendant la jonction, celle-ci échoue (« aborted ») et sa connexion est fermée ; pendant l'attente du jeton, rien ne sera ouvert.
   leave() {
+    if (this._pending) { this._pending('Connexion annulée.', 'aborted'); return; }
     if (this._ended) return;
-    this._send(this.topic, 'phx_leave', {});
-    this._ended = true;
-    this._stop();
-    try { this.ws && this.ws.close(); } catch { /* déjà fermé */ }
+    this._abort();
   }
 }
 
@@ -250,31 +275,36 @@ export class LocalSignaling extends Emitter {
     this.bc.onmessage = (e) => this._onMessage(e.data);
   }
   async join(meta) {
-    if (Date.now() < LocalSignaling.blockedUntil) throw new Error('réseau coupé (essai)');
+    if (this._ended) throw signalingError('Connexion annulée.', 'aborted');
+    if (Date.now() < LocalSignaling.blockedUntil) { this._end(); throw signalingError('réseau coupé (essai)', 'network'); }     // (tentative ratée : fermée, TECH-044)
     this.meta = meta;
-    this.bc.postMessage({ k: 'hello', id: this.selfId, meta });
+    this._post({ k: 'hello', id: this.selfId, meta });
     await new Promise((r) => setTimeout(r, 250));      // le temps de recevoir les réponses des présents
+    if (this._ended) throw signalingError('Connexion annulée.', 'aborted');
   }
+  _post(m) { if (this._ended) return false; try { this.bc.postMessage(m); return true; } catch { return false; } }
+  _end() { if (this._ended) return; this._ended = true; try { this.bc.close(); } catch { /* déjà fermé */ } }
   _onMessage(m) {
-    if (!m || m.id === this.selfId) return;
+    if (this._ended || !m || m.id === this.selfId) return;
     if (m.k === 'hello') {
-      this._set(m.id, m.meta);
-      this.bc.postMessage({ k: 'here', id: this.selfId, to: m.id, meta: this.meta });
+      this._set(m.id, m.meta, true);
+      this._post({ k: 'here', id: this.selfId, to: m.id, meta: this.meta });
     } else if (m.k === 'here' && m.to === this.selfId) this._set(m.id, m.meta);
     else if (m.k === 'meta') this._set(m.id, m.meta);
     else if (m.k === 'bye') { if (this.peers.delete(m.id)) this.emit('leave', m.id); }
     else if (m.k === 'signal' && m.to === this.selfId) this.emit('signal', m.id, m.data);
   }
-  _set(id, meta) { const had = this.peers.has(id); this.peers.set(id, meta); this.emit(had ? 'meta' : 'join', id, meta); }
-  track(meta) { this.meta = meta; this.bc.postMessage({ k: 'meta', id: this.selfId, meta }); }
-  send(to, data) { this.bc.postMessage({ k: 'signal', id: this.selfId, to, data }); return true; }
-  leave() { this.bc.postMessage({ k: 'bye', id: this.selfId }); this.bc.close(); }
+  // hello d'un joueur déjà connu : il a rouvert sa signalisation (info.conn, comme une nouvelle connexion Realtime).
+  _set(id, meta, hello = false) { const had = this.peers.has(id); this.peers.set(id, meta); if (had) this.emit('meta', id, meta, hello ? { conn: true } : undefined); else this.emit('join', id, meta); }
+  track(meta) { this.meta = meta; this._post({ k: 'meta', id: this.selfId, meta }); }
+  send(to, data) { return this._post({ k: 'signal', id: this.selfId, to, data }); }
+  leave() { this._post({ k: 'bye', id: this.selfId }); this._end(); }
   // Essais (tests, ?net=local) : une coupure réseau de ms millisecondes. Les autres voient le joueur disparaître de l'annuaire (sans « au revoir » du
   // salon), lui perd sa signalisation, et ne peut pas la retrouver avant la fin de la coupure.
   simulateCut(ms) {
     LocalSignaling.blockedUntil = Date.now() + ms;
-    this.bc.postMessage({ k: 'bye', id: this.selfId });
-    this.bc.close();
+    this._post({ k: 'bye', id: this.selfId });
+    this._end();
     this.emit('closed', 'coupure simulée');
   }
 }

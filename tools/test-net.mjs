@@ -551,7 +551,7 @@ test('tokenExpiry : échéance d\'un JWT (base64url, sans remplissage) ; null si
 });
 
 console.log('Banc simulé : tentatives abandonnées (TECH-044, TECH-082)');
-await bugConnu('TECH-044', () => scenario(async (w) => {
+await test('délai dépassé puis réponse tardive (TECH-044) : connexion fermée, aucune présence publiée', () => scenario(async (w) => {
   w.rt.joinDelay = 8000;                                 // la réponse arrive après le délai de 6 s du client
   const sig = w.raw('zed', 'zed');
   await assert.rejects(w.clock.until(sig.join({ name: 'Zed' }), 7000), /ne répond pas/);
@@ -559,8 +559,8 @@ await bugConnu('TECH-044', () => scenario(async (w) => {
   assert.equal(pres(w).has('zed'), false, 'aucune présence publiée par la réponse tardive');
   assert.equal(w.rt.connections('zed'), 0, 'connexion fermée');
   assert.equal(w.rt.count('zed', 'heartbeat'), 0, 'aucun battement');
-}), 'délai dépassé puis réponse tardive : connexion fermée, aucune présence publiée');
-await bugConnu('TECH-044', () => scenario(async (w) => {
+}));
+await test('reconnexion (TECH-044) : la tentative abandonnée (délai) ne laisse ni connexion ni présence fantôme', () => scenario(async (w) => {
   const ana = await w.host('ana'), bea = await w.join('bea');
   await w.clock.advance(2000);
   w.rt.joinDelay = 8000;                                 // la première tentative de reconnexion de Bea n'aura sa réponse qu'après son délai
@@ -572,15 +572,15 @@ await bugConnu('TECH-044', () => scenario(async (w) => {
   assert.equal(w.rt.connections('bea'), 1, 'une seule connexion : la tentative abandonnée est fermée');
   assert.equal(pres(w).get('bea'), 1, 'une seule présence');
   void ana;
-}), 'reconnexion : la tentative abandonnée (délai) ne laisse ni connexion ni présence fantôme');
-await bugConnu('TECH-044', () => scenario(async (w) => {
+}));
+await test('annuaire (TECH-044) : l\'écoute qui dépasse le délai est fermée', () => scenario(async (w) => {
   w.rt.joinDelay = 8000;
   const dir = new PublicDirectory({ makeSignaling: ({ selfId, observe }) => w.raw('obs', selfId, { code: LOBBY_CODE, observe }), selfId: 'o' });
   await assert.rejects(w.clock.until(dir.watch(() => {}), 7000));
   await w.clock.advance(60000);
   assert.equal(w.rt.connections('obs'), 0, 'connexion de l\'annuaire fermée');
   assert.equal(w.rt.count('obs', 'heartbeat'), 0, 'aucun battement');
-}), 'annuaire : l\'écoute qui dépasse le délai est fermée');
+}));
 const listing = (code) => ({ code, host: 'Ana', track: 'Un', players: 1, max: 8, mode: 'free', round: 0, rounds: 0, v: PHYS_VER, net: NET_VER });
 await bugConnu('TECH-082', () => scenario(async (w) => {
   const slow = async () => { await new Promise((r) => setTimeout(r, 500)); return w.rt.issueToken('hote', 3600000); };      // jeton lent à venir

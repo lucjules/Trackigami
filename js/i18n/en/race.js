@@ -172,6 +172,8 @@ export default {
   'Le serveur de salons ne répond pas.': 'The room server is not responding.',
   'Salle refusée par le serveur': 'Room refused by the server',
   'Connexion fermée.': 'Connection closed.',
+  'Connexion annulée.': 'Connection cancelled.',
+  'Connexion impossible.': 'Unable to connect.',
   'Connexion au serveur de salons perdue.': 'Connection to the room server lost.',
 };
 

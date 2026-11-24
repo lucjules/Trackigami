@@ -55,7 +55,11 @@ export class PublicDirectory extends Emitter {
     const sig = this.watcher = this.makeSignaling({ selfId: this.selfId + 'w', observe: true });
     const push = () => onChange([...sig.peers.values()].map(cleanListing).filter(Boolean).sort((a, b) => b.players - a.players || (a.code < b.code ? -1 : 1)).slice(0, MAX_LISTED));
     sig.on('join', push); sig.on('meta', push); sig.on('leave', push);
-    await sig.join({});
+    try { await sig.join({}); } catch (e) {
+      try { sig.leave(); } catch { /* déjà fermée */ }            // écoute ratée ou abandonnée : sa connexion est fermée (TECH-044)
+      if (this.watcher === sig) this.watcher = null;
+      throw e;
+    }
     push();
     return () => { try { sig.leave(); } catch { /* déjà fermé */ } if (this.watcher === sig) this.watcher = null; };
   }
