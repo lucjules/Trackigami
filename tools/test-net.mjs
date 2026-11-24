@@ -582,7 +582,7 @@ await test('annuaire (TECH-044) : l\'écoute qui dépasse le délai est fermée'
   assert.equal(w.rt.count('obs', 'heartbeat'), 0, 'aucun battement');
 }));
 const listing = (code) => ({ code, host: 'Ana', track: 'Un', players: 1, max: 8, mode: 'free', round: 0, rounds: 0, v: PHYS_VER, net: NET_VER });
-await bugConnu('TECH-082', () => scenario(async (w) => {
+await test('retrait pendant l\'annonce (TECH-082) : aucun salon listé, aucune erreur', () => scenario(async (w) => {
   const slow = async () => { await new Promise((r) => setTimeout(r, 500)); return w.rt.issueToken('hote', 3600000); };      // jeton lent à venir
   const dir = new PublicDirectory({ makeSignaling: ({ selfId, observe }) => w.raw('hote', selfId, { code: LOBBY_CODE, observe, getToken: slow }), selfId: 'h' });
   const p = dir.announce(listing('ABC234'));
@@ -597,7 +597,17 @@ await bugConnu('TECH-082', () => scenario(async (w) => {
   let rows = null; const stop = await w.clock.until(watcher.watch((x) => { rows = x; }));
   assert.deepEqual(rows, [], 'l\'annuaire est vide');
   stop();
-}), 'retrait pendant l\'annonce : aucun salon listé');
+}));
+await test('retrait pendant l\'annonce (TECH-082), signalisation qui ne sait pas abandonner : fermée dès la fin de la jonction', async () => {
+  const live = new Set();
+  const make = ({ selfId }) => { const sig = new Emitter(); sig.peers = new Map(); sig.join = async () => { await new Promise((r) => setTimeout(r, 30)); live.add(selfId); }; sig.leave = () => { live.delete(selfId); }; sig.track = () => {}; return sig; };
+  const dir = new PublicDirectory({ makeSignaling: make, selfId: 'h' });
+  const p = dir.announce(listing('ABC234'));
+  dir.retract();
+  await p;
+  assert.equal(live.size, 0, 'la connexion qui a fini par aboutir est refermée');
+  await dir.announce(listing('ABC234')); assert.equal(live.size, 1, 'une nouvelle annonce marche'); dir.close(); assert.equal(live.size, 0);
+});
 
 console.log('Banc simulé : signalisation des seuls membres (TECH-045)');
 await bugConnu('TECH-045', () => scenario(async (w) => {
