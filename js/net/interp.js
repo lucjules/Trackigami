@@ -57,13 +57,20 @@ export class SnapshotBuffer {
     if (arr.length && s.t <= arr[0].t - 0.001) return false;
     let i = arr.length;
     while (i > 0 && arr[i - 1].t > s.t) i--;
-    if (i > 0 && Math.abs(arr[i - 1].t - s.t) < 1e-9) return false;
+    // Même pas d'horloge : un doublon est ignoré, SAUF un paquet plus récent (numéro de séquence) : la téléportation, le nouvel essai ou l'arrivée envoyés au
+    // pas même du paquet périodique (TECH-089 a : avant, ce paquet était jeté et la téléportation ne se voyait qu'au paquet suivant, 50 ms plus tard).
+    let replace = false;
+    if (i > 0 && Math.abs(arr[i - 1].t - s.t) < 1e-9) {
+      const d = ((s.seq | 0) - (arr[i - 1].seq | 0)) & 0xffff;
+      if (!(d > 0 && d < 0x8000)) return false;
+      i--; replace = true;
+    }
     const e = {
-      t: s.t, tele: s.tele, vehicle: s.vehicle, flags: s.flags, cp: s.cp, lap: s.lap, prog: s.prog || 0,
+      t: s.t, seq: s.seq | 0, tele: s.tele, vehicle: s.vehicle, flags: s.flags, cp: s.cp, lap: s.lap, prog: s.prog || 0,
       pos: new THREE.Vector3(s.pos.x, s.pos.y, s.pos.z), vel: new THREE.Vector3(s.vel.x, s.vel.y, s.vel.z),
       quat: new THREE.Quaternion(s.quat.x, s.quat.y, s.quat.z, s.quat.w),
     };
-    arr.splice(i, 0, e);
+    arr.splice(i, replace ? 1 : 0, e);
     this._judge(i);
     if (i + 1 < arr.length) this._judge(i + 1);                     // (un paquet arrivé en retard est le précédent du suivant)
     // TECH-087 : purge à la réception aussi (pas seulement au rendu, dans sample()) : onglet masqué, aucune image n'est dessinée mais les paquets arrivent toujours

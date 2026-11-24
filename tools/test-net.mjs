@@ -1422,14 +1422,22 @@ await test('règle « voitures identiques » (TECH-088) : les voitures distantes
   teardown(S);
   assert.equal(col, DEFAULT_LOADOUT.color, 'règle « voitures identiques » : la voiture de Zoé a l\'apparence d\'origine');
 });
-await bugConnu('TECH-089', () => {
+await test('téléportation au même pas que le paquet périodique (TECH-089 a) : pas de paquet perdu, la voiture apparaît sans attendre le paquet suivant', () => {
   const buf = new SnapshotBuffer();
   feed(buf, [snap(0, 0, { seq: 1 }), snap(6, 10, { seq: 2 })]);
   const tp = pk(snap(6, 5000, { tele: 1, seq: 3 }));                // téléportation envoyée au même pas que le paquet périodique (même horloge)
   const ok = buf.push(tp, 6 * DT * 1000 + 31);
   assert.notEqual(ok, false, 'le paquet de téléportation n\'est pas jeté comme doublon');
   assert.equal(buf.samples.at(-1).pos.x, 5000);
-}, '(a) téléportation au même pas que le paquet périodique : pas de paquet perdu');
+  assert.equal(buf.samples.length, 2, 'il remplace le paquet périodique du même pas');
+  let seen = 0; for (let ms = 0; ms < 400; ms += 8) { const o = buf.sample(ms + 30); if (o.teleported) { seen++; assert.equal(o.pos.x, 5000); } }
+  assert.equal(seen, 1, 'téléportation vue une fois, à son instant');
+  assert.equal(buf.push(pk(snap(6, 10, { seq: 2 })), 6 * DT * 1000 + 40), false, 'le périodique (plus ancien) arrivé après ne la défait pas');
+  assert.equal(buf.push(pk(snap(6, 5000, { tele: 1, seq: 3 })), 6 * DT * 1000 + 41), false, 'un vrai doublon reste ignoré');
+  // numéros de séquence qui reviennent à zéro (16 bits)
+  const w = new SnapshotBuffer();
+  w.push(pk(snap(6, 10, { seq: 65535 })), 50); assert.notEqual(w.push(pk(snap(6, 900, { tele: 1, seq: 0 })), 51), false, 'séquence 65535 puis 0 : plus récent');
+});
 await bugConnu('TECH-089', () => {
   const tr = new Track('t'); tr.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); tr.add({ t: 'finish', x: 0, z: -3, l: 0, r: 0 });     // circuit de joueur : pas de ligne centrale, aucun checkpoint
   const logic = new RaceLogic(tr);
