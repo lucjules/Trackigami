@@ -6,7 +6,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { test, finish } from './harness.mjs';
+import { test, finish, bugConnu } from './harness.mjs';
 import { jsStrings } from './i18n-scan.mjs';
 import { GAME_NAME, FILE_PREFIX } from '../js/version.js';
 import { BUILTIN_AUTHOR, authorLabel, BUILTIN_TRACKS, buildBuiltin } from '../js/tracks.js';
@@ -114,6 +114,13 @@ test('confidentialité : chaque donnée envoyée, chaque destinataire, les duré
   const e = legalPage('confidentialite', 'en').html;
   for (const w of ['No email address', 'bcrypt', 'Anonymous statistics', 'Multiplayer', 'IP address', 'Export my data', 'Delete account', '15', 'CNIL', '12 months']) assert.ok(e.includes(w), w);
 });
+
+bugConnu('TECH-051', () => {
+  // Les offres et candidats WebRTC passent par un canal que tout abonné peut lire : la page doit le dire, en français et en anglais.
+  const fr = legalPage('confidentialite', 'fr').html, en = legalPage('confidentialite', 'en').html;
+  assert.ok(/abonn/.test(fr) && /salon public/.test(fr) && /code de la salle/.test(fr), 'français : quiconque connaît le code (tout le monde pour un salon public) peut lire les adresses');
+  assert.ok(/subscri/.test(en) && /public room/.test(en) && /room code/.test(en), 'anglais');
+}, 'page Confidentialité : exposition des adresses IP aux abonnés du canal de la salle');
 
 test('mentions légales : éditeur non professionnel (LCEN), hébergeur avec adresse et téléphone ; contact par adresse réglée, sinon page du projet', () => {
   const m = legalPage('mentions', 'fr').html;

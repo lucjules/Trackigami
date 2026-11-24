@@ -13,7 +13,7 @@ import { RESUME_MS, RETRY_MS } from '../js/net/resume.js';
 import { RaceLogic } from '../js/raceLogic.js';
 import { Track } from '../js/track.js';
 import { PHYS_VER, NET_VER } from '../js/version.js';
-import { test, finish, precondition } from './harness.mjs';
+import { test, finish, precondition, bugConnu } from './harness.mjs';
 import { VirtualClock, FakeRealtime, FakeRTCNet } from './fake-realtime.mjs';
 import { PublicDirectory, LOBBY_CODE } from '../js/net/directory.js';
 import { createIceLoader } from '../js/net/ice.js';
@@ -470,11 +470,14 @@ async function scenario(fn, { rtc: rtcOpts = {} } = {}) {
   const rt = new FakeRealtime(clock), rtc = new FakeRTCNet(clock, rtcOpts);
   const rooms = [];
   const sigOf = (client, o = {}) => ({ code, selfId, observe }) => new SupabaseSignaling({ code, selfId, observe, WebSocketImpl: rt.socket(client), url: URL_RT, key: KEY_RT, getToken: o.getToken || rt.tokenSource(client, o.ttl || 3600000) });
-  const opts = (client, o = {}) => ({ name: client[0].toUpperCase() + client.slice(1), selfId: client, now: clock.now, makeSignaling: sigOf(client, o), makeMesh: (m) => new PeerMesh({ ...m, RTC: rtc.pc(client) }), ...(o.getIce ? { getIce: o.getIce } : {}) });
+  // o.selfId : un identifiant imposé (un joueur qui revient, ou un client modifié qui prend celui d'un autre) ; o.token / o.identity : ce qu'il présente pour reprendre une place.
+  const opts = (client, o = {}) => ({ name: client[0].toUpperCase() + client.slice(1), selfId: o.selfId || client, now: clock.now, makeSignaling: sigOf(client, o), makeMesh: (m) => new PeerMesh({ ...m, RTC: rtc.pc(client) }),
+    ...(o.getIce ? { getIce: o.getIce } : {}), ...(o.token ? { token: o.token } : {}), ...(o.identity ? { identity: o.identity } : {}) });
   const w = {
     clock, rt, rtc, rooms, sigOf,
     host: async (client, code = 'ABC234', o) => { const r = await clock.until(Room.create({ ...opts(client, o), code })); rooms.push(r); return r; },
     join: async (client, code = 'ABC234', o) => { const r = await clock.until(Room.join(code, opts(client, o))); rooms.push(r); return r; },
+    tryJoin: async (client, code = 'ABC234', o) => { try { const r = await clock.until(Room.join(code, opts(client, o)), 20000); rooms.push(r); return r; } catch (e) { return e; } },
     linked: (a, b) => !!(a.members.get(b.selfId) && a.members.get(b.selfId).link === 'open' && b.members.get(a.selfId) && b.members.get(a.selfId).link === 'open'),
     raw: (client, selfId, o = {}) => new SupabaseSignaling({ code: o.code || 'ABC234', selfId, observe: !!o.observe, WebSocketImpl: rt.socket(client), url: URL_RT, key: KEY_RT, getToken: o.getToken || null }),
   };
@@ -842,5 +845,95 @@ await test('deux lancements rapprochés (TECH-049, circuit lent puis intégré) 
   await multiMethods._startMultiRace.call(app, room2, { id: 'b-quatre' }, 0, null, 4);
   assert.deepEqual(played, ['b-vite', 'b-quatre']);
 });
+
+console.log('Hôte, identité (phase 17 ; défauts reproduits avant correction)');
+const CUP2 = [{ id: 'b-un-a1', name: 'Un' }, { id: 'b-deux-b2', name: 'Deux' }];
+const allLinked = (w, rs) => rs.every((a) => rs.every((b) => a === b || w.linked(a, b)));
+await bugConnu('TECH-010', () => scenario(async (w) => {
+  w.rt.ghostMs = 2000;                                             // (le serveur retire vite une connexion morte : l'absente n'est plus dans l'annuaire)
+  const ana = await w.host('ana'), bea = await w.join('bea'), cid = await w.join('cid');
+  await w.clock.advance(3000);
+  precondition(allLinked(w, [ana, bea, cid]), 'trois joueurs reliés');
+  ana.startCup({ rounds: CUP2 }); await w.clock.advance(500);
+  ana.reportFinish(4000); await w.clock.advance(300);              // l'hôte finit la manche… puis son réseau tombe (moins de 20 s)
+  w.rt.cut('ana', 16000); w.rtc.cut('ana'); w.clock.setTimeout(() => w.rtc.heal('ana'), 16000);
+  await w.clock.advance(12000);
+  precondition(bea.members.get('ana').link === 'away' && cid.members.get('ana').link === 'away', 'Ana absente, place gardée');
+  bea.reportFinish(4100); cid.reportFinish(4200);
+  await w.clock.advance(1000);
+  assert.equal(bea.cupState.phase, 'results', 'tous ont fini : la manche est close à temps, sans attendre la fin de l\'absence de l\'hôte');
+  assert.ok([bea, cid].some((r) => r.isHost && r.meta.host), 'un successeur se marque hôte (drapeau republié)');
+  const dan = await w.tryJoin('dan');
+  assert.ok(!(dan instanceof Error), 'la salle reste rejoignable pendant l\'absence de l\'hôte : ' + (dan && dan.message));
+}), 'hôte coupé moins de 20 s : manche close à temps, drapeau republié, salle rejoignable');
+await bugConnu('TECH-010', () => scenario(async (w) => {
+  const ana = await w.host('ana'), bea = await w.join('bea');
+  await w.clock.advance(3000);
+  precondition(w.linked(ana, bea), 'reliés');
+  const saved = ana.exportIdentity ? await ana.exportIdentity() : null;           // ce que l'onglet garde (sessionStorage) pour revenir
+  ana._dispose();                                                  // Ana recharge sa page : l'onglet se ferme sans « au revoir »
+  await w.clock.advance(4000);
+  const back = await w.tryJoin('ana', 'ABC234', { selfId: 'ana', token: ana.token, identity: saved });
+  assert.ok(!(back instanceof Error), 'l\'hôte qui recharge rejoint sa salle : ' + (back && back.message));
+  await w.clock.advance(4000);
+  assert.equal(back.isHost, true, 'il retrouve son rôle d\'hôte'); assert.equal(bea.hostId, 'ana');
+  assert.ok(w.linked(back, bea), 'relié');
+}), 'hôte qui recharge et rejoint avec son secret : salle trouvée, rôle retrouvé');
+await bugConnu('TECH-010', () => scenario(async (w) => {
+  const ana = await w.host('ana'), bea = await w.join('bea');
+  await w.clock.advance(3000);
+  let leftAt = null; bea.on('left', (id) => { if (id === 'ana' && leftAt == null) leftAt = w.clock.now(); });
+  const t0 = w.clock.now();
+  ana._dispose();                                                  // l'onglet de l'hôte se ferme
+  await w.clock.advance(6000);
+  precondition(bea.members.get('ana').link === 'away', 'Ana absente');
+  w.rtc.cut('ana');                                                // elle revient, mais sa liaison ne s'ouvre jamais (retour non relié)
+  await w.tryJoin('ana', 'ABC234', { selfId: 'ana', token: ana.token });
+  await w.clock.advance(20000);
+  assert.ok(leftAt != null && leftAt - t0 <= RESUME_MS + 3000, 'un retour non relié ne remet pas à zéro le délai d\'absence : place rendue ' + (leftAt == null ? 'jamais' : Math.round((leftAt - t0) / 1000) + ' s') + ' après la coupure');
+}), 'retour non relié : le délai d\'absence n\'est pas remis à zéro');
+await bugConnu('TECH-010', () => scenario(async (w) => {
+  // L'hôte (zed) n'a PAS le plus petit identifiant : abe le prend « par défaut » quand zed s'en va.
+  const zed = await w.host('zed'), abe = await w.join('abe'), cid = await w.join('cid');
+  await w.clock.advance(3000);
+  zed._dispose();                                                  // l'hôte recharge…
+  await w.clock.advance(2000);
+  await w.tryJoin('zed', 'ABC234', { selfId: 'zed', token: zed.token });      // … et revient sans son secret (onglet perdu) ; ou n'y parvient pas
+  await w.clock.advance(RESUME_MS + 5000);
+  const hosts = [abe, cid].filter((r) => r.isHost);
+  assert.equal(hosts.length, 1, 'un hôte parmi ceux qui restaient');
+  assert.equal(hosts[0].meta.host, true, 'il republie le drapeau d\'hôte');
+  const dan = await w.tryJoin('dan');
+  assert.ok(!(dan instanceof Error), 'un arrivant est accepté : ' + (dan && dan.message));
+}), 'le successeur qui devient hôte republie le drapeau ; un arrivant est accepté');
+await bugConnu('TECH-040', () => scenario(async (w) => {
+  const ana = await w.host('ana'), bea = await w.join('bea');
+  await w.clock.advance(3000);
+  ana.selectTrack({ id: 'b-un-a1', name: 'Un' });
+  const evil = await w.join('aaa');                                // un client modifié, au plus petit identifiant…
+  evil.meta.host = true; evil.signaling.track(evil.meta);          // … se déclare hôte dans la présence
+  await w.clock.advance(3000);
+  evil.mesh.sendCtl({ k: 'start', e: 99, trackId: 'b-un-a1', name: 'Un', startIn: 1000 });
+  evil.mesh.sendCtl({ k: 'rules', r: { g0: 40 } });
+  await w.clock.advance(1000);
+  assert.notEqual(bea.hostId, 'aaa', 'se déclarer hôte ne fait pas l\'hôte');
+  assert.equal(bea.state, 'lobby', 'son « départ » est refusé'); assert.equal(bea.rules, null, 'ses règles aussi');
+  assert.equal(ana.isHost, true);
+}), 'client modifié annonçant host: true : refusé');
+await bugConnu('TECH-040', () => scenario(async (w) => {
+  w.rt.ghostMs = 2000;
+  const ana = await w.host('ana'); await w.join('bea'); await w.join('cid');
+  await w.clock.advance(3000);
+  ana.selectTrack({ id: 'b-un-a1', name: 'Un' }); ana.start(); await w.clock.advance(500);
+  w.rt.cut('bea', 60000); w.rtc.cut('bea');                        // Bea coupée : sa place est gardée 20 s
+  await w.clock.advance(12000);
+  precondition(ana.members.get('bea').link === 'away', 'place de Bea gardée');
+  const evil = await w.tryJoin('mallory', 'ABC234', { selfId: 'bea', token: 'n-importe-quoi' });   // un client modifié prend l'identifiant de Bea
+  await w.clock.advance(4000);
+  if (!(evil instanceof Error)) evil.reportFinish(1000);
+  await w.clock.advance(1000);
+  assert.notEqual(ana.members.get('bea') && ana.members.get('bea').link, 'open', 'sans le secret de Bea, sa place n\'est pas rendue');
+  assert.equal(ana.results.has('bea'), false, 'aucune arrivée comptée pour Bea');
+}), 'hello de remplacement sans le secret : la place d\'un absent n\'est pas rendue');
 
 await finish('Tous les tests réseau passent.');
