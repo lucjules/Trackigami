@@ -48,15 +48,15 @@ Sans secret configuré, la fonction répond 501 et le jeu n'insiste pas avant 10
 Une coupure (Wi-Fi qui saute, passage en 4G, onglet rechargé) ne fait plus sortir de la salle (`js/net/resume.js`) :
 - **le joueur coupé** garde sa salle ouverte et sa course continue ; il retente de rejoindre le canal avec le **même identifiant** (après 0,8, 1,5, 2,5, 4 et 6 s,
   puis toutes les 6 s tant qu'une de ses liaisons de jeu est ouverte ; sans aucune, il abandonne au-delà de 20 s) ;
-  un onglet rechargé reprend sa place s'il revient dans les 20 s (identifiant et jeton gardés en `sessionStorage`) ;
+  un onglet rechargé reprend sa place s'il revient dans les 20 s (identifiant et **secret de reprise** gardés en `sessionStorage` ; voir « Identité, rôle d'hôte et vie privée ») ;
 - **les autres** continuent de jouer avec lui tant que leur liaison WebRTC marche (0.16.14, TECH-046 : une coupure de la seule signalisation ne fige plus rien) ;
   quand sa liaison tombe aussi, ils lui gardent sa place **20 s** (« ⏳ reconnexion » dans la liste) : il reste sur la grille, la manche ne se clôt pas sans lui (dans la
   limite des délais habituels), et son arrivée compte s'il finit ; au-delà, sa place est rendue ;
 - **à son retour**, chacun lui envoie `hello`, l'hôte lui renvoie l'état complet (règles, circuit ou championnat **avec les arrivées de la manche en cours**) et
   lui renvoie l'arrivée qu'il aurait annoncée pendant la coupure ;
 - **un départ volontaire** (« Quitter la salle ») envoie `bye` : sa place n'est pas gardée ;
-- **hôte remplacé** : l'hôte coupé plus de 20 s est remplacé par l'identifiant le plus petit, qui se **marque** hôte (`hostover`) ; l'ancien, s'il revient,
-  ne reprend pas la main (son état pourrait être périmé).
+- **hôte absent** (0.16.16) : le suivant dans l'**ordre d'arrivée** fait l'intérim dès que la liaison de l'hôte est tombée (6 s), se **marque** hôte (`hostover`) et clôt les
+  manches ; l'hôte qui revient dans les 20 s **avec son secret** reprend la main après avoir reçu l'état de la salle ; au-delà, sa place est rendue.
 
 ## Signalisation et liaisons (0.16.14, audit LOT-8b, `TRANS-06`)
 
@@ -128,7 +128,7 @@ Les circuits sont tirés au sort **sans doublon et du plus facile au plus dur** 
 - **Classement en direct** : chaque paquet d'état porte l'avancement (0 à 1) de la voiture sur la ligne centrale du circuit (`js/net/progress.js` ; sans ligne centrale : checkpoints franchis).
 - **Collisions douces** (option) : `js/net/collide.js`. Chaque voiture est un disque de 1,15 m de rayon ; chaque joueur applique SA moitié du choc à SA voiture d'après la position affichée de l'autre
   (poussée plafonnée à ~4 g, rien en looping, rien 2 s après un retour au checkpoint, rien contre une voiture arrivée). Pas de physique rejouable : aucun record n'en dépend.
-- **Hôte parti** : l'identifiant le plus petit devient hôte et reprend la clôture et les départs (l'état du championnat est copié chez tous). Un joueur qui arrive en cours de route
+- **Hôte parti ou absent** : le suivant dans l'ordre d'arrivée (voir « Identité, rôle d'hôte et vie privée ») devient hôte et reprend la clôture et les départs (l'état du championnat est copié chez tous). Un joueur qui arrive en cours de route
   reçoit le championnat (`cup`), voit le circuit et « Manche en cours : tu joueras la suivante » (GAME-008), suit la manche sans la courir et part à la suivante. Un `rend` manqué est
   rattrapé par le résultat joint au `round` suivant, ou par l'état que l'hôte renvoie quand la liaison se rouvre : le joueur revenu après la clôture voit les résultats de SA manche,
   sa course s'arrête (TECH-047).
@@ -188,6 +188,88 @@ classements finaux sont identiques ; (6) un circuit de la communauté puis, auss
 
 Limite assumée : il n'y a pas de serveur de jeu, **chacun est seul juge de son temps**. Un tricheur peut annoncer un faux temps ; rien d'autre n'en dépend (ni record, ni pièces, ni classement en ligne).
 
+## Identité, rôle d'hôte et vie privée (0.16.16, audit LOT-8d, `TECH-010`, `TECH-040`, `TECH-051`, `TRANS-05`, `TRANS-06`, `TRANS-16`)
+
+Modèle de menaces, écrit avant le code : [docs/MENACES-MULTIJOUEUR.md](../docs/MENACES-MULTIJOUEUR.md) (ce qu'un client modifié, un observateur silencieux ou un membre malveillant
+peut faire, ce qui est paré, ce qui ne l'est pas). **Décision D-3** : secret de reprise, membres seuls, autorité d'hôte non déclarable ; **canaux privés et relais côté serveur : hors
+périmètre**. Rien de ce qui suit n'est inviolable : un pair à pair n'a pas d'arbitre ; chaque garantie dit pour qui elle vaut.
+
+**Pourquoi** : le canal Realtime est public et la présence est déclarée par le client (clé et métadonnées non vérifiées) : n'importe qui qui connaît le code pouvait annoncer `host: true`,
+reprendre l'identifiant d'un joueur coupé, ou recevoir une salle « introuvable » parce que l'hôte rechargeait sa page.
+
+### Identité (`js/net/identity.js`, Web Crypto seulement : ECDSA P-256, SHA-256 ; aucune dépendance)
+
+- **Secret de reprise** : à son arrivée, chaque joueur tire une paire de clés ECDSA P-256. La clé privée **ne quitte jamais le navigateur** (ni présence, ni message, ni journal, ni DOM) ; elle est
+  gardée en `sessionStorage` (propre à l'onglet, 20 s de validité renouvelées toutes les 5 s) pour retrouver sa place après un rechargement. **Engagement** : l'empreinte SHA-256 de la clé
+  publique (43 signes, `meta.c` dans la présence) : c'est la seule chose publiée.
+- **Poignée de main sur chaque liaison ouverte** : la liaison passe `connecting → proving → open`. Chacun envoie un défi aléatoire (`hi {n}`, 16 octets) ; l'autre répond `hello {pub, sig, e}` : une
+  **signature** (jamais le secret, qu'un membre pourrait rejouer) sur le code de la salle, les deux identifiants, **les deux empreintes DTLS de cette liaison** et le défi. Elle ne se rejoue donc ni sur
+  une autre liaison, ni dans une autre salle, ni plus tard, et celui qui relaierait les messages (autres empreintes DTLS de chaque côté) ne peut pas la produire. Elle est vérifiée contre l'engagement
+  attendu (déjà prouvé, sinon celui de la présence), comparé **à temps constant**. Avant la preuve : paquets d'état ignorés, messages de contrôle gardés (64 au plus) et traités après, jetés si elle est refusée.
+- **Engagement épinglé** à la première preuve, pour toute la vie de la salle : une connexion de l'annuaire qui annonce un identifiant connu avec un autre engagement est ignorée.
+- **Offres et réponses WebRTC signées** (`seal` / `vet`, `transport.js`) : la négociation qu'un client modifié lance au nom d'un autre est écartée avant de rien ouvrir (le vrai joueur
+  qui revient retrouve sa liaison même si un imposteur occupe son identifiant).
+- **Place d'un absent** : elle n'est rendue qu'à celui qui prouve le secret. Un client modifié qui prend l'identifiant d'un joueur coupé n'obtient ni liaison, ni arrivées comptées.
+- Une page non sécurisée (sans Web Crypto, hors https) ne peut pas jouer en ligne : message clair, traduit.
+
+### Rôle d'hôte : ordre d'arrivée, intérim, retour
+
+- **Plus jamais déclaré par la présence.** Le drapeau `host` n'est qu'une indication (pour dire à un arrivant quelle version la salle joue) ; il ne donne aucun droit.
+- **Ordre d'arrivée** : `[[identifiant, engagement]…]`, le créateur d'abord, puis chaque joueur au rang où l'hôte l'a vu apparaître (une fois son identité prouvée), tenu par l'hôte et envoyé à
+  chacun (`order`, et dans `hostover`). **L'hôte est le premier présent de l'ordre** : présent = liaison ouverte (ou tombée depuis moins de 6 s), ni absent, ni revenu sans preuve, ni d'une autre version.
+  Chaque membre le recalcule seul ; `_checkHost` tourne à chaque changement (arrivée, absence, retour, départ, ordre reçu).
+- **Un ordre n'est cru que de celui que je tiens pour l'hôte**, et seulement s'il ne passe pas devant un joueur dont je garde encore la place : un membre qui se met en tête, ou qui parle au nom de
+  l'hôte, n'évince personne. Un **arrivant** (ou un joueur revenu d'une longue coupure) croit la **majorité** des membres vérifiés, pas le premier avis ; une salle à deux ne peut pas s'en défendre (limite).
+- **Intérim** (hôte coupé ou onglet fermé, moins de 20 s) : dès que sa liaison est tombée depuis 6 s (la présence d'une connexion morte peut rester 30 s côté serveur), le suivant devient hôte, se
+  marque dans la présence, annonce `hostover` et sa course libre en cours, et **clôt les manches à temps** ; chacun lui renvoie l'état de son championnat et son arrivée en attente (`cupsync`,
+  comme en 0.16.15). La salle reste **rejoignable** : elle existe tant que quelqu'un y est, même sans drapeau.
+- **Retour de l'hôte avec son secret** : il rejoint (même identifiant), reçoit l'état de la salle de celui qui l'a tenue (règles, circuit ou championnat, ordre), **puis** reprend le rôle (4 s au plus
+  d'attente) ; l'intérimaire retire son drapeau. Le délai d'absence n'est **pas remis à zéro** par un retour qui ne s'est pas relié (preuve non faite) : une place gardée 20 s est rendue 20 s après la coupure.
+  Sans son secret (autre onglet, rechargement après 20 s), il n'a plus de place : il rejoint comme un arrivant, en dernier de l'ordre.
+- **Après la séparation du réseau** deux joueurs peuvent un moment se croire hôtes (aucun arbitre) ; les résultats de manche, fusionnés depuis 0.16.15, convergent (voir « Époque de lancement »).
+
+| Message (NET_VER 5) | Envoyé par | Contenu | Reçu |
+| --- | --- | --- | --- |
+| `hi` | chacun, à l'ouverture d'une liaison | `n` : défi de 16 octets | l'autre signe et répond |
+| `hello` | chacun | `pub`, `sig`, `e` (époque vue) | vérifié contre l'engagement attendu ; vrai : la liaison est « ouverte » |
+| `order` | hôte | `o` : ordre d'arrivée avec les engagements | cru seulement de l'hôte que je connais, si l'ordre ne devance personne dont je garde la place |
+| `orderq` | joueur revenu d'une longue coupure | — | l'ordre lui est renvoyé |
+| `hostover` | nouvel hôte | `o` | comme `order` ; chacun lui donne son état de championnat |
+
+**`NET_VER` reste 5** : le changement de protocole de cette phase (poignée de main, ordre, descriptions signées) s'ajoute à celui de la 0.16.15 (époque de lancement), qui n'a pas été publié
+(branche de travail, aucune version diffusée) ; selon la règle commune, on ne le réincrémente pas. **À réincrémenter avant toute publication qui laisserait en jeu des joueurs de la 0.16.15** : ils
+ne répondent pas à `hi` et seraient refusés (« en connexion… »), sans message d'erreur plus précis.
+
+### Ce qui reste exposé (TECH-051) : les adresses IP
+
+Les offres WebRTC et les candidats ICE (adresse IP publique du joueur, celle du relais TURN s'il sert) passent par le canal Realtime `copytrack-room-CODE`, **public** : la clé du projet est dans le jeu,
+tout abonné reçoit tout ce qui y est diffusé (le filtrage par destinataire se fait chez le client), et il peut s'y abonner **sans figurer dans la présence** (comme la liste des salons publics). Le code
+d'un **salon public** est affiché dans la liste. Conséquences :
+
+| Qui | Voit | Parade |
+| --- | --- | --- |
+| Les autres joueurs de la salle | adresse IP, pseudo, apparence de la voiture | aucune : c'est le principe du pair à pair (un relais TURN cacherait l'adresse, pas l'existence de la liaison) |
+| Un abonné du canal qui ne joue pas (code connu) | les adresses des joueurs, au moment où elles sont échangées | **aucune dans cette phase** (canal privé : hors périmètre, D-3) |
+| Les serveurs STUN (Google) et le relais | adresse IP le temps de la partie | déjà dit |
+
+**Chiffrer la signalisation avec le code de la salle serait sans objet** : le code est le nom du canal, donc quiconque peut s'abonner le connaît ; et celui d'un salon public est listé. Un chiffrement
+par paire (clés publiées par chaque joueur) cacherait les adresses à un observateur silencieux, mais pas à un membre (WebRTC les lui donne de toute façon) : il lui suffirait d'entrer dans la salle, où il serait visible ; non fait.
+La page **Confidentialité** (français et anglais, `js/legal.js`) le dit sans promettre de chiffrement ni de salle privée, et conseille de ne donner le code qu'à des personnes de confiance.
+
+### À vérifier sur de vraies machines (rien de cela n'a été observé hors du banc et de Chromium sur une seule machine)
+
+Sur le vrai Realtime, deux à trois appareils sur des réseaux différents :
+1. **Hôte coupé < 20 s** : l'hôte coupe son Wi-Fi 15 s en pleine manche ; relever la durée avant que l'invitée voie « tu es maintenant l'hôte » (attendu : 6 à 16 s, selon que la liaison tombe ou s'éteint
+   en silence) et que la manche se clôt ; au retour du Wi-Fi, l'hôte reprend la main sans refaire partir personne. Noter si la présence morte d'Ana reste dans l'annuaire (jusqu'à ~30 s) sans gêner.
+2. **Hôte qui recharge** (F5) pendant un championnat : l'invitée devient hôte, Ana revient, retrouve son nom et son rôle ; vérifier `copytrack.room.ident.commit` identique avant et après (jamais le secret).
+3. **Imposteur** : dans la console d'un troisième navigateur, `const { Room, defaultSignaling } = await import('/js/net/room.js'); await Room.join('CODE', { name: 'X', selfId: '<id d\'un absent>', makeSignaling: (o) => defaultSignaling(o, null) })`
+   pendant que le joueur est coupé : aucune liaison ne s'ouvre, le joueur retrouve sa place à son retour ; et `copytrack.room.meta.host = true; copytrack.room.signaling.track(copytrack.room.meta)` depuis un
+   invité (en désactivant `copytrack.room._checkHost`) ne le fait pas hôte pour les autres.
+4. **Observateur silencieux** (exposition, pas une parade) : s'abonner au canal sans rejoindre (`copytrack.room.signaling` d'un autre onglet avec `observe: true`) et relever les `signal` reçus : on y lit les
+   offres et les candidats (donc les adresses) destinés à d'autres.
+5. **Deux salons en même temps** sur le même projet : aucune interférence (hôtes, ordres, identités distincts).
+6. **Page en http** (hors localhost) : le multijoueur refuse avec le message dédié ; en https, tout marche.
+
 ## Salons publics
 
 Cocher *Salon public* dans le salon (créateur seulement) publie une fiche (code, pseudo de l'hôte, circuit, nombre de joueurs, mode) dans un canal Realtime commun (`copytrack-room-LOBBY`, 5 lettres :
@@ -234,6 +316,11 @@ Choisis par l'hôte dans le salon :
   course ou au salon ; arrivée en vol ; temps synchronisés gardés ; joueur revenu après une clôture ; migration d'hôte après une clôture manquée, avec ou sans réponse perdue ; arrivée
   en attente jamais rejouée ; classement sans les joueurs qui n'ont pas couru, départage par moyenne ; arrivant pendant une « Course ») ; `test-net` (course d'un lancement précédent,
   deux départs rapprochés) ; `test-browser` (trois onglets).
+  Identité, hôte, vie privée (0.16.16) : `test-identite-salle` (la preuve : refusée si la salle, un identifiant, une empreinte DTLS ou le défi changent, ou si elle est renvoyée à son auteur ; engagement ; sauvegarde
+  de l'onglet ; le secret n'est dans rien de ce qui part) ; `test-net` (hôte coupé < 20 s, avec ou sans présence fantôme : manche close, drapeau republié, salle rejoignable ; hôte qui recharge avec son
+  secret ; retour non relié sans remise à zéro du délai ; successeur sans drapeau ; client modifié annonçant `host: true` ; preuve de remplacement sans secret ; preuve rejouée sur une autre liaison, une
+  seconde fois, dans une autre salle ; descriptions signées ; ordre usurpé ; majorité de l'arrivant ; deux salons simultanés) ; `test-manche` (hôte qui recharge en pleine manche) ; `test-legal` (page
+  Confidentialité) ; `test-browser` (trois onglets, vrai WebRTC et vrai Web Crypto : intérim, imposteur refusé, hôte revenu avec son secret). Chaque défaut a d'abord été reproduit (`bugConnu`).
 - Essai à deux ou trois onglets sans serveur : `?net=local` dans l'URL (signalisation par BroadcastChannel ; le WebRTC est réel).
 
 ## Limites de l'architecture actuelle (à lire avant d'attendre plus)
