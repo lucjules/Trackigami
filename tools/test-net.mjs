@@ -1394,13 +1394,18 @@ await test('supabase/MULTI.md dit le vrai plafond des collisions (TECH-041)', ()
 });
 
 console.log('Phase 18 : ressources et défauts mineurs (TECH-087, TECH-088, TECH-089)');
-await bugConnu('TECH-087', () => {
+await test('onglet masqué 10 minutes (TECH-087, TRANS-09) : tampon d\'interpolation borné, et la voiture repart dès le retour au premier plan', () => {
   const rc = new RemoteCar(new THREE.Scene(), { id: 'a', name: 'A' });
   for (let i = 0; i < 12000; i++) rc.push(pk(snap(i * 6, i)), i * 50);          // 10 minutes à 20 Hz, onglet masqué : aucune image, donc aucun sample()
-  const n = rc.buffer.samples.length;
-  rc.dispose();
+  const n = rc.buffer.samples.length, span = rc.buffer.latest.t - rc.buffer.samples[0].t;
   assert.ok(n <= 64, 'tampon d\'interpolation borné : ' + n + ' paquets gardés');
-}, 'onglet masqué 10 minutes : tampon borné');
+  assert.ok(span >= 1.4 && span <= 1.6, 'les 1,5 dernières secondes : ' + span.toFixed(2) + ' s');
+  assert.ok(rc.update(12000 * 50 + 100, CAM) && Math.abs(rc.pos.x - 11998) < 1.5, 'retour au premier plan : la voiture est à sa place récente : ' + rc.pos.x.toFixed(1));
+  const flood = new SnapshotBuffer();
+  for (let i = 0; i < 5000; i++) flood.push(pk(snap(i, i)), i);                        // un paquet par pas (6 fois trop serré)
+  assert.ok(flood.samples.length <= 64, 'paquets serrés : ' + flood.samples.length);
+  rc.dispose();
+});
 await bugConnu('TECH-088', () => {
   const room = fakeRoom([{ id: 'zoe', car: { color: '#ff0000', color2: '#00ff00', body: 'muscle' } }], { rules: { sameCars: 1 } });
   const S = raceSide(room, { cup: { n: 0, total: 1, collisions: true } });

@@ -16,6 +16,7 @@ const DEFAULT_DELAY = 0.1;       // s
 const MAX_EXTRAP = 0.25;                // s : au-delà, la voiture s'arrête sur place plutôt que de dériver
 const HERMITE_MAX_GAP = 0.15;           // s : au-delà (paquets perdus), interpolation linéaire
 const KEEP = 1.5;                       // s d'historique conservé
+const MAX_SAMPLES = 64;                 // paquets gardés au plus (TECH-087 : 1,5 s à 20 par seconde en demande 30 ; borne contre un flot de paquets serrés)
 const OFFSET_WINDOW = 40;
 const FAR_S = 5;                        // s : écart d'horloge au-delà duquel un paquet est « hors horloge » (voir push)
 const FAR_CONFIRM = 3;                  // paquets consécutifs hors horloge qu'il faut pour croire à un vrai changement d'horloge
@@ -65,6 +66,12 @@ export class SnapshotBuffer {
     arr.splice(i, 0, e);
     this._judge(i);
     if (i + 1 < arr.length) this._judge(i + 1);                     // (un paquet arrivé en retard est le précédent du suivant)
+    // TECH-087 : purge à la réception aussi (pas seulement au rendu, dans sample()) : onglet masqué, aucune image n'est dessinée mais les paquets arrivent toujours
+    // (≈ 4 Mo par adversaire et par 10 minutes avant). On garde KEEP secondes derrière le plus récent, et MAX_SAMPLES paquets au plus.
+    const newest = arr[arr.length - 1].t;
+    let k = 0;
+    while (k + 2 < arr.length && (arr[k + 1].t < newest - KEEP || arr.length - k > MAX_SAMPLES)) k++;
+    if (k > 0) arr.splice(0, k);
     this.offsets.push(nowMs / 1000 - s.t);
     if (this.offsets.length > OFFSET_WINDOW) this.offsets.shift();
     this.lastRecvMs = nowMs;
