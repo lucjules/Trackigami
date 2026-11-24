@@ -110,6 +110,7 @@ export class Room extends Emitter {
     }
     this.mesh = (this.makeMesh || ((o) => new PeerMesh(o)))({
       selfId: this.selfId, signaling: sig, ...(iceServers ? { iceServers } : {}),
+      isMember: (id) => this._accepts(id),
       handlers: { onMessage: (id, kind, data) => this._onMessage(id, kind, data), onLink: (id, st) => this._onLink(id, st) },
     });
     this._wire(sig);
@@ -128,7 +129,7 @@ export class Room extends Emitter {
       if (host[1].v !== PHYS_VER || host[1].net !== NET_VER) throw new RoomError('Version du jeu différente de celle de l\'hôte : recharge la page.', 'version');
     }
     for (const [id, meta] of present) this._onPeer(id, meta);
-    this._pingTimer = setInterval(() => { this._pingAll(); this._expireAway(); }, 2000);
+    this._pingTimer = setInterval(() => { this._sweepLinks(); this._pingAll(); this._expireAway(); }, 2000);
     this._cupTimer = setInterval(() => this._cupTick(), 400);
     this.emit('members');
   }
@@ -188,6 +189,19 @@ export class Room extends Emitter {
     if (m.link !== 'away') m.awaySince = this.now();
     m.link = 'away';
     this.mesh.removePeer(id);
+  }
+
+  // TECH-045 : la signalisation n'ouvre une liaison que pour un membre présent dans l'annuaire, d'une version compatible, dont la place n'est pas « absente ».
+  _accepts(id) {
+    const m = this.members.get(id);
+    return !this.closed && !!m && m.link !== 'incompatible' && m.link !== 'away' && !!(this.signaling && this.signaling.peers && this.signaling.peers.has(id));
+  }
+
+  // Liaisons orphelines (aucun membre, ou membre incompatible ou absent) : fermées.
+  _sweepLinks() {
+    const links = this.mesh && this.mesh.links;
+    if (!links || typeof links.keys !== 'function') return;
+    for (const id of [...links.keys()]) { const m = this.members.get(id); if (!m || m.link === 'incompatible' || m.link === 'away') this.mesh.removePeer(id); }
   }
 
   _expireAway() {

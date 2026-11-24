@@ -43,8 +43,11 @@ class PeerLink {
 
 export class PeerMesh {
   // signaling : voir signaling.js ; handlers : { onMessage(id, 'ctl'|'state', data), onLink(id, status) }
-  constructor({ selfId, signaling, handlers, iceServers = ICE_SERVERS, RTC = globalThis.RTCPeerConnection }) {
+  // isMember(id) : ce joueur est-il un membre présent de la salle ? Seuls ses messages de signalisation peuvent ouvrir une liaison (TECH-045) ; par défaut,
+  // présent dans l'annuaire de la signalisation.
+  constructor({ selfId, signaling, handlers, iceServers = ICE_SERVERS, isMember = null, RTC = globalThis.RTCPeerConnection }) {
     this.selfId = selfId; this.signaling = signaling; this.h = handlers; this.ice = iceServers; this.RTC = RTC;
+    this.isMember = isMember || ((id) => !!(this.signaling && this.signaling.peers && this.signaling.peers.has(id)));
     this.links = new Map();
     this.stats = { sent: 0, recv: 0, skipped: 0 };
     signaling.on('signal', (from, data) => { if (signaling === this.signaling) this._onSignal(from, data); });
@@ -123,9 +126,10 @@ export class PeerMesh {
   }
 
   async _onSignal(from, data) {
-    if (!data || typeof data !== 'object') return;
+    if (!data || typeof data !== 'object' || typeof from !== 'string' || from === this.selfId) return;
     let link = this.links.get(from);
-    if (!link) { this.addPeer(from); link = this.links.get(from); if (!link) return; }
+    // TECH-045 : un message d'un inconnu (identifiant inventé, joueur parti dont un candidat ICE arrive en retard) n'ouvre rien ; seul un membre présent le peut.
+    if (!link) { if (!this.isMember(from)) return; this.addPeer(from); link = this.links.get(from); if (!link) return; }
     try {
       if (data.k === 'desc' && data.d) {
         // Seul le non-initiateur reçoit des offres ; seul l'initiateur reçoit des réponses.

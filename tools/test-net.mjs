@@ -263,9 +263,10 @@ await test('une seule offre par paire (le plus petit identifiant initie), candid
 });
 await test('signalisation invalide ou tardive : ignorée sans planter', async () => {
   const hub = new Hub(); const s = new FakeSignaling(hub, 'aaa');
-  new PeerMesh({ selfId: 'aaa', signaling: s, RTC: FakePC, handlers: { onMessage() {}, onLink() {} } });
+  const mesh = new PeerMesh({ selfId: 'aaa', signaling: s, RTC: FakePC, handlers: { onMessage() {}, onLink() {} } });
   for (const bad of [null, 5, 'x', { k: 'desc' }, { k: 'desc', d: { type: 'rien' } }, { k: 'ice', c: { candidate: 'x' } }]) s.emit('signal', 'zzz', bad);
   await new Promise((r) => setTimeout(r, 10));
+  assert.equal(mesh.links.size, 0, 'aucune liaison pour un inconnu (TECH-045)');
 });
 
 console.log('Salon (hôte, jonction, version, départ)');
@@ -610,7 +611,7 @@ await test('retrait pendant l\'annonce (TECH-082), signalisation qui ne sait pas
 });
 
 console.log('Banc simulé : signalisation des seuls membres (TECH-045)');
-await bugConnu('TECH-045', () => scenario(async (w) => {
+await test('signalisation (TECH-045) : un non-membre ne crée aucun lien ; un candidat tardif d\'un joueur parti non plus', () => scenario(async (w) => {
   const ana = await w.host('ana');
   const intrus = w.raw('intrus', 'intrus', { observe: true });       // abonné au canal, absent de la présence
   await w.clock.until(intrus.join({}));
@@ -628,8 +629,11 @@ await bugConnu('TECH-045', () => scenario(async (w) => {
   forge('bea', { k: 'desc', d: { type: 'offer', sdp: 'v=0' } });
   await w.clock.advance(1000);
   assert.equal(ana.mesh.links.has('bea'), false, 'aucun lien recréé pour un joueur parti');
+  ana.mesh.addPeer('orphelin');                        // une liaison sans membre (ne devrait plus exister) : nettoyée au tour suivant
+  await w.clock.advance(2500);
+  assert.equal(ana.mesh.links.has('orphelin'), false, 'liaison orpheline fermée');
   intrus.leave();
-}), 'un message de signalisation d\'un non-membre ne crée aucun lien ; un candidat tardif d\'un joueur parti non plus');
+}));
 
 console.log('Banc simulé : liens de jeu découplés de la signalisation (TECH-046)');
 const racing = (w, r) => { let tick = 0; return w.clock.setInterval(() => { if (!r.closed) r.sendSnapshot(snap(tick += 6, tick / 10)); }, 50); };
