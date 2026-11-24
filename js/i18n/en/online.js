@@ -328,6 +328,7 @@ export default {
   'L\'hôte choisit le circuit…': 'The host is choosing the track…',
   'Tu rejoins à la prochaine manche.': 'You join at the next round.',
   'Course en cours : rejoins-la.': 'Race in progress: join it.',
+  'Rejoindre la course': 'Join the race',
   'En attente de l\'hôte.': 'Waiting for the host.',
   'Mode': 'Mode',
   'Course libre': 'Free race',

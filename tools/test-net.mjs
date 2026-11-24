@@ -350,14 +350,16 @@ await test('le départ est donné par l\'hôte seulement, avec un délai commun'
   const host = await Room.create({ ...opts('H'), code: 'ABC234', now }); const g = await Room.join('ABC234', { ...opts('G'), now });
   let started = null; g.on('start', (e) => { started = e; });
   host.selectTrack({ id: 'b-1-xyz', name: 'Premiers Éclats' });
-  assert.deepEqual(host.mesh.ctl.at(-1)[0], { k: 'track', id: 'b-1-xyz', name: 'Premiers Éclats', sig: '', started: false });
+  assert.deepEqual(host.mesh.ctl.at(-1)[0], { k: 'track', e: 0, id: 'b-1-xyz', name: 'Premiers Éclats', sig: '' }, 'le choix du circuit, avec l\'époque courante (aucun lancement)');
   assert.equal(g.start(), false, 'un invité ne peut pas lancer');
   g.members.get(host.selfId).rtt = 80;
-  g._onMessage(host.selfId, 'ctl', { k: 'track', id: 'b-1-xyz', name: 'Premiers Éclats' });
-  g._onMessage(host.selfId, 'ctl', { k: 'start', trackId: 'b-1-xyz', startIn: 4000 });
+  g._onMessage(host.selfId, 'ctl', { k: 'track', e: 0, id: 'b-1-xyz', name: 'Premiers Éclats' });
+  assert.equal(started, null, 'le choix d\'un circuit ne lance rien');
+  g._onMessage(host.selfId, 'ctl', { k: 'start', e: 1, trackId: 'b-1-xyz', startIn: 4000 });
   assert.equal(started.trackId, 'b-1-xyz'); assert.equal(started.startLocal, 1000 + 4000 - 40, 'départ = délai − demi-aller-retour');
   assert.equal(g.track.name, 'Premiers Éclats');
-  started = null; g._onMessage('intrus', 'ctl', { k: 'start', trackId: 'x', startIn: 10 }); assert.equal(started, null, 'départ d\'un non-hôte ignoré');
+  started = null; g._onMessage('intrus', 'ctl', { k: 'start', e: 2, trackId: 'x', startIn: 10 }); assert.equal(started, null, 'départ d\'un non-hôte ignoré');
+  g._onMessage(host.selfId, 'ctl', { k: 'start', e: 1, trackId: 'b-1-xyz', startIn: 4000 }); assert.equal(started, null, 'un même lancement ne relance pas');
   host.leave(); g.leave();
 });
 
@@ -370,7 +372,7 @@ await test('on peut rejoindre une salle où la course a déjà commencé : dépa
   host.selectTrack({ id: 'b-1-xyz', name: 'T' }); host.start();
   const g = await Room.join('ABC234', { ...opts('G'), now });                  // plus de refus « course en cours »
   let st = null; g.on('start', (e) => { st = e; });
-  g._onMessage(host.selfId, 'ctl', { k: 'track', id: 'b-1-xyz', name: 'T', started: true });   // l'hôte renseigne le nouvel arrivant
+  g._onMessage(host.selfId, 'ctl', { k: 'live', e: host.epoch, on: true, trackId: 'b-1-xyz', name: 'T' });   // l'hôte annonce sa course en cours au nouvel arrivant
   assert.ok(st && st.startLocal === 5000 + 1500, 'départ dans 1,5 s, à son propre rythme');
   assert.equal(g.state, 'racing');
   host.leave(); g.leave();
@@ -401,7 +403,8 @@ await test('retour au salon : propre à ce joueur, les autres ne sont pas interr
   host.selectTrack({ id: 'b-1-xyz', name: 'T' }); host.start();
   const before = host.mesh.ctl.length;
   host.backToLobby();
-  assert.equal(host.state, 'lobby'); assert.equal(host.mesh.ctl.length, before, 'aucun message envoyé aux autres');
+  // (NET_VER 5) le seul message est « live : plus de course en cours chez l'hôte », pour les arrivants : il n'interrompt personne
+  assert.equal(host.state, 'lobby'); assert.deepEqual(host.mesh.ctl.slice(before).map((c) => [c[0].k, c[0].on]), [['live', false]], 'aucun autre message envoyé aux autres');
   assert.equal(host.meta.racing, false);
   host.leave();
 });
@@ -429,7 +432,7 @@ await test('circuit envoyé par l\'hôte (code de circuit) : morceaux, assemblag
   await assert.rejects(() => g.waitForCode('u:jamais', 30), (e) => e.code === 'no-code');
   // nouvel arrivant : l'hôte renvoie circuit ET morceaux
   host.mesh.ctl.length = 0; host.members.set('n', { id: 'n', name: 'N', link: 'open', rtt: 0 }); host._onLink('n', 'open');
-  assert.deepEqual(host.mesh.ctl.map((c) => c[0].k + (c[1] ? '>' + c[1] : '')), ['hello>n', 'track>n', 'tcode>n', 'tcode>n', 'tcode>n'], 'bonjour (E16), puis circuit et morceaux');
+  assert.deepEqual(host.mesh.ctl.map((c) => c[0].k + (c[1] ? '>' + c[1] : '')), ['hello>n', 'track>n', 'tcode>n', 'tcode>n', 'tcode>n', 'live>n'], 'bonjour (E16), puis circuit et morceaux, puis l\'état de la course libre (NET_VER 5)');
   host.leave(); g.leave();
 });
 await test('paquets d\'état : anti-inondation', async () => {

@@ -20,4 +20,6 @@ export const PHYS_VER = 39;
 // s'ils ont le même PHYS_VER (même physique) ET le même NET_VER (ils se comprennent). À incrémenter dès que le format d'un message change.
 // 3 (0.9.25) : message « rules » (règles de la partie choisies par l'hôte).
 // 4 (0.9.38) : reconnexion (hello, bye, hostover ; place gardée 20 s, état du championnat renvoyé avec les arrivées de la manche).
-export const NET_VER = 4;
+// 5 (0.16.15) : époque de lancement e dans start, track, live, cup, round, rend, cupstop, finish et hello ; « track » ne lance plus ; « live » (course libre de
+//   l'hôte réellement en cours) ; finish porte son circuit ; « cupsync » et résultats de manche fusionnés (migration d'hôte) ; voir supabase/MULTI.md.
+export const NET_VER = 5;

@@ -467,24 +467,30 @@ await test('plafond : une manche qui ne se termine jamais est close au bout de 1
 await test('seul l\'hôte conduit le championnat : messages d\'un invité, mauvaise manche, joueur hors grille, temps absurdes ignorés', async () => {
   const env = lan(); const a = await env.add('Ana', 'a'); await env.add('Ben', 'b'); const c = await env.add('Cléo', 'c');
   env.open(); a.startCup({ rounds: ROUNDS });
+  const e = a.epoch;                                                            // (NET_VER 5 : les messages de course portent leur époque)
   const before = env.events.c.start.length;
-  c._onMessage('b', 'ctl', { k: 'round', n: 1, roster: ['a', 'b', 'c'], names: {}, startIn: 4000 });
-  c._onMessage('b', 'ctl', { k: 'rend', n: 0, times: { a: 1, b: 2, c: 3 }, nextIn: 5 });
-  c._onMessage('b', 'ctl', { k: 'cupstop' });
-  c._onMessage('b', 'ctl', { k: 'cup', cup: { rounds: [{ id: 'b-x-1' }] } });
+  c._onMessage('b', 'ctl', { k: 'round', e, n: 1, roster: ['a', 'b', 'c'], names: {}, startIn: 4000 });
+  c._onMessage('b', 'ctl', { k: 'rend', e, n: 0, times: { a: 1, b: 2, c: 3 }, nextIn: 5 });
+  c._onMessage('b', 'ctl', { k: 'cupstop', e });
+  c._onMessage('b', 'ctl', { k: 'cup', e, cup: { rounds: [{ id: 'b-x-1' }] } });
   assert.equal(env.events.c.start.length, before); assert.equal(c.cupState.phase, 'racing'); assert.equal(env.events.c.stop, 0); assert.equal(c.cup.total, 2);
-  a._onMessage('b', 'ctl', { k: 'finish', steps: 4000, rn: 1 }); assert.equal(a.cupState.finishes.size, 0, 'mauvais numéro de manche');
-  a._onMessage('zzz', 'ctl', { k: 'finish', steps: 4000, rn: 0 }); assert.equal(a.cupState.finishes.size, 0, 'hors grille');
-  a._onMessage('b', 'ctl', { k: 'finish', steps: -3, rn: 0 }); a._onMessage('b', 'ctl', { k: 'finish', steps: 1e12, rn: 0 }); a._onMessage('b', 'ctl', { k: 'finish', steps: 'x', rn: 0 });
+  // Messages de l'hôte d'une AUTRE époque (lancement précédent, ou à venir) : ignorés (TRANS-05).
+  c._onMessage('a', 'ctl', { k: 'cupstop', e: e - 1 }); c._onMessage('a', 'ctl', { k: 'rend', e: e - 1, n: 0, times: { a: 1 }, nextIn: 5 });
+  c._onMessage('a', 'ctl', { k: 'round', e: e + 1, n: 1, roster: ['a', 'b', 'c'], names: {}, startIn: 4000 });
+  assert.equal(env.events.c.stop, 0); assert.equal(c.cupState.phase, 'racing'); assert.equal(c.cupState.n, 0); assert.equal(env.events.c.start.length, before);
+  a._onMessage('b', 'ctl', { k: 'finish', e: e - 1, steps: 4000, rn: 0 }); assert.equal(a.cupState.finishes.size, 0, 'arrivée d\'un autre lancement');
+  a._onMessage('b', 'ctl', { k: 'finish', e, steps: 4000, rn: 1 }); assert.equal(a.cupState.finishes.size, 0, 'mauvais numéro de manche');
+  a._onMessage('zzz', 'ctl', { k: 'finish', e, steps: 4000, rn: 0 }); assert.equal(a.cupState.finishes.size, 0, 'hors grille');
+  a._onMessage('b', 'ctl', { k: 'finish', e, steps: -3, rn: 0 }); a._onMessage('b', 'ctl', { k: 'finish', e, steps: 1e12, rn: 0 }); a._onMessage('b', 'ctl', { k: 'finish', e, steps: 'x', rn: 0 });
   assert.equal(a.cupState.finishes.size, 0, 'temps absurdes');
-  a._onMessage('b', 'ctl', { k: 'finish', steps: 4000 });                       // temps du mode libre : sans effet en championnat
+  a._onMessage('b', 'ctl', { k: 'finish', e, steps: 4000 });                       // temps du mode libre : sans effet en championnat
   assert.equal(a.cupState.finishes.size, 0); assert.equal(a.results.size, 0);
-  a._onMessage('b', 'ctl', { k: 'finish', steps: 4000, rn: 0 }); a._onMessage('b', 'ctl', { k: 'finish', steps: 3000, rn: 0 });
+  a._onMessage('b', 'ctl', { k: 'finish', e, steps: 4000, rn: 0 }); a._onMessage('b', 'ctl', { k: 'finish', e, steps: 3000, rn: 0 });
   assert.equal(a.cupState.finishes.get('b'), 4000, 'le premier temps compte');
   // L'hôte envoie des temps pour des joueurs hors grille ou absurdes dans « rend » : nettoyés.
-  c._onMessage('a', 'ctl', { k: 'rend', n: 0, times: { a: 3000, b: -1, c: 1e12, intrus: 10 }, nextIn: 5000 });
+  c._onMessage('a', 'ctl', { k: 'rend', e, n: 0, times: { a: 3000, b: -1, c: 1e12, intrus: 10 }, nextIn: 5000 });
   assert.deepEqual(env.events.c.round[0].result.times, { a: 3000, b: null, c: null });
-  c._onMessage('a', 'ctl', { k: 'rend', n: 0, times: { a: 1 }, nextIn: 5000 }); assert.equal(env.events.c.round.length, 1, 'une manche close ne se clôt pas deux fois');
+  c._onMessage('a', 'ctl', { k: 'rend', e, n: 0, times: { a: 1 }, nextIn: 5000 }); assert.equal(env.events.c.round.length, 1, 'une manche close ne se clôt pas deux fois');
   env.end();
 });
 await test('un résultat manqué est rattrapé au départ suivant ; arrêter le championnat remet tout le monde au salon', async () => {
@@ -553,7 +559,7 @@ console.log('État de la salle : lancements, résultats, migration (phase 16 ; d
 const T1 = { id: 'b-un-a1', name: 'Un' }, T2 = { id: 'b-deux-b2', name: 'Deux' };
 const lobbyAll = (rs) => { for (const r of rs) if (!r.closed) r.backToLobby(); };
 const starts = (env, ...ids) => ids.reduce((n, id) => n + env.events[id].start.length, 0);
-await bugConnu('TECH-008', async () => {
+await test('course libre (TECH-008) : retour au salon, l\'hôte change de circuit : les invités restent au salon', async () => {
   const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
   env.open();
   a.selectTrack(T1); a.start();
@@ -564,8 +570,8 @@ await bugConnu('TECH-008', async () => {
   assert.equal(b.state, 'lobby'); assert.equal(c.state, 'lobby');
   assert.equal(starts(env, 'b', 'c'), n0, 'aucun départ sur un simple choix de circuit');
   } finally { env.end(); }
-}, 'course libre : retour au salon, l\'hôte change de circuit : les invités restent au salon');
-await bugConnu('TECH-008', async () => {
+});
+await test('après « Arrêter le championnat » (TECH-008), l\'hôte change de circuit : l\'invité reste au salon', async () => {
   const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
   env.open();
   a.startCup({ rounds: ROUNDS });
@@ -575,8 +581,8 @@ await bugConnu('TECH-008', async () => {
   a.selectTrack(T2); env.open();
   assert.equal(b.state, 'lobby'); assert.equal(starts(env, 'b'), n0, 'aucun départ après « Arrêter le championnat »');
   } finally { env.end(); }
-}, 'après « Arrêter le championnat », l\'hôte change de circuit : l\'invité reste au salon');
-await bugConnu('TECH-008', async () => {
+});
+await test('après une course unique terminée (TECH-008) : un arrivant n\'est pas lancé alors que tout le monde est au salon', async () => {
   const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
   env.open();
   a.selectTrack(T1); a.start(); lobbyAll([a, b]);                  // une course libre a eu lieu
@@ -590,8 +596,27 @@ await bugConnu('TECH-008', async () => {
   assert.equal(d.state, 'lobby', 'l\'arrivant n\'est pas lancé : personne ne court');
   assert.equal(env.events.d.start.length, 0);
   } finally { env.end(); }
-}, 'après une course unique terminée : un arrivant n\'est pas lancé alors que tout le monde est au salon');
+});
 
+await test('course libre (TECH-008) : un arrivant rejoint la course que l\'hôte court RÉELLEMENT ; revenu au salon, il n\'y est pas renvoyé et peut la rejoindre', async () => {
+  const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
+  env.open();
+  a.selectTrack(T1); a.start();
+  const d = await env.add('Dan', 'd'); env.open();
+  assert.equal(d.state, 'racing', 'l\'hôte court : l\'arrivant part, à son rythme');
+  assert.equal(env.events.d.start.at(-1).startLocal, env.clock.t + 1500, 'départ dans 1,5 s');
+  assert.equal(env.events.d.start.at(-1).e, a.epoch, 'sur le lancement en cours');
+  d.backToLobby(); env.open();
+  assert.equal(d.state, 'lobby', 'revenu au salon : une liaison qui se rouvre ne l\'y renvoie pas');
+  assert.ok(d.hostLive && d.hostLive.track.id === T1.id, 'il sait que la course continue');
+  assert.equal(d.joinLive(), true); assert.equal(d.state, 'racing', 'il la rejoint d\'un clic');
+  a.backToLobby();
+  assert.equal(d.hostLive, null, 'l\'hôte revenu au salon : plus de course « en cours »');
+  assert.equal(d.state, 'racing', 'ceux qui courent ne sont pas interrompus'); assert.equal(b.state, 'racing');
+  const f = await env.add('Fay', 'f'); env.open();
+  assert.equal(f.state, 'lobby', 'un arrivant n\'est pas lancé quand l\'hôte est au salon');
+  } finally { env.end(); }
+});
 await bugConnu('TECH-042', async () => {
   const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
   env.open();

@@ -13,6 +13,10 @@
 //     L'hôte ne fait que donner les départs et clore chaque manche ; son rôle passe à l'identifiant le plus petit s'il part (l'état du championnat est
 //     copié chez tous les joueurs). Messages fiables : cup (le championnat) · round (départ de la manche n) · finish{rn} (mon temps) · rend (manche close,
 //     temps de tous) · cupstop (l'hôte arrête). Une manche se clôt quand tous ont fini ou quitté, FINISH_GRACE_MS après la première arrivée, ou au plafond.
+// Époque de lancement (NET_VER 5, TRANS-05) : chaque lancement de l'hôte (course libre, championnat, « Course ») a un numéro e, croissant dans la salle ;
+//     start, track, live, cup, round, rend, cupstop et finish le portent, et un message d'une autre époque est ignoré. Le choix d'un circuit (track) ne lance
+//     JAMAIS : seul start (ou cup / round) lance. « Course en cours » n'est plus un état mémorisé : l'hôte annonce sa course libre réellement en cours (live),
+//     un arrivant qui ne l'a jamais courue la rejoint, un joueur revenu au salon n'y est pas renvoyé (voir supabase/MULTI.md, « Époque de lancement »).
 // Reconnexion (E16, NET_VER 4 ; voir resume.js) : hello (à l'ouverture d'une liaison) · bye (départ volontaire) · hostover (un nouvel hôte se marque).
 //     Une coupure n'est pas un départ : la place est gardée RESUME_MS (« away »), le joueur coupé retente de rejoindre la salle avec le même identifiant.
 //     Les liaisons WebRTC ne dépendent pas de la signalisation (TECH-046) : quand seule la signalisation tombe, on continue de jouer ; une place n'est gardée
@@ -40,6 +44,8 @@ export const LINK_SILENCE_MS = 10000;
 const OUTBOX_MAX = 16;                                             // messages fiables gardés par joueur, à renvoyer quand sa liaison se rouvre
 
 export const ROOM_RE = /^[A-HJ-NP-Z2-9]{6}$/;
+const LATE_START_MS = 1500;                                        // rejoindre une course libre déjà lancée : départ dans 1,5 s, à son rythme
+const trackOf = (id, name, sig) => ({ id: String(id).slice(0, 60), name: String(name || '').slice(0, 40), sig: String(sig || '').slice(0, 40) });
 export const MODES = ['race', 'cup', 'free'];
 export function normalizeCode(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
 export function newRoomCode(random = (n) => crypto.getRandomValues(new Uint8Array(n))) {
@@ -73,7 +79,9 @@ export class Room extends Emitter {
     this.members = new Map();           // id → { id, name, host, ready, racing, v, t, link, rtt, car, want }
     this.track = null;                  // circuit choisi : { id, name, sig } ; id = 'b-…' (intégré), 'c:<uuid>' (communauté), 'u:<signature>' (code envoyé par l'hôte)
     this.rules = null;                  // règles de la partie choisies par l'hôte (rules.js) ; null : aucune
-    this.started = false;               // une course a déjà été lancée dans cette salle : les arrivants y entrent directement
+    // Époque (TRANS-05) : epoch = le lancement que je suis (adopté des messages de l'hôte) ; _seenEpoch = le plus grand numéro vu (un nouvel hôte numérote
+    // au-delà) ; launch = { e, kind: 'free' | 'cup', track } ; hostLive = la course libre que l'hôte court en ce moment ({ e, track }) ou null.
+    this.epoch = 0; this._seenEpoch = 0; this.launch = null; this.hostLive = null;
     this.trackCodes = new Map();        // id 'u:…' → code du circuit reçu de l'hôte
     this._asm = new Map();              // assemblage des morceaux de code en cours
     this.state = 'lobby';               // lobby | racing (propre à chaque joueur : la boucle de jeu est asynchrone)
@@ -381,12 +389,15 @@ export class Room extends Emitter {
     if (m && status === 'open') { m.everOpen = true; m.heardAt = this.now(); m.unanswered = 0; m.sentLog = []; }
     // L'hôte informe un nouvel arrivant du circuit choisi.
     if (status === 'open') {
-      this.mesh.sendCtl({ k: 'hello', token: this.token }, id);
+      this.mesh.sendCtl({ k: 'hello', token: this.token, e: this._seenEpoch }, id);
       // Mon arrivée de la manche, annoncée pendant une coupure : renvoyée à l'hôte (il l'ignore s'il l'a déjà).
-      if (this._pendingFinish && id === this.hostId && this.cupState && this.cupState.n === this._pendingFinish.rn) this.mesh.sendCtl({ k: 'finish', steps: this._pendingFinish.steps, rn: this._pendingFinish.rn }, id);
+      if (this._pendingFinish && id === this.hostId && this.cupState && this.cupState.n === this._pendingFinish.rn) this.mesh.sendCtl({ k: 'finish', e: this.epoch, steps: this._pendingFinish.steps, rn: this._pendingFinish.rn }, id);
       if (this.isHost && this.rules) this.mesh.sendCtl({ k: 'rules', r: this.rules }, id);        // les règles d'abord : elles s'appliquent au circuit qui suit
       if (this.isHost && this.cup && !this.cup.finished) this._sendCup(id);       // en championnat, un arrivant reçoit le championnat, pas le circuit seul
-      else if (this.isHost && this.track) this._sendTrack(id);
+      else if (this.isHost) {
+        if (this.track) this._sendTrack(id);
+        this._sendLive(id);                                                     // ma course libre réellement en cours (ou rien) : il en déduit s'il peut la rejoindre
+      }
       this._flushOutbox(id);                                                    // mes messages fiables qu'il n'a pas reçus (arrivées pendant une coupure)
       const mine = this.results.get(this.selfId);
       if (mine) this.mesh.sendCtl({ k: 'finish', steps: mine.best, sync: true }, id);   // le nouvel arrivant voit mon meilleur temps
@@ -411,7 +422,7 @@ export class Room extends Emitter {
     const m = this.members.get(from);
     switch (data.k) {
       case 'ping': this.mesh.sendCtl({ k: 'pong', id: data.id }, from); break;
-      case 'hello': if (m && typeof data.token === 'string' && data.token.length <= 32) m.token = data.token; break;
+      case 'hello': if (m && typeof data.token === 'string' && data.token.length <= 32) m.token = data.token; this._see(data.e); break;
       case 'bye': this._drop(from); break;
       case 'hostover': this.emit('members'); break;
       case 'pong': {
@@ -420,27 +431,33 @@ export class Room extends Emitter {
         break;
       }
       case 'track': {
+        // Le circuit choisi par l'hôte, pour le salon. Il ne lance JAMAIS une course (TECH-008) : seul « start » le fait.
         if (from !== this.hostId || typeof data.id !== 'string') break;
-        this.track = { id: data.id.slice(0, 60), name: String(data.name || '').slice(0, 40), sig: String(data.sig || '').slice(0, 40) };
+        this._see(data.e);
+        if ((data.e | 0) < this.epoch) break;                       // choix d'avant un lancement plus récent : périmé
+        this.track = trackOf(data.id, data.name, data.sig);
         this.emit('track');
-        // Course déjà lancée dans la salle : un arrivant part tout de suite, à son rythme (rien à synchroniser).
-        if (data.started && this.state === 'lobby' && !this.cup) { this.started = true; this._begin(this.track.id, 1500); }
         break;
       }
+      case 'live': this._onLive(from, data); break;
       case 'rules': if (from === this.hostId) { this.rules = isDefaultRules(data.r) ? null : sanitizeRules(data.r); this.emit('rules'); } break;
       case 'tcode': this._onCodeChunk(from, data); break;
-      case 'start':
-        // Un nouveau « Lancer » de l'hôte (même circuit ou autre) remet chacun au départ de ce circuit, à son rythme.
-        if (from !== this.hostId) break;
-        if (typeof data.trackId === 'string') this.track = { id: data.trackId.slice(0, 60), name: String(data.name || (this.track && this.track.name) || '').slice(0, 40), sig: String(data.sig || '').slice(0, 40) };
-        this._begin(String(data.trackId || '').slice(0, 60), Math.max(500, Math.min(15000, +data.startIn || START_DELAY_MS)) - (m ? m.rtt / 2 : 0));
+      case 'start': {
+        // Un nouveau « Lancer » de l'hôte (même circuit ou autre) remet chacun au départ de ce circuit, à son rythme. Une seule fois par lancement.
+        if (from !== this.hostId || typeof data.trackId !== 'string') break;
+        const e = data.e | 0;
+        this._see(e);
+        if (!(e > this.epoch)) break;                               // déjà vu (ou plus ancien) : on ne relance pas
+        this.track = trackOf(data.trackId, data.name || (this.track && this.track.name), data.sig);
+        this._begin(e, this.track, Math.max(500, Math.min(15000, +data.startIn || START_DELAY_MS)) - (m ? m.rtt / 2 : 0));
         break;
+      }
       case 'cup': this._onCup(from, data); break;
       case 'round': this._onRound(from, data); break;
-      case 'rend': if (from === this.hostId) this._onRoundEnd(data.n | 0, data.times && typeof data.times === 'object' ? data.times : {}, +data.nextIn || 0); break;
-      case 'cupstop': if (from === this.hostId) this._cupStopped(); break;
+      case 'rend': if (from === this.hostId && this._sameEpoch(data)) this._onRoundEnd(data.n | 0, data.times && typeof data.times === 'object' ? data.times : {}, +data.nextIn || 0); break;
+      case 'cupstop': if (from === this.hostId && this.cup && this._sameEpoch(data)) this._cupStopped(); break;
       case 'finish': {
-        if (data.rn !== undefined) { this._onCupFinish(from, data); break; }
+        if (data.rn !== undefined) { if (this._sameEpoch(data)) this._onCupFinish(from, data); break; }
         if (this.cup && !this.cup.finished) break;                 // en championnat, seuls les temps de la manche comptent
         const steps = +data.steps | 0;
         if (!m || !(steps > 0 && steps <= MAX_RUN_STEPS)) break;
@@ -484,7 +501,7 @@ export class Room extends Emitter {
 
   _sendTrack(to = null) {
     const t = this.track;
-    this.mesh.sendCtl({ k: 'track', id: t.id, name: t.name, sig: t.sig, started: this.started }, to);
+    this.mesh.sendCtl({ k: 'track', e: this.epoch, id: t.id, name: t.name, sig: t.sig }, to);
     const code = this.trackCodes.get(t.id);
     if (code && t.id.startsWith('u:')) {
       const n = Math.ceil(code.length / CODE_CHUNK);
@@ -519,24 +536,70 @@ export class Room extends Emitter {
   start() {
     if (!this.isHost || !this.track) return false;
     if (this.cup) this.stopCup();       // un départ libre met fin au championnat
-    this.mesh.sendCtl({ k: 'start', trackId: this.track.id, name: this.track.name, sig: this.track.sig, startIn: START_DELAY_MS });
-    this._begin(this.track.id, START_DELAY_MS);
+    const e = this._newEpoch();
+    this.mesh.sendCtl({ k: 'start', e, trackId: this.track.id, name: this.track.name, sig: this.track.sig, startIn: START_DELAY_MS });
+    this._begin(e, this.track, START_DELAY_MS);
     return true;
   }
 
-  _begin(trackId, inMs) {
+  // ---- Époque de lancement (TRANS-05) -----------------------------------------------------------------------------------
+  _see(e) { e = +e; if (Number.isInteger(e) && e > this._seenEpoch && e < 2 ** 31) this._seenEpoch = e; }
+  _newEpoch() { this._seenEpoch = Math.max(this._seenEpoch, this.epoch) + 1; return this._seenEpoch; }
+  _sameEpoch(d) { return (d.e | 0) === this.epoch; }
+
+  // Course libre : je pars sur le lancement e. Un lancement nouveau remet le tableau à zéro (les temps d'un autre circuit ne se comparent pas) ; rejoindre
+  // le même (retour du salon) garde le tableau.
+  _begin(e, track, inMs) {
+    if (e !== this.epoch) {
+      this.results.clear();
+      for (const m of this.members.values()) { m.outbox = []; m.sentLog = []; }       // (les arrivées d'avant ne sont plus à renvoyer)
+    }
+    this.epoch = e; this._see(e);
+    this.launch = { e, kind: 'free', track };
     this.state = 'racing';
-    this.started = true;
-    this.results.clear();                // un nouveau circuit : on repart de zéro (les temps d'avant ne se comparent pas)
-    for (const m of this.members.values()) { m.outbox = []; m.sentLog = []; }         // (les arrivées d'avant ne sont plus à renvoyer)
     this.meta.racing = true; this.meta.ready = false; this.meta.want = null; this.signaling.track(this.meta);
-    this.emit('start', { trackId, track: this.track, startLocal: this.now() + inMs });
+    this.emit('start', { trackId: track.id, track, startLocal: this.now() + inMs, e });
+    if (this.isHost) this._sendLive();
+  }
+
+  // Ma course libre réellement en cours (hôte) : { e, track } tant que je la cours ; null au salon, en championnat, ou sans lancement libre.
+  get freeLive() { return this.isHost && this.state === 'racing' && !this.cupActive && this.launch && this.launch.kind === 'free' ? { e: this.launch.e, track: this.launch.track } : null; }
+
+  _sendLive(to = null) {
+    if (!this.isHost) return;
+    const l = this.freeLive;
+    this.mesh.sendCtl(l ? { k: 'live', e: l.e, on: true, trackId: l.track.id, name: l.track.name, sig: l.track.sig } : { k: 'live', e: this.epoch, on: false }, to);
+  }
+
+  // L'hôte annonce sa course libre en cours (ou sa fin). Un joueur qui ne l'a jamais courue (arrivant, ou coupé pendant le départ) la rejoint, à son rythme ;
+  // un joueur revenu au salon de CE lancement n'y est pas renvoyé (il peut la rejoindre : joinLive).
+  _onLive(from, d) {
+    if (from !== this.hostId) return;
+    const e = d.e | 0;
+    this._see(e);
+    if (e < this.epoch) return;
+    this.hostLive = d.on && typeof d.trackId === 'string' ? { e, track: trackOf(d.trackId, d.name, d.sig) } : null;
+    if (this.hostLive && e > this.epoch && !this.cupActive && (this.state === 'lobby' || (this.launch && this.launch.kind === 'free'))) {
+      this.track = this.hostLive.track;
+      this._begin(e, this.track, LATE_START_MS);
+    }
+    this.emit('members');
+  }
+
+  // Rejoindre la course libre que l'hôte court en ce moment (bouton du salon, après en être revenu).
+  joinLive() {
+    const l = this.hostLive;
+    if (!l || this.cupActive || this.state === 'racing' || l.e < this.epoch) return false;
+    this.track = l.track;
+    this._begin(l.e, l.track, LATE_START_MS);
+    return true;
   }
 
   // Retour au salon : propre à ce joueur seulement (les autres continuent de courir, chacun à son rythme).
   backToLobby() {
     this.state = 'lobby';
     this.meta.racing = false; this.meta.ready = false; this.signaling.track(this.meta);
+    if (this.isHost) this._sendLive();                             // l'hôte au salon : plus de course libre « en cours » pour les arrivants
     this.emit('lobby');
     this.emit('members');
   }
@@ -552,7 +615,7 @@ export class Room extends Emitter {
       if (!st.roster.includes(this.selfId) || st.finishes.has(this.selfId)) return false;
       this._noteFinish(this.selfId, steps);
       this._pendingFinish = { steps, rn: st.n };
-      this.mesh.sendCtl({ k: 'finish', steps, rn: st.n });
+      this.mesh.sendCtl({ k: 'finish', e: this.epoch, steps, rn: st.n });
       this.emit('live'); this._cupTick();
       return true;
     }
@@ -576,11 +639,12 @@ export class Room extends Emitter {
   startCup({ rounds, collisions = true }) {
     if (!this.isHost || !Array.isArray(rounds) || !rounds.length || rounds.length > MAX_ROUNDS) return false;
     if (!rounds.every((r) => r && typeof r.id === 'string' && /^(b-|c:)/.test(r.id))) return false;
+    const e = this._newEpoch();
+    this.epoch = e; this.launch = { e, kind: 'cup', track: null };
     this.cup = new Championship({ id: Math.random().toString(36).slice(2, 8), rounds, collisions });
     this.cupState = null;
-    this.started = true;
     for (const m of this.list) this.cup.setName(m.id, m.name);
-    this.mesh.sendCtl({ k: 'cup', cup: this.cup.toJSON() });
+    this.mesh.sendCtl({ k: 'cup', e, cup: this.cup.toJSON() });
     this.emit('cup');
     this._hostBeginRound(0);
     return true;
@@ -589,13 +653,14 @@ export class Room extends Emitter {
   // L'hôte arrête le championnat : tout le monde retrouve le salon.
   stopCup() {
     if (!this.cup || !this.isHost) return false;
-    this.mesh.sendCtl({ k: 'cupstop' });
+    this.mesh.sendCtl({ k: 'cupstop', e: this.epoch });
     this._cupStopped();
     return true;
   }
 
   _cupStopped() {
     this.cup = null; this.cupState = null;
+    if (this.launch && this.launch.kind === 'cup') this.launch = null;
     this.emit('cupstop');
     this.emit('members');
   }
@@ -612,7 +677,7 @@ export class Room extends Emitter {
     const roster = this._gridOrder(this.cupRoster());
     const names = {};
     for (const id of roster) names[id] = id === this.selfId ? this.meta.name : (this.members.get(id) || {}).name || '?';
-    this.mesh.sendCtl({ k: 'round', n, roster, names, startIn: START_DELAY_MS, prev: n > 0 ? cup.results[n - 1] || null : null });
+    this.mesh.sendCtl({ k: 'round', e: this.epoch, n, roster, names, startIn: START_DELAY_MS, prev: n > 0 ? cup.results[n - 1] || null : null });
     this._beginRound(n, roster, names, START_DELAY_MS);
   }
 
@@ -622,13 +687,12 @@ export class Room extends Emitter {
     const track = cup.rounds[n];
     this.track = { ...track };
     this.cupState = { phase: 'racing', n, roster, finishes: new Map(), t0: this.now() + inMs, firstAt: null, until: 0 };
-    this.started = true;
     const slot = roster.indexOf(this.selfId);
     if (slot < 0) { this.emit('cupwait', { n, total: cup.total }); this.emit('members'); return; }         // arrivé trop tard pour cette manche : il part à la suivante
     this.state = 'racing';
     this.meta.racing = true; this.meta.ready = false; this.meta.want = null; this.signaling.track(this.meta);
     this.emit('start', {
-      trackId: track.id, track: this.track, startLocal: this.now() + inMs,
+      trackId: track.id, track: this.track, startLocal: this.now() + inMs, e: this.epoch,
       cup: { n, total: cup.total, slot, count: roster.length, roster, collisions: cup.collisions },
     });
   }
@@ -636,15 +700,18 @@ export class Room extends Emitter {
   _sendCup(to) {
     const st = this.cupState, now = this.now();
     const state = st ? { phase: st.phase, n: st.n, roster: st.roster, nextIn: st.until ? Math.max(0, st.until - now) : 0, finishes: Object.fromEntries(st.finishes) } : null;
-    this.mesh.sendCtl({ k: 'cup', cup: this.cup.toJSON(), state }, to);
+    this.mesh.sendCtl({ k: 'cup', e: this.epoch, cup: this.cup.toJSON(), state }, to);
   }
 
   _onCup(from, d) {
     if (from !== this.hostId || !d.cup || typeof d.cup !== 'object') return;
     const rounds = Array.isArray(d.cup.rounds) ? d.cup.rounds : [];
     if (!rounds.length || rounds.length > MAX_ROUNDS || !rounds.every((r) => r && typeof r.id === 'string' && /^(b-|c:)/.test(r.id))) return;
+    const e = d.e | 0;
+    this._see(e);
+    if (e < this.epoch) return;                                    // un championnat d'avant un lancement plus récent
+    if (e > this.epoch) { this.epoch = e; this.launch = { e, kind: 'cup', track: null }; this.hostLive = null; this.cupState = null; }
     this.cup = Championship.from(d.cup);
-    this.started = true;
     const s = d.state;
     // Un arrivant en cours de route : il suit la manche (sans y participer) puis part à la suivante. Un joueur qui revient d'une coupure (E16) garde
     // sa manche en cours (il est sur la grille, sa course a continué) : on complète seulement les arrivées qu'il a manquées.
@@ -664,7 +731,7 @@ export class Room extends Emitter {
 
   _onRound(from, d) {
     const cup = this.cup;
-    if (from !== this.hostId || !cup) return;
+    if (from !== this.hostId || !cup || !this._sameEpoch(d)) return;
     const n = d.n | 0;
     // Un résultat manqué (liaison coupée un instant) est rattrapé avec celui que l'hôte joint au départ suivant.
     if (n > cup.played && d.prev && typeof d.prev === 'object' && (d.prev.n | 0) === cup.played) {
@@ -710,7 +777,7 @@ export class Room extends Emitter {
     const times = {};
     for (const id of st.roster) times[id] = st.finishes.has(id) ? st.finishes.get(id) : null;
     const nextIn = cup.played + 1 >= cup.total ? 0 : RESULTS_MS;
-    this.mesh.sendCtl({ k: 'rend', n: st.n, times, nextIn });
+    this.mesh.sendCtl({ k: 'rend', e: this.epoch, n: st.n, times, nextIn });
     this._onRoundEnd(st.n, times, nextIn);
   }
 

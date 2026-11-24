@@ -276,14 +276,22 @@ export const multiMethods = {
       if (start) {
         start.hidden = !host;
         start.disabled = cup ? false : !room.track;
-        start.textContent = cup ? (room.cupActive ? 'Relancer un championnat' : 'Lancer le championnat') : race ? 'Lancer la course' : room.started ? 'Relancer pour tous' : 'Lancer la course libre';
+        start.textContent = cup ? (room.cupActive ? 'Relancer un championnat' : 'Lancer le championnat') : race ? 'Lancer la course' : room.launch && room.launch.kind === 'free' ? 'Relancer pour tous' : 'Lancer la course libre';
       }
       const running = room.cupActive;
       if (!host) {
         modeRow.innerHTML = `<span>Mode</span><b>${esc(MODES[mode] || MODES.race)}</b>`;
         trackRow.textContent = running ? `Championnat en cours : manche ${Math.min(room.cup.total, (room.cupState ? room.cupState.n : room.cup.played) + 1)} sur ${room.cup.total}.`
           : room.track ? `Circuit : ${room.track.name || room.track.id}` : 'L\'hôte choisit le circuit…';
-        note.textContent = (running ? 'Tu rejoins à la prochaine manche.' : room.started && mode === 'free' ? 'Course en cours : rejoins-la.' : 'Clique « Je suis prêt » ; l\'hôte lance la course.') + (room.rules ? ' Règles : ' + describeRules(room.rules).join(' · ') + '.' : '');
+        // « Course en cours » : la course libre que l'hôte court réellement (message live, TECH-008), jamais un souvenir ; on la rejoint d'un clic.
+        const live = !running && room.hostLive && room.state === 'lobby';
+        note.textContent = (running ? 'Tu rejoins à la prochaine manche.' : live ? 'Course en cours : rejoins-la.' : 'Clique « Je suis prêt » ; l\'hôte lance la course.') + (room.rules ? ' Règles : ' + describeRules(room.rules).join(' · ') + '.' : '');
+        if (live) {
+          const join = Object.assign(document.createElement('button'), { type: 'button', className: 'btn primary', textContent: 'Rejoindre la course' });
+          join.dataset.mp = 'join';
+          join.onclick = () => { off(); if (!room.joinLive()) render(); };
+          pick.append(join);
+        }
         drawPreview();
         return;
       }
@@ -452,7 +460,8 @@ export const multiMethods = {
     const s = this.session;
     if (s && s.cup && s.multi && s.multi.room === b.room && b.room.cup) { b.el.innerHTML = this._cupBoardHtml(b.room, s); return; }
     const rows = b.room.ranking();
-    b.el.innerHTML = `<div class="mp-board-h">Salle ${esc(b.room.code)} · ${esc((b.room.track && b.room.track.name) || '')}</div>`
+    const lt = (b.room.launch && b.room.launch.track) || b.room.track;          // le circuit du lancement couru (pas le choix du salon)
+    b.el.innerHTML = `<div class="mp-board-h">Salle ${esc(b.room.code)} · ${esc((lt && lt.name) || '')}</div>`
       + rows.map((r, i) => `<div class="mp-board-r${r.self ? ' me' : ''}"><b>${r.best != null ? i + 1 : '–'}</b><span>${esc(r.name)}</span><i>${r.best != null ? formatTime(r.best / 120) : '--:--.---'}</i><em>${r.n ? '×' + r.n : ''}</em></div>`).join('')
       + '<div class="mp-board-f">R : nouvel essai · Échap : quitter</div>';
   },
