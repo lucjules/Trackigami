@@ -27,7 +27,7 @@ export const multiMethods = {
   },
 
   _bindRoom(room) {
-    room.on('start', ({ trackId, track, startLocal, cup }) => this._startMultiRace(room, track || { id: trackId }, startLocal, cup));
+    room.on('start', ({ trackId, track, startLocal, cup, e }) => this._startMultiRace(room, track || { id: trackId }, startLocal, cup, e));
     room.on('error', (e) => { this.ui.flash(e.message); });
     room.on('members', () => { this._updateBoard(); this._syncDirectory(room); });
     room.on('results', () => this._updateBoard());
@@ -405,7 +405,8 @@ export const multiMethods = {
     render();
   },
 
-  async _startMultiRace(room, spec, startLocal, cup = null) {
+  // e : l'époque du lancement (room.js) ; la course la garde (opts.multi.epoch) : son arrivée ne compte que pour ce lancement (TECH-042).
+  async _startMultiRace(room, spec, startLocal, cup = null, e = room.epoch) {
     let track;
     try { track = await this._resolveMultiTrack(room, spec); }
     catch (e) { this.ui.flash(e.message || 'Circuit impossible à charger.', 4); room.backToLobby(); if (!this.ui.modalOpen) this.multiLobby(room); return; }
@@ -413,7 +414,7 @@ export const multiMethods = {
     this.ui.closeModal();
     this._removeCupPanel();
     // Course libre : chacun court à son rythme, le départ commun n'a de sens que pour le tout premier essai. Championnat : départ commun à chaque manche (grille).
-    this.playTrack(track, { multi: { room, startLocal: Math.min(startLocal, performance.now() + 4000), cup }, trackKey: null, seed: spec.id, difficulty: 1 });
+    this.playTrack(track, { multi: { room, startLocal: Math.min(startLocal, performance.now() + 4000), cup, epoch: e }, trackKey: null, seed: spec.id, difficulty: 1 });
     this._mountBoard(room);
   },
 

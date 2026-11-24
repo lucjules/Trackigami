@@ -400,7 +400,7 @@ export class Room extends Emitter {
       }
       this._flushOutbox(id);                                                    // mes messages fiables qu'il n'a pas reçus (arrivées pendant une coupure)
       const mine = this.results.get(this.selfId);
-      if (mine) this.mesh.sendCtl({ k: 'finish', steps: mine.best, sync: true }, id);   // le nouvel arrivant voit mon meilleur temps
+      if (mine && this.launch && this.launch.kind === 'free') this.mesh.sendCtl({ k: 'finish', e: this.epoch, t: this.launch.track.id, steps: mine.best, sync: true }, id);   // le nouvel arrivant voit mon meilleur temps
     }
     this.emit('members');
   }
@@ -461,11 +461,12 @@ export class Room extends Emitter {
         if (this.cup && !this.cup.finished) break;                 // en championnat, seuls les temps de la manche comptent
         const steps = +data.steps | 0;
         if (!m || !(steps > 0 && steps <= MAX_RUN_STEPS)) break;
-        const r = this.results.get(from) || { best: steps, last: steps, n: 0 };
-        r.best = Math.min(r.best, steps);
-        if (!data.sync) { r.last = steps; r.n++; }
-        this.results.set(from, r);
-        this.emit('results');
+        // TECH-042 : un temps compte pour SON lancement (époque) et SON circuit. Plus ancien : ignoré (pas crédité au circuit suivant). Plus récent (un
+        // arrivant qui reçoit les meilleurs temps avant d'apprendre le lancement en cours) : gardé de côté pour ce lancement.
+        const e = data.e | 0, t = typeof data.t === 'string' ? data.t.slice(0, 60) : '';
+        this._see(e);
+        if (e === this.epoch && this.launch && this.launch.kind === 'free' && t === this.launch.track.id) { this._noteResult(this.results, from, steps, !!data.sync); this.emit('results'); }
+        else if (e > this.epoch) this._noteFuture(e, t, from, steps, !!data.sync);
         break;
       }
       default: break;
@@ -551,9 +552,11 @@ export class Room extends Emitter {
   // le même (retour du salon) garde le tableau.
   _begin(e, track, inMs) {
     if (e !== this.epoch) {
-      this.results.clear();
+      const f = this._future && this._future.get(e);
+      this.results = f && f.t === track.id ? f.results : new Map();                     // les temps déjà reçus pour ce lancement (arrivant : TECH-042)
       for (const m of this.members.values()) { m.outbox = []; m.sentLog = []; }       // (les arrivées d'avant ne sont plus à renvoyer)
     }
+    if (this._future) for (const k of [...this._future.keys()]) if (k <= e) this._future.delete(k);
     this.epoch = e; this._see(e);
     this.launch = { e, kind: 'free', track };
     this.state = 'racing';
@@ -609,8 +612,11 @@ export class Room extends Emitter {
   sendSnapshot(s) { this.mesh.broadcastState(packSnapshot({ ...s, seq: this.seq++ })); }
 
   // Une arrivée (à chaque essai) : annoncée à tous ; chacun garde le meilleur temps de chaque joueur.
-  reportFinish(steps) {
+  // e : l'époque de la course qui vient de finir (RaceSession : opts.multi.epoch). Une course d'un lancement précédent (encore à l'écran pendant le
+  // chargement du suivant) ne compte plus (TECH-042).
+  reportFinish(steps, e = this.epoch) {
     const st = this.cupState;
+    if (e !== this.epoch) return false;
     if (this.cup && st && st.phase === 'racing') {                    // championnat : un seul temps par manche, annoncé avec son numéro
       if (!st.roster.includes(this.selfId) || st.finishes.has(this.selfId)) return false;
       this._noteFinish(this.selfId, steps);
@@ -619,12 +625,32 @@ export class Room extends Emitter {
       this.emit('live'); this._cupTick();
       return true;
     }
-    const r = this.results.get(this.selfId) || { best: steps, last: steps, n: 0 };
-    r.best = Math.min(r.best, steps); r.last = steps; r.n++;
-    this.results.set(this.selfId, r);
-    this._sendReliable({ k: 'finish', steps });                       // renvoyée après une coupure à qui ne l'a pas reçue (TECH-046)
+    if (!this.launch || this.launch.kind !== 'free') return false;
+    const r = this._noteResult(this.results, this.selfId, steps, false);
+    this._sendReliable({ k: 'finish', e, t: this.launch.track.id, steps });      // renvoyée après une coupure à qui ne l'a pas reçue (TECH-046)
     this.emit('results');
     return r.best === steps;      // vrai : nouveau meilleur temps personnel dans cette salle
+  }
+
+  // Meilleur temps, dernier temps et nombre d'essais d'un joueur (un temps synchronisé, « sync », ne compte pas comme un essai).
+  _noteResult(map, id, steps, sync) {
+    const r = map.get(id) || { best: steps, last: steps, n: 0 };
+    r.best = Math.min(r.best, steps);
+    if (!sync) { r.last = steps; r.n++; }
+    map.set(id, r);
+    return r;
+  }
+
+  // Temps reçus pour un lancement que je ne connais pas encore : gardés pour lui (deux lancements au plus, 8 joueurs chacun).
+  _noteFuture(e, t, id, steps, sync) {
+    this._future = this._future || new Map();
+    let f = this._future.get(e);
+    if (!f) {
+      f = { t, results: new Map() }; this._future.set(e, f);
+      while (this._future.size > 2) this._future.delete(Math.min(...this._future.keys()));
+    }
+    if (f.t !== t || (!f.results.has(id) && f.results.size >= MAX_PLAYERS)) return;
+    this._noteResult(f.results, id, steps, sync);
   }
 
   // ---- Championnat (manches) -----------------------------------------------------------------------------------------

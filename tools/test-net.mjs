@@ -381,9 +381,12 @@ await test('chaque joueur garde son meilleur temps et son nombre d\'essais ; un 
   const env = fakeRoomEnv();
   const room = await Room.create({ name: 'H', code: 'ABC234', makeSignaling: ({ code, selfId }) => env.make(selfId, code), makeMesh: env.makeMesh, now: () => 5 });
   room.members.set('p', { id: 'p', name: 'Pierre', link: 'open', rtt: 0 }); room.members.set('q', { id: 'q', name: 'Quentin', link: 'open', rtt: 0 });
-  room._onMessage('p', 'ctl', { k: 'finish', steps: 4800 }); room._onMessage('p', 'ctl', { k: 'finish', steps: 4700 }); room._onMessage('p', 'ctl', { k: 'finish', steps: 4900 });
-  room._onMessage('q', 'ctl', { k: 'finish', steps: 5000, sync: true });
-  room._onMessage('q', 'ctl', { k: 'finish', steps: -4 }); room._onMessage('q', 'ctl', { k: 'finish', steps: 1e9 }); room._onMessage('q', 'ctl', { k: 'finish', steps: 'x' });
+  room.selectTrack({ id: 'b-1-xyz', name: 'T' }); room.start();
+  const e = room.epoch, t = 'b-1-xyz';                                          // (NET_VER 5 : un temps porte son lancement et son circuit)
+  room._onMessage('p', 'ctl', { k: 'finish', e, t, steps: 4800 }); room._onMessage('p', 'ctl', { k: 'finish', e, t, steps: 4700 }); room._onMessage('p', 'ctl', { k: 'finish', e, t, steps: 4900 });
+  room._onMessage('q', 'ctl', { k: 'finish', e, t, steps: 5000, sync: true });
+  room._onMessage('q', 'ctl', { k: 'finish', e, t, steps: -4 }); room._onMessage('q', 'ctl', { k: 'finish', e, t, steps: 1e9 }); room._onMessage('q', 'ctl', { k: 'finish', e, t, steps: 'x' });
+  room._onMessage('p', 'ctl', { k: 'finish', e: e - 1, t, steps: 1000 }); room._onMessage('p', 'ctl', { k: 'finish', e, t: 'b-autre', steps: 1000 });     // autre lancement, autre circuit : ignorés
   const p = room.results.get('p'); assert.deepEqual([p.best, p.last, p.n], [4700, 4900, 3]);
   const q = room.results.get('q'); assert.deepEqual([q.best, q.n], [5000, 0]);
   assert.deepEqual(room.ranking().map((r) => r.name), ['Pierre', 'Quentin', 'H']);
@@ -393,7 +396,7 @@ await test('chaque joueur garde son meilleur temps et son nombre d\'essais ; un 
   // un nouvel arrivant reçoit mon meilleur temps
   room.members.set('z', { id: 'z', name: 'Zoé', link: 'connecting', rtt: 0 });
   room._onLink('z', 'open');
-  assert.deepEqual(room.mesh.ctl.at(-1), [{ k: 'finish', steps: 4600, sync: true }, 'z']);
+  assert.deepEqual(room.mesh.ctl.at(-1), [{ k: 'finish', e, t, steps: 4600, sync: true }, 'z']);
   room.leave();
 });
 await test('retour au salon : propre à ce joueur, les autres ne sont pas interrompus', async () => {
@@ -644,6 +647,8 @@ await test('coupure de la signalisation (TECH-046, 5 s) : liens WebRTC ouverts, 
   const ana = await w.host('ana'), bea = await w.join('bea');
   await w.clock.advance(2000);
   precondition(w.linked(ana, bea), 'liaison ouverte');
+  ana.selectTrack({ id: 'b-un-a1', name: 'Un' }); ana.start(); await w.clock.advance(500);      // une course libre est lancée
+  precondition(bea.state === 'racing', 'Bea court');
   const pcA = ana.mesh.links.get('bea').pc, pcB = bea.mesh.links.get('ana').pc;
   let snaps = 0; ana.on('snapshot', (id) => { if (id === 'bea') snaps++; });
   const send = racing(w, bea);
@@ -666,6 +671,8 @@ await test('vraie coupure (TECH-046 ; signalisation et liens, 12 s) : liaison re
   const ana = await w.host('ana'), bea = await w.join('bea');
   await w.clock.advance(2000);
   precondition(w.linked(ana, bea), 'liaison ouverte');
+  ana.selectTrack({ id: 'b-un-a1', name: 'Un' }); ana.start(); await w.clock.advance(500);      // une course libre est lancée
+  precondition(bea.state === 'racing', 'Bea court');
   w.rt.cut('bea', 12000); w.rtc.cut('bea');              // vraie coupure du réseau de Bea (signalisation ET pair à pair), 12 s
   w.clock.setTimeout(() => w.rtc.heal('bea'), 12000);
   await w.clock.advance(4000);
@@ -798,7 +805,7 @@ await test('banc : aucun jeton dans les journaux (connexion, renouvellement, exp
 }));
 
 console.log('État de la salle : lancements (phase 16 ; défauts reproduits avant correction)');
-await bugConnu('TECH-042', async () => {
+await test('arrivée d\'une course précédente pendant le chargement de la suivante (TECH-042) : non créditée au nouveau circuit', async () => {
   const env = fakeRoomEnv();
   const host = await Room.create({ name: 'H', code: 'ABC234', makeSignaling: ({ code, selfId }) => env.make(selfId, code), makeMesh: env.makeMesh, now: () => 5 });
   try {
@@ -807,8 +814,9 @@ await bugConnu('TECH-042', async () => {
     host.selectTrack({ id: 'b-deux-b2', name: 'Deux' }); host.start();          // relance sur un autre circuit
     host.reportFinish(4000, e1);                                                  // l'ancienne course (sur Un) finit pendant le chargement de Deux
     assert.equal(host.results.has(host.selfId), false, 'l\'arrivée de l\'ancien lancement n\'est pas créditée au nouveau');
+    assert.equal(host.reportFinish(4100), true, 'la course du lancement en cours, elle, compte');
   } finally { host.leave(); }
-}, 'arrivée d\'une course précédente pendant le chargement de la suivante : non créditée au nouveau circuit');
+});
 await bugConnu('TECH-049', async () => {
   if (!globalThis.localStorage) {
     const mem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), key: (i) => [...m.keys()][i] ?? null, get length() { return m.size; } }; };

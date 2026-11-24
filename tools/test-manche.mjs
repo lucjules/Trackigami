@@ -617,7 +617,7 @@ await test('course libre (TECH-008) : un arrivant rejoint la course que l\'hôte
   assert.equal(f.state, 'lobby', 'un arrivant n\'est pas lancé quand l\'hôte est au salon');
   } finally { env.end(); }
 });
-await bugConnu('TECH-042', async () => {
+await test('arrivée envoyée pendant un changement de circuit (TECH-042) : créditée à son lancement, pas au suivant', async () => {
   const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
   env.open();
   a.selectTrack(T1); a.start();
@@ -629,8 +629,8 @@ await bugConnu('TECH-042', async () => {
   c._onMessage = hear; for (const m of held) hear(...m);
   assert.equal(c.results.has('b'), false, 'chez Cléo : le temps fait sur Un n\'est pas crédité à Deux');
   } finally { env.end(); }
-}, 'arrivée envoyée pendant un changement de circuit : créditée à son lancement, pas au suivant');
-await bugConnu('TECH-042', async () => {
+});
+await test('un arrivant garde les meilleurs temps synchronisés (TECH-042) quand l\'état de l\'hôte arrive après eux', async () => {
   const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
   env.open();
   a.selectTrack(T1); a.start();
@@ -640,7 +640,7 @@ await bugConnu('TECH-042', async () => {
   a._onLink('d', 'open'); c._onLink('d', 'open'); for (const r of [b, c, a]) d._onLink(r.selfId, 'open');
   assert.equal(d.results.get('b') && d.results.get('b').best, 4000, 'l\'arrivant garde le temps synchronisé, quel que soit l\'ordre des messages');
   } finally { env.end(); }
-}, 'un arrivant garde les meilleurs temps synchronisés quand l\'état de l\'hôte arrive après eux');
+});
 
 await bugConnu('TECH-047', async () => {
   const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
