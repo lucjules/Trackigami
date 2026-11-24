@@ -13,11 +13,12 @@ import { PHYS_VER } from '../js/version.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const repo = readStamp(readFileSync(new URL('../supabase/functions/submit-score/index.ts', import.meta.url), 'utf8'));
+const recoveryRepo = readStamp(readFileSync(new URL('../supabase/functions/account-recovery/index.ts', import.meta.url), 'utf8'));
 const other = repo.stamp === '0000000000000000' ? '1111111111111111' : '0000000000000000';
 
 // Faux projet : `states` est la suite des réponses de submit-score aux GET successifs (la dernière se répète). Chaque état : { status, physVer, build }.
 const GOOD = { status: 200, physVer: PHYS_VER, build: repo.stamp };
-async function fake(states, { iceStatus = 401, closed = false } = {}) {
+async function fake(states, { iceStatus = 401, closed = false, recovery = { build: recoveryRepo.stamp } } = {}) {
   const hits = { submit: 0 };
   const server = http.createServer((req, res) => {
     const json = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
@@ -26,6 +27,7 @@ async function fake(states, { iceStatus = 401, closed = false } = {}) {
       if (st.status !== 200) return json(st.status, { error: 'x' });
       return json(200, { ok: true, service: 'submit-score', physVer: st.physVer, rate: { max: 8, windowS: 60, globalMax: 600, anonMax: 400 }, actions: ['submit', 'publish-track'], ...(st.build ? { build: st.build } : {}) });
     }
+    if (req.url.startsWith('/functions/v1/account-recovery')) return recovery === 404 ? json(404, { error: 'absente' }) : json(200, { ok: true, service: 'account-recovery', actions: ['recover'], ...(recovery.build ? { build: recovery.build } : {}) });
     if (req.url.startsWith('/functions/v1/ice')) return json(iceStatus, { error: 'jeton requis' });
     if (req.url.startsWith('/rest/v1/')) return json(200, { definitions: { tracks: { properties: { author_verified: {} } } }, paths: {} });
     return json(404, {});
@@ -75,6 +77,12 @@ await test('ice déployée sans authentification (réponse 200 à la clé publiq
   const r = await barrier([GOOD], { iceStatus: 200 }, { ESSAIS: '1', PAUSE: '0' });
   assert.equal(r.code, 1, r.out); assert.match(r.out, /inconnu\s+ice/);
 });
+await test('account-recovery PÉRIMÉE ou NON déployée alors que submit-score est conforme : la barrière ne passe PAS (le site n\'est pas publié avec un « J\'ai perdu mon mot de passe » qui échouerait)', async () => {
+  const stale = await barrier([GOOD], { recovery: { build: recoveryRepo.stamp === '0000000000000000' ? '1111111111111111' : '0000000000000000' } }, { ESSAIS: '2', PAUSE: '0' });
+  assert.equal(stale.code, 1, stale.out); assert.match(stale.out, /ÉCART\s+account-recovery : empreinte déployée/); assert.match(stale.out, /Barrière non franchie/);
+  const none = await barrier([GOOD], { recovery: 404 }, { ESSAIS: '2', PAUSE: '0' });
+  assert.equal(none.code, 1, none.out); assert.match(none.out, /ÉCART\s+account-recovery : fonction NON déployée/);
+});
 await test('RÉESSAIE : la fonction n\'est conforme qu\'au 3e constat (le temps que le déploiement se propage) : franchie au 3e essai', async () => {
   const r = await barrier([{ ...GOOD, build: other }, { ...GOOD, build: undefined }, GOOD], undefined, { ESSAIS: '5', PAUSE: '0' });
   assert.equal(r.code, 0, r.out); assert.match(r.out, /essai 1\/5 : la production n'est pas/); assert.match(r.out, /essai 2\/5/); assert.match(r.out, /Barrière franchie \(essai 3\/5\)/); assert.equal(r.hits, 3);
@@ -99,9 +107,9 @@ test('ORDRE : tests → construire → serveur → site (chaque tâche attend la
 });
 test('dans « serveur » : jeton vérifié, ice puis submit-score déployées, PUIS la barrière (dans cet ordre) ; déploiement jamais à blanc ; la barrière est tools/barriere.sh', () => {
   const s = job('serveur'), at = (re) => { const i = s.search(re); assert.ok(i >= 0, String(re)); return i; };
-  const list = at(/functions list/), ice = at(/functions deploy ice /), sub = at(/functions deploy submit-score /), bar = at(/bash tools\/barriere\.sh/);
-  assert.ok(list < ice && ice < sub && sub < bar, 'liste (jeton) < ice < submit-score < barrière');
-  assert.equal((s.match(/DRY_RUN != 'oui'/g) || []).length, 3, 'ice, submit-score et barrière sont sautés à blanc');
+  const list = at(/functions list/), ice = at(/functions deploy ice /), sub = at(/functions deploy submit-score /), rec = at(/functions deploy account-recovery /), bar = at(/bash tools\/barriere\.sh/);
+  assert.ok(list < ice && ice < sub && sub < rec && rec < bar, 'liste (jeton) < ice < submit-score < account-recovery < barrière');
+  assert.equal((s.match(/DRY_RUN != 'oui'/g) || []).length, 4, 'ice, submit-score, account-recovery et barrière sont sautés à blanc');
   assert.doesNotMatch(wf, /--no-verify-jwt/, 'la vérification du jeton des appelants reste active');
 });
 test('protections : environnement « production » (approbation possible), droits GitHub minimaux, CLI épinglée, aucun secret affiché', () => {

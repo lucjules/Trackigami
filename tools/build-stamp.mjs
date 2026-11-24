@@ -1,4 +1,4 @@
-// Empreinte de build de la fonction serveur « submit-score » (supabase/functions/submit-score/index.ts).
+// Empreinte de build des fonctions serveur « submit-score » et « account-recovery » (supabase/functions/<nom>/index.ts).
 //
 // Pourquoi : `check-deployed` ne comparait que `physVer`. Or plusieurs corrections du serveur (temps non numérique confirmé, roulis d'obstacle absent de la clé de classement, phase 4)
 // n'ont PAS changé PHYS_VER : une fonction périmée répondait « ok » alors qu'elle gardait la faille. L'empreinte est un SHA-256 (16 premiers caractères hexadécimaux) du contenu du
@@ -26,11 +26,12 @@ export function readStamp(file) {
 }
 
 // Verdict de la comparaison entre l'empreinte annoncée par la fonction EN LIGNE (deployed : chaîne, ou absente) et celle du fichier du dépôt (repo : résultat de readStamp, ou null).
-// kind : 'ok' | 'ÉCART' | 'inconnu' (mêmes mots que tools/check-deployed.mjs).
-export function judgeBuild(deployed, repo) {
-  if (!repo) return { kind: 'inconnu', msg: 'le fichier du dépôt (submit-score/index.ts) ne porte pas d\'empreinte : relancer `npm run build:function`' };
+// kind : 'ok' | 'ÉCART' | 'inconnu' (mêmes mots que tools/check-deployed.mjs). name : la fonction jugée (messages).
+export function judgeBuild(deployed, repo, name = 'submit-score') {
+  const file = `supabase/functions/${name}/index.ts`;
+  if (!repo) return { kind: 'inconnu', msg: `le fichier du dépôt (${name}/index.ts) ne porte pas d'empreinte : relancer \`npm run build:function\`` };
   if (!repo.valid) return { kind: 'ÉCART', msg: `l'empreinte du fichier du dépôt (${repo.stamp}) ne correspond pas à son contenu : fichier modifié à la main ? relancer \`npm run build:function\`` };
-  if (typeof deployed !== 'string' || !/^[0-9a-f]{16}$/.test(deployed)) return { kind: 'ÉCART', msg: `la fonction déployée n'annonce pas d'empreinte de build : c'est une version d'AVANT ce contrôle (même si physVer est le bon, elle peut garder des corrections manquantes) → REDÉPLOYER supabase/functions/submit-score/index.ts (dépôt : ${repo.stamp})` };
-  if (deployed !== repo.stamp) return { kind: 'ÉCART', msg: `empreinte déployée ${deployed}, dépôt ${repo.stamp} → le code en ligne n'est pas celui du dépôt : REDÉPLOYER supabase/functions/submit-score/index.ts` };
+  if (typeof deployed !== 'string' || !/^[0-9a-f]{16}$/.test(deployed)) return { kind: 'ÉCART', msg: `la fonction déployée n'annonce pas d'empreinte de build : c'est une version d'AVANT ce contrôle (même si le reste est conforme, elle peut garder des corrections manquantes) → REDÉPLOYER ${file} (dépôt : ${repo.stamp})` };
+  if (deployed !== repo.stamp) return { kind: 'ÉCART', msg: `empreinte déployée ${deployed}, dépôt ${repo.stamp} → le code en ligne n'est pas celui du dépôt : REDÉPLOYER ${file}` };
   return { kind: 'ok', msg: `empreinte de build identique (${deployed}) : la fonction en ligne est exactement le fichier du dépôt` };
 }

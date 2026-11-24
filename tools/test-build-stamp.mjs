@@ -13,6 +13,7 @@ import { PHYS_VER } from '../js/version.js';
 const INDEX = new URL('../supabase/functions/submit-score/index.ts', import.meta.url);
 const repoFile = readFileSync(INDEX, 'utf8');
 const repo = readStamp(repoFile);
+const recoveryRepo = readStamp(readFileSync(new URL('../supabase/functions/account-recovery/index.ts', import.meta.url), 'utf8'));
 
 console.log('Fichier généré');
 test('submit-score/index.ts porte une empreinte VALIDE (elle correspond au contenu qui la précède) : sinon `npm run build:function` n\'a pas été relancé ou le fichier a été modifié à la main', () => {
@@ -20,7 +21,11 @@ test('submit-score/index.ts porte une empreinte VALIDE (elle correspond au conte
   assert.ok(repo.valid, 'empreinte ' + repo.stamp + ' ≠ contenu');
   assert.match(repo.stamp, /^[0-9a-f]{16}$/);
 });
-test('ice/index.ts n\'est PAS marqué (seul submit-score publie son état)', () => {
+test('account-recovery/index.ts porte une empreinte VALIDE, différente de celle de submit-score', () => {
+  assert.ok(recoveryRepo && recoveryRepo.valid, 'empreinte absente ou invalide : relancer `npm run build:function`');
+  assert.notEqual(recoveryRepo.stamp, repo.stamp);
+});
+test('ice/index.ts n\'est PAS marqué (seuls submit-score et account-recovery publient leur état)', () => {
   assert.equal(readStamp(readFileSync(new URL('../supabase/functions/ice/index.ts', import.meta.url), 'utf8')), null);
 });
 
@@ -75,13 +80,17 @@ test('une valeur qui n\'a pas la forme d\'une empreinte n\'est jamais publiée (
 
 console.log('Le script check-deployed lancé contre un faux serveur');
 // Faux projet Supabase local : le GET d'état de submit-score annonce la physique du dépôt et l'empreinte voulue ; ice exige un jeton ; la racine REST expose le schéma attendu.
-async function runCheck(buildField) {
+async function runCheck(buildField, recovery = { build: recoveryRepo.stamp }) {
   const server = http.createServer((req, res) => {
     const json = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
     if (req.url.startsWith('/functions/v1/submit-score')) {
       const body = { ok: true, service: 'submit-score', physVer: PHYS_VER, rate: { max: 8, windowS: 60, globalMax: 600, anonMax: 400 }, actions: ['submit', 'publish-track'] };
       if (buildField !== undefined) body.build = buildField;
       return json(200, body);
+    }
+    if (req.url.startsWith('/functions/v1/account-recovery')) {
+      if (recovery === 404) return json(404, { error: 'absente' });
+      return json(200, { ok: true, service: 'account-recovery', actions: ['recover'], ...(recovery.build ? { build: recovery.build } : {}) });
     }
     if (req.url.startsWith('/functions/v1/ice')) return json(401, { error: 'jeton requis' });
     if (req.url.startsWith('/rest/v1/')) return json(200, { definitions: { tracks: { properties: { author_verified: {} } } }, paths: {} });
@@ -114,6 +123,22 @@ await test('autre code déployé (empreinte différente, même physVer) : ÉCART
   const o = await runCheck(other);
   assert.match(line(o, /empreinte/), new RegExp(`^ÉCART\\s+submit-score : empreinte déployée ${other}, dépôt ${repo.stamp}`), o.stdout);
   assert.equal(o.code, 1);
+});
+
+await test('account-recovery : empreinte identique = « ok » ; PÉRIMÉE, d\'avant le contrôle, ou NON déployée = ÉCART qui dit quoi faire, code de sortie 1', async () => {
+  const ok = await runCheck(repo.stamp);
+  assert.match(line(ok, /^ok\s+account-recovery : empreinte de build identique/), /^ok/, ok.stdout);
+  assert.equal(ok.code, 0, ok.stdout);
+  const other = recoveryRepo.stamp === '0000000000000000' ? '1111111111111111' : '0000000000000000';
+  const stale = await runCheck(repo.stamp, { build: other });
+  assert.match(line(stale, /account-recovery : empreinte déployée/), new RegExp(`^ÉCART\\s+account-recovery : empreinte déployée ${other}, dépôt ${recoveryRepo.stamp}.*account-recovery/`), stale.stdout);
+  assert.equal(stale.code, 1);
+  const old = await runCheck(repo.stamp, {});
+  assert.match(line(old, /account-recovery : la fonction déployée/), /^ÉCART/, old.stdout);
+  assert.equal(old.code, 1);
+  const none = await runCheck(repo.stamp, 404);
+  assert.match(line(none, /account-recovery/), /^ÉCART\s+account-recovery : fonction NON déployée/, none.stdout);
+  assert.equal(none.code, 1);
 });
 
 finish('Tous les tests de l\'empreinte de build passent.');

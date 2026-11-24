@@ -1,5 +1,5 @@
 name: déploiement
-# Mise en production dans le BON ORDRE : tests → construction de la fonction → [approbation] → déploiement de `submit-score` et `ice` → contrôle d'empreinte (barrière) → publication du site.
+# Mise en production dans le BON ORDRE : tests → construction des fonctions → [approbation] → déploiement de `ice`, `submit-score` et `account-recovery` → contrôle d'empreinte (barrière) → publication du site.
 # Pourquoi : le serveur ne vérifie les temps qu'avec la physique qui l'a produit (PHYS_VER, égalité stricte) ; tant que la fonction n'est pas à jour, TOUS les temps du nouveau site sont refusés
 # (supabase/MIGRATIONS.md, docs/ARCHITECTURE.md « Changer la physique »). Ici le site n'est publié QU'APRÈS la fonction, et seulement si `tools/check-deployed.mjs` constate qu'elle est en ligne.
 # Procédure pour le propriétaire (secrets, environnement protégé, réglage de GitHub Pages, vérifications au premier déploiement, retour arrière) : docs/DEPLOIEMENT.md.
@@ -57,7 +57,7 @@ jobs:
         with: { node-version: 22 }
       - run: npm run build:function
       - name: les fichiers du dépôt sont déjà ceux de la construction
-        run: git diff --exit-code supabase/functions/submit-score/index.ts supabase/functions/ice/index.ts
+        run: git diff --exit-code supabase/functions/submit-score/index.ts supabase/functions/ice/index.ts supabase/functions/account-recovery/index.ts
       - name: empreinte de build de submit-score (celle que la barrière attendra)
         id: stamp
         run: |
@@ -120,6 +120,12 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: npx --yes "$SUPABASE_CLI" functions deploy submit-score --project-ref "${{ steps.cible.outputs.ref }}" --use-api
+      # « account-recovery » (récupération d'un compte par code de secours, COMPLETE-003) : appelée SANS session, protégée par son code et ses limites ; elle exige l'étape SQL 21 (à la main, AVANT ce déploiement).
+      - name: déployer « account-recovery »
+        if: env.DRY_RUN != 'oui'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: npx --yes "$SUPABASE_CLI" functions deploy account-recovery --project-ref "${{ steps.cible.outputs.ref }}" --use-api
       # BARRIÈRE : la fonction EN LIGNE doit être exactement le fichier du dépôt (version de physique ET empreinte de build) ; le site n'est publié que si elle l'est.
       # tools/barriere.sh : jusqu'à 8 essais espacés de 15 s (une fonction qui vient d'être déployée met quelques secondes à répondre). Un écart (code 1) ET un point non vérifié (code 2 : rien n'est prouvé) échouent.
       - name: 'barrière : la fonction en ligne est celle du dépôt (tools/check-deployed.mjs)'

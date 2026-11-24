@@ -15,10 +15,10 @@ import {
 import { toCloud, fromCloud, mergeSaves, sameData, pickSynced, fitCloud, isSyncKey } from './cloudsave.js';
 import { reloadProfile } from './profile.js';
 import { CONFIG } from './config.js';
+import { checkPseudo, checkPassword } from './accountRules.js';
 
 // Domaine technique des adresses (doit être le même que dans supabase/etape4-comptes.sql).
 const ACCOUNT_EMAIL_DOMAIN = 'accounts.copytrack.invalid';
-const FORBIDDEN_NAMES = ['player', 'pilote'];
 const MAX_CLOUD_BYTES = 6_000_000;     // au-delà, les fantômes enregistrés (puis les commandes des plus anciens records) ne partent pas dans le cloud (cloudsave.fitCloud)
 
 // Messages quand la copie locale du compte ne tient pas dans le stockage de l'appareil (le cloud, lui, garde tout).
@@ -38,27 +38,8 @@ const fitNote = (fit) => (fit.level === 'partial'
 
 export const accountEmail = (name) => String(name).trim().toLowerCase() + '@' + ACCOUNT_EMAIL_DOMAIN;
 
-// Pseudo : jamais « Player » / « Pilote ». Invité : 2 à 20 caractères lisibles ; compte : 3 à 20 lettres, chiffres ou _.
-export function checkPseudo(raw, { account = false } = {}) {
-  const name = String(raw ?? '').trim().replace(/\s+/g, ' ');
-  if (!name) return { ok: false, error: 'Choisis un pseudo.' };
-  if (FORBIDDEN_NAMES.includes(name.toLowerCase())) return { ok: false, error: '« Player » et « Pilote » sont réservés : choisis ton propre pseudo.' };
-  if (account) {
-    if (!/^[A-Za-z0-9_]{3,20}$/.test(name)) return { ok: false, error: 'Le pseudo d’un compte fait 3 à 20 caractères : lettres, chiffres ou _ (sans espace ni accent).' };
-  } else if (!/^[\p{L}\p{N} _.'-]{2,20}$/u.test(name)) {
-    return { ok: false, error: 'Le pseudo fait 2 à 20 caractères (lettres, chiffres, espace, _ . - \').' };
-  }
-  return { ok: true, name };
-}
-
-// Mot de passe : 8 caractères au moins ; 72 octets au plus (bcrypt ignore la suite).
-export function checkPassword(pw, pseudo = '') {
-  const s = String(pw ?? '');
-  if (s.length < 8) return { ok: false, error: 'Le mot de passe doit faire au moins 8 caractères.' };
-  if (new TextEncoder().encode(s).length > 72) return { ok: false, error: 'Le mot de passe est trop long (72 octets au plus).' };
-  if (pseudo && s.toLowerCase() === String(pseudo).toLowerCase()) return { ok: false, error: 'Le mot de passe ne doit pas être ton pseudo.' };
-  return { ok: true };
-}
+// Pseudo et mot de passe : js/accountRules.js (pur, partagé avec la fonction serveur account-recovery) ; réexportés ici pour les écrans et les tests.
+export { checkPseudo, checkPassword };
 
 class Account {
   constructor() {
