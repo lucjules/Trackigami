@@ -9,6 +9,7 @@ import { PRIO } from '../hudMessages.js';
 import { DEFAULT_LOADOUT } from '../cosmetics.js';
 import { softCollide, presentState, PROTECT_S } from '../net/collide.js';
 
+const LATE_MS = 1000, LATE_COUNTDOWN_MS = 3000;     // TECH-089 (d) : moins de 1 s avant le départ prévu quand la course est prête : décompte complet de 3 s
 const GONE_MS = 1000;        // après le retrait de sa voiture (retour au salon), les paquets d'avant d'un joueur sont ignorés pendant 1 s (ceux qui étaient en route)
 export const netMethods = {
   // ---- Multijoueur : voitures des autres joueurs (RemoteCar), alimentées par les paquets WebRTC ----------------------------
@@ -115,6 +116,14 @@ export const netMethods = {
       this._netAcc -= DT;
       if (++this.netTick % SEND_EVERY_STEPS === 0) this._sendNet();
     }
+  },
+
+  // Heure locale du GO (départ commun). TECH-089 (d) : un circuit plus long à charger que le délai de départ donnait un GO immédiat, sans décompte ; si la course est
+  // prête moins de LATE_MS avant le départ prévu (ou après), le décompte recommence : 3, 2, 1, GO (ce joueur part un peu après les autres ; son chrono est le sien).
+  // Fixée à la première image du décompte.
+  _startAt() {
+    if (this._goAt == null) { const now = performance.now(), at = this.multi.startLocal; this._goAt = at - now < LATE_MS ? now + LATE_COUNTDOWN_MS : at; }
+    return this._goAt;
   },
 
   // Avancement sur le circuit (0 à 1) : sur la ligne centrale du circuit quand il en a une, sinon d'après les checkpoints franchis.

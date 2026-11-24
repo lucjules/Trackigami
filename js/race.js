@@ -508,7 +508,7 @@ export class RaceSession {
       let k;
       if (this.multi) {
         // Départ commun : « GO » tombe à l'instant convenu avec l'hôte (3, 2, 1 à une seconde d'intervalle).
-        const left = (this.multi.startLocal - performance.now()) / 1000;
+        const left = (this._startAt() - performance.now()) / 1000;
         k = left > 3 ? this.countShown : left > 2 ? 0 : left > 1 ? 1 : left > 0 ? 2 : 3;
       } else {
         this.countT += dt;

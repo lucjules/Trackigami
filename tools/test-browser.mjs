@@ -2267,7 +2267,7 @@ try {
 
   // Phase 18 (TECH-089 b, d ; TECH-009, TECH-043) : deux onglets, vrai WebRTC. Pendant le décompte, chacun voit l'autre sur la grille ; un circuit plus long à charger que le
   // délai de départ donne quand même un décompte ; revenu au salon, un joueur disparaît de la piste de l'autre.
-  await test('multijoueur (TECH-089 b) : grille visible pendant le décompte', async () => {
+  await test('multijoueur (TECH-089 b, d ; TECH-043) : grille visible pendant le décompte ; départ avec décompte après un chargement trop long ; retour au salon : la voiture disparaît', async () => {
     const B = await hook(await ctx.newPage());
     try {
       await app(() => history.replaceState(null, '', '?net=local'));
@@ -2294,6 +2294,24 @@ try {
       await app(() => window.copytrack.session._finish(31.5));
       await waitApp(() => /Course terminée/.test((document.getElementById('mp-cup') || {}).textContent || ''), null, 20000);
       await B.waitForFunction(() => /Course terminée/.test((document.getElementById('mp-cup') || {}).textContent || ''), null, { timeout: 20000 });
+      // (d) revanche : chez Bea, le circuit met 6 s à « charger » (plus que les 4 s du délai de départ) : elle a quand même un décompte (3, 2, 1, GO)
+      await B.evaluate(() => { const A = window.copytrack, orig = A._resolveMultiTrack; A._resolveMultiTrack = async function (...args) { await new Promise((r) => setTimeout(r, 6000)); return orig.apply(this, args); }; });
+      const e0 = await B.evaluate(() => window.copytrack.room.epoch);
+      await B.evaluate(() => document.querySelector('#mp-cup [data-act="want"]').click());
+      await waitApp(() => /Revanche demandée : 1 \/ 2/.test(document.getElementById('mp-cup').textContent), null, 10000);
+      await page.evaluate(() => document.querySelector('#mp-cup [data-act="rematch"]').click());
+      await B.waitForFunction((e) => window.copytrack.room.epoch > e && window.copytrack.session && window.copytrack.session.multi && window.copytrack.session.multi.epoch > e, e0, { timeout: 20000 });
+      const st = await B.evaluate(() => ({ state: window.copytrack.session.state, left: window.copytrack.session.multi.startLocal - performance.now() }));
+      assert.ok(st.left < 0, 'précondition : le départ prévu est déjà passé quand la course de Bea est prête (' + Math.round(st.left) + ' ms)');
+      assert.equal(st.state, 'countdown', 'chargement trop long : la course commence par un décompte, pas par un GO immédiat');
+      await B.waitForTimeout(1500);
+      assert.equal(await B.evaluate(() => window.copytrack.session.state), 'countdown', 'le décompte dure (3, 2, 1)');
+      await B.waitForFunction(() => window.copytrack.session.state === 'racing', null, { timeout: 10000 });
+      // TECH-043 : Bea revient au salon : chez Ana, sa voiture disparaît de la piste
+      await waitApp(() => window.copytrack.session && [...window.copytrack.session.remote.values()].some((rc) => rc.group.visible), null, 20000);
+      await B.evaluate(() => window.copytrack._leaveRaceToLobby(window.copytrack.room));
+      await waitApp(() => window.copytrack.session && ![...window.copytrack.session.remote.values()].some((rc) => rc.group.visible), null, 5000);
+      await waitApp(() => window.copytrack.session.remote.size === 0, null, 10000);
     } finally {
       await app(() => { if (window.copytrack.room) window.copytrack.room.leave(); window.copytrack.ui.closeModal(); if (window.copytrack.mode === 'race') window.copytrack.quitRace(); window.copytrack.showMenu('menu'); }).catch(() => {});
       await B.close();
