@@ -680,7 +680,7 @@ await bugConnu('TECH-048', async () => {
   } finally { env.end(); }
 }, 'migration d\'hôte après une clôture manquée : classements identiques chez tous');
 
-await bugConnu('TECH-084', async () => {
+await test('arrêt puis nouveau championnat (TECH-084) : aucune arrivée rejouée', async () => {
   const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
   env.open(); a.startCup({ rounds: ROUNDS });
   const send = b.mesh.sendCtl; b.mesh.sendCtl = () => {};          // Ben finit la manche 0 pendant que sa liaison avec l'hôte est coupée
@@ -690,8 +690,20 @@ await bugConnu('TECH-084', async () => {
   a.stopCup(); a.startCup({ rounds: ROUNDS });                     // arrêt, puis nouveau championnat
   b._onLink('a', 'open');                                          // la liaison se rouvre : Ben renvoie ce qu'il avait en attente
   assert.equal(a.cupState.finishes.has('b'), false, 'aucune arrivée de l\'ancien championnat rejouée dans le nouveau');
+  // Témoin : dans le MÊME championnat, une arrivée faite pendant une coupure est bien renvoyée à la réouverture.
+  b.mesh.sendCtl = () => {}; b.reportFinish(3500); b.mesh.sendCtl = send;
+  precondition(!a.cupState.finishes.has('b'), 'l\'hôte n\'a pas encore l\'arrivée');
+  b._onLink('a', 'open');
+  assert.equal(a.cupState.finishes.get('b'), 3500, 'renvoyée pour sa manche');
+  // « Relancer un championnat » sans l'arrêter (revanche) : l'arrivée en attente ne passe pas non plus dans le nouveau.
+  a.startCup({ rounds: ROUNDS });
+  b.mesh.sendCtl = () => {}; precondition(b.reportFinish(3700) === true, 'Ben finit, liaison coupée'); b.mesh.sendCtl = send;
+  a.startCup({ rounds: ROUNDS });
+  precondition(b.cupState.phase === 'racing' && b.cupState.n === 0, 'Ben est sur la manche 0 du nouveau championnat');
+  b._onLink('a', 'open');
+  assert.equal(a.cupState.finishes.has('b'), false, 'rien de rejoué après « Relancer »');
   } finally { env.end(); }
-}, 'arrêt puis nouveau championnat : aucune arrivée rejouée');
+});
 
 await bugConnu('TECH-085', async () => {
   const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];

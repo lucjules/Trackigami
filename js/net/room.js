@@ -72,7 +72,7 @@ export class Room extends Emitter {
     super();
     this.code = code; this.selfId = selfId; this.now = now; this.token = token; this.schedule = schedule;
     this.reconnecting = false;          // signalisation perdue : on retente de rejoindre la salle (resume.js)
-    this._pendingFinish = null;         // championnat : mon arrivée de la manche en cours, renvoyée à l'hôte si une liaison se rouvre
+    this._pendingFinish = null;         // championnat : mon arrivée { e, rn, steps } de la manche en cours, renvoyée à l'hôte si une liaison se rouvre (TECH-084 : de CE championnat seulement)
     this.makeSignaling = makeSignaling; this.makeMesh = makeMesh; this.getIce = getIce;
     // car : apparence de ma voiture (garage), want : ce que je demande après une course ('rematch' : une revanche), annoncés par la présence.
     this.meta = { name: String(name).slice(0, 20), host: false, ready: false, racing: false, v: PHYS_VER, net: NET_VER, t: Date.now(), car: cleanCarMeta(car), want: null };
@@ -391,7 +391,7 @@ export class Room extends Emitter {
     if (status === 'open') {
       this.mesh.sendCtl({ k: 'hello', token: this.token, e: this._seenEpoch }, id);
       // Mon arrivée de la manche, annoncée pendant une coupure : renvoyée à l'hôte (il l'ignore s'il l'a déjà).
-      if (this._pendingFinish && id === this.hostId && this.cupState && this.cupState.n === this._pendingFinish.rn) this.mesh.sendCtl({ k: 'finish', e: this.epoch, steps: this._pendingFinish.steps, rn: this._pendingFinish.rn }, id);
+      if (id === this.hostId) this._resendFinish(id);
       if (this.isHost && this.rules) this.mesh.sendCtl({ k: 'rules', r: this.rules }, id);        // les règles d'abord : elles s'appliquent au circuit qui suit
       if (this.isHost && this.cup && !this.cup.finished) this._sendCup(id);       // en championnat, un arrivant reçoit le championnat, pas le circuit seul
       else if (this.isHost) {
@@ -558,6 +558,7 @@ export class Room extends Emitter {
     }
     if (this._future) for (const k of [...this._future.keys()]) if (k <= e) this._future.delete(k);
     this.epoch = e; this._see(e);
+    this._pendingFinish = null;
     this.launch = { e, kind: 'free', track };
     this.state = 'racing';
     this.meta.racing = true; this.meta.ready = false; this.meta.want = null; this.signaling.track(this.meta);
@@ -620,7 +621,7 @@ export class Room extends Emitter {
     if (this.cup && st && st.phase === 'racing') {                    // championnat : un seul temps par manche, annoncé avec son numéro
       if (!st.roster.includes(this.selfId) || st.finishes.has(this.selfId)) return false;
       this._noteFinish(this.selfId, steps);
-      this._pendingFinish = { steps, rn: st.n };
+      this._pendingFinish = { e: this.epoch, rn: st.n, steps };
       this.mesh.sendCtl({ k: 'finish', e: this.epoch, steps, rn: st.n });
       this.emit('live'); this._cupTick();
       return true;
@@ -630,6 +631,16 @@ export class Room extends Emitter {
     this._sendReliable({ k: 'finish', e, t: this.launch.track.id, steps });      // renvoyée après une coupure à qui ne l'a pas reçue (TECH-046)
     this.emit('results');
     return r.best === steps;      // vrai : nouveau meilleur temps personnel dans cette salle
+  }
+
+  // Mon arrivée de la manche en cours, annoncée pendant une coupure : renvoyée à l'hôte (il l'ignore s'il l'a déjà). TECH-084 : seulement pour le championnat
+  // et la manche où elle a été faite ; jamais rejouée dans un autre.
+  _resendFinish(to) {
+    const p = this._pendingFinish, st = this.cupState;
+    if (!p) return;
+    if (!this.cup || p.e !== this.epoch || (st && st.n !== p.rn)) { this._pendingFinish = null; return; }       // autre championnat, autre manche : périmée
+    if (!st || st.phase !== 'racing') return;
+    this.mesh.sendCtl({ k: 'finish', e: p.e, steps: p.steps, rn: p.rn }, to);
   }
 
   // Meilleur temps, dernier temps et nombre d'essais d'un joueur (un temps synchronisé, « sync », ne compte pas comme un essai).
@@ -667,6 +678,7 @@ export class Room extends Emitter {
     if (!rounds.every((r) => r && typeof r.id === 'string' && /^(b-|c:)/.test(r.id))) return false;
     const e = this._newEpoch();
     this.epoch = e; this.launch = { e, kind: 'cup', track: null };
+    this._pendingFinish = null;
     this.cup = new Championship({ id: Math.random().toString(36).slice(2, 8), rounds, collisions });
     this.cupState = null;
     for (const m of this.list) this.cup.setName(m.id, m.name);
@@ -686,6 +698,7 @@ export class Room extends Emitter {
 
   _cupStopped() {
     this.cup = null; this.cupState = null;
+    this._pendingFinish = null;                                   // (TECH-084) l'arrivée en attente meurt avec son championnat
     if (this.launch && this.launch.kind === 'cup') this.launch = null;
     this.emit('cupstop');
     this.emit('members');
@@ -736,7 +749,7 @@ export class Room extends Emitter {
     const e = d.e | 0;
     this._see(e);
     if (e < this.epoch) return;                                    // un championnat d'avant un lancement plus récent
-    if (e > this.epoch) { this.epoch = e; this.launch = { e, kind: 'cup', track: null }; this.hostLive = null; this.cupState = null; }
+    if (e > this.epoch) { this.epoch = e; this.launch = { e, kind: 'cup', track: null }; this.hostLive = null; this.cupState = null; this._pendingFinish = null; }
     this.cup = Championship.from(d.cup);
     const s = d.state;
     // Un arrivant en cours de route : il suit la manche (sans y participer) puis part à la suivante. Un joueur qui revient d'une coupure (E16) garde
