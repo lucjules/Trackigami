@@ -2139,9 +2139,23 @@ try {
       assert.ok(prog > 0.002 && prog < 0.5, 'avancement de Bea vu par Ana : ' + prog);
       assert.ok((await text(page, '#mp-board')).includes('Bea'), 'classement en direct');
       await shot('13-manche-en-direct');
-      // Reconnexion (E16) : coupure simulée de 3 s chez Bea ; sa place est gardée, elle revient seule, les liaisons se refont, la manche continue.
+      // TECH-046 : coupure de la SIGNALISATION seule (3 s) chez Bea : la vraie liaison WebRTC reste ouverte des deux côtés (même connexion), sa voiture
+      // n'est pas figée chez Ana (ses paquets continuent d'arriver), personne n'est « absent » ; Bea retrouve sa signalisation seule.
       const beaId = await B.evaluate(() => window.copytrack.room.selfId);
+      await app((id) => { const r = window.copytrack.room; window.__beaPc = r.mesh.links.get(id).pc; window.__snaps = 0; r.on('snapshot', (from) => { if (from === id) window.__snaps++; }); }, beaId);
       await B.evaluate(() => window.copytrack.room.signaling.simulateCut(3000));
+      assert.equal(await B.evaluate(() => window.copytrack.room.reconnecting && !window.copytrack.room.closed), true, 'Bea se sait sans signalisation');
+      const s0 = await app(() => window.__snaps);
+      await page.waitForTimeout(1500);
+      const during = await app((id) => ({ snaps: window.__snaps, link: (window.copytrack.room.members.get(id) || {}).link, samePc: window.copytrack.room.mesh.links.get(id) && window.copytrack.room.mesh.links.get(id).pc === window.__beaPc }), beaId);
+      assert.ok(during.snaps > s0 + 5, `la voiture de Bea n'est pas figée pendant la coupure de signalisation (${during.snaps - s0} paquets en 1,5 s)`);
+      assert.equal(during.link, 'open', 'chez Ana, la liaison avec Bea reste ouverte'); assert.equal(during.samePc, true, 'même connexion WebRTC');
+      assert.equal(await B.evaluate(() => window.copytrack.room.reconnecting && window.copytrack.room.list.every((m) => m.self || m.link === 'open')), true, 'chez Bea aussi, pendant la coupure');
+      await B.waitForFunction(() => !window.copytrack.room.reconnecting, null, { timeout: 30000 });
+      assert.equal(await app((id) => window.copytrack.room.mesh.links.get(id).pc === window.__beaPc && window.copytrack.room.members.get(id).link === 'open', beaId), true, 'signalisation retrouvée, liaison jamais refaite');
+      // Reconnexion (E16) : VRAIE coupure de 3 s chez Bea (signalisation ET connexions WebRTC fermées) ; sa place est gardée, elle revient seule, les liaisons
+      // se refont, la manche continue.
+      await B.evaluate(() => { const r = window.copytrack.room; r.signaling.simulateCut(3000); for (const l of r.mesh.links.values()) { try { l.pc.close(); } catch { /* déjà fermée */ } } });
       await waitApp((id) => (window.copytrack.room.members.get(id) || {}).link === 'away', beaId, 10000);
       assert.equal(await B.evaluate(() => window.copytrack.room.reconnecting && !window.copytrack.room.closed), true, 'Bea se sait coupée, la salle reste ouverte chez elle');
       assert.equal(await B.evaluate(() => window.copytrack.session && window.copytrack.session.state), 'racing', 'sa course continue');
