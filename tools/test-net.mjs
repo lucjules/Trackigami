@@ -13,7 +13,7 @@ import { RESUME_MS, RETRY_MS } from '../js/net/resume.js';
 import { RaceLogic } from '../js/raceLogic.js';
 import { Track } from '../js/track.js';
 import { PHYS_VER, NET_VER } from '../js/version.js';
-import { test, finish, precondition, bugConnu } from './harness.mjs';
+import { test, finish, precondition } from './harness.mjs';
 import { VirtualClock, FakeRealtime, FakeRTCNet } from './fake-realtime.mjs';
 import { PublicDirectory, LOBBY_CODE } from '../js/net/directory.js';
 import { createIceLoader } from '../js/net/ice.js';
@@ -817,7 +817,7 @@ await test('arrivée d\'une course précédente pendant le chargement de la suiv
     assert.equal(host.reportFinish(4100), true, 'la course du lancement en cours, elle, compte');
   } finally { host.leave(); }
 });
-await bugConnu('TECH-049', async () => {
+await test('deux lancements rapprochés (TECH-049, circuit lent puis intégré) : la dernière demande gagne ; un lancement remplacé n\'est pas lancé', async () => {
   if (!globalThis.localStorage) {
     const mem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), key: (i) => [...m.keys()][i] ?? null, get length() { return m.size; } }; };
     globalThis.localStorage = mem(); globalThis.sessionStorage = mem();
@@ -833,6 +833,14 @@ await bugConnu('TECH-049', async () => {
   const room = { rules: null, closed: false, backToLobby() {} };
   await Promise.all([multiMethods._startMultiRace.call(app, room, { id: 'c:lent' }, 0), multiMethods._startMultiRace.call(app, room, { id: 'b-vite' }, 0)]);
   assert.deepEqual(played, ['b-vite'], 'seule la dernière demande est lancée : ' + played.join(', '));
-}, 'deux lancements rapprochés (circuit lent puis intégré) : la dernière demande gagne');
+  // Le lancement de la salle a changé pendant le chargement (une relance de l'hôte) : la course de l'ancien n'est pas lancée.
+  const room2 = { rules: null, closed: false, epoch: 3, backToLobby() {} };
+  const p3 = multiMethods._startMultiRace.call(app, room2, { id: 'b-trois' }, 0, null, 3);
+  room2.epoch = 4;
+  await p3;
+  assert.deepEqual(played, ['b-vite'], 'lancement remplacé pendant le chargement : rien n\'est lancé');
+  await multiMethods._startMultiRace.call(app, room2, { id: 'b-quatre' }, 0, null, 4);
+  assert.deepEqual(played, ['b-vite', 'b-quatre']);
+});
 
 await finish('Tous les tests réseau passent.');

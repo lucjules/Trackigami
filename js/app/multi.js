@@ -406,10 +406,15 @@ export const multiMethods = {
   },
 
   // e : l'époque du lancement (room.js) ; la course la garde (opts.multi.epoch) : son arrivée ne compte que pour ce lancement (TECH-042).
+  // TECH-049 (TRANS-08) : deux départs rapprochés (un circuit lent à télécharger, puis un intégré) : seul le DERNIER demandé est lancé ; un chargement
+  // qui finit après une demande plus récente, ou après un autre lancement de la salle, est abandonné (son échec aussi : il ne ramène personne au salon).
   async _startMultiRace(room, spec, startLocal, cup = null, e = room.epoch) {
+    const req = this._mpReq = (this._mpReq || 0) + 1;
+    const stale = () => req !== this._mpReq || room.closed || room.epoch !== e;
     let track;
     try { track = await this._resolveMultiTrack(room, spec); }
-    catch (e) { this.ui.flash(e.message || 'Circuit impossible à charger.', 4); room.backToLobby(); if (!this.ui.modalOpen) this.multiLobby(room); return; }
+    catch (err) { if (stale()) return; this.ui.flash(err.message || 'Circuit impossible à charger.', 4); room.backToLobby(); if (!this.ui.modalOpen) this.multiLobby(room); return; }
+    if (stale()) return;
     track = applyRules(track, room.rules);          // règles de la partie choisies par l'hôte (rules.js)
     this.ui.closeModal();
     this._removeCupPanel();
