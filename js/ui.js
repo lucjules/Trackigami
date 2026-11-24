@@ -40,6 +40,8 @@ class Hud {
     e.split.textContent = '';
     e.center.textContent = '';
     e.msg.classList.remove('on');
+    clearTimeout(this._msgT);
+    this.gate.offer('', 0, 0, 0);      // (TECH-070) le verrou de priorité repart à zéro : un message prioritaire d'avant le redémarrage ne fait pas refuser la consigne de la leçon au GO
     this.time(0);
     const inp = session.app.input;
     session.app.refreshKeyHints();      // (pause, arrivée, barre du replay : les touches citées suivent les liaisons actuelles, TECH-020)
