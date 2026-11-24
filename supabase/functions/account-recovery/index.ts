@@ -316,18 +316,21 @@ function createRecoveryHandler({ supabaseUrl = "", serviceKey = "", allowedOrigi
         "Retry-After": "10"
       });
     }
-    try {
-      const r = await rpc("recovery_finish", {
-        p_uid: uid,
-        p_nonce: nonce
-      });
-      if (!r.ok) throw new Upstream("recovery_finish " + r.status);
-      const out = await r.json();
-      if (!out || out.consumed !== true) log("account-recovery : ALERTE : le code n\u2019a pas pu \xEAtre marqu\xE9 consomm\xE9 (r\xE9servation expir\xE9e ?) : \xE0 v\xE9rifier dans recovery_log");
-      else if (out.sessions === -1) log("account-recovery : ALERTE : les sessions n\u2019ont pas pu \xEAtre r\xE9voqu\xE9es c\xF4t\xE9 base : \xE0 v\xE9rifier (auth.sessions)");
-    } catch (e) {
-      log("account-recovery : ALERTE : recovery_finish a \xE9chou\xE9 :", e && e.message);
+    let out = null;
+    for (let attempt = 0; attempt < 2 && !out; attempt++) {
+      try {
+        const r = await rpc("recovery_finish", {
+          p_uid: uid,
+          p_nonce: nonce
+        });
+        if (!r.ok) throw new Upstream("recovery_finish " + r.status);
+        out = await r.json();
+      } catch (e) {
+        if (attempt === 1) log("account-recovery : ALERTE : recovery_finish a \xE9chou\xE9 (le code n\u2019est pas marqu\xE9 consomm\xE9) :", e && e.message);
+      }
     }
+    if (out && out.consumed !== true) log("account-recovery : ALERTE : le code n\u2019a pas pu \xEAtre marqu\xE9 consomm\xE9 (r\xE9servation expir\xE9e ?) : \xE0 v\xE9rifier dans recovery_log");
+    else if (out && out.sessions === -1) log("account-recovery : ALERTE : les sessions n\u2019ont pas pu \xEAtre r\xE9voqu\xE9es c\xF4t\xE9 base : \xE0 v\xE9rifier (auth.sessions)");
     return json(200, {
       ok: true
     });
@@ -378,4 +381,4 @@ Deno.serve(createRecoveryHandler({
   serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   allowedOrigin: Deno.env.get("ALLOWED_ORIGIN") ?? "*"
 }));
-globalThis.__COPYTRACK_BUILD__ = "566404abcf254be2";
+globalThis.__COPYTRACK_BUILD__ = "7db52ceae5a9e685";

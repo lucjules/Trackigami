@@ -140,15 +140,19 @@ export function createRecoveryHandler({
       if (put.status === 422 || ec === 'weak_password') return json(400, { error: 'Mot de passe refusé par le serveur (trop faible ou déjà divulgué) : choisis-en un autre.', code: WEAK_MESSAGE_CODE });
       return json(503, { error: 'Service momentanément indisponible : réessaie dans un instant.', code: 'unavailable' }, { 'Retry-After': '10' });
     }
-    // Le mot de passe est changé : le code est consommé et les sessions révoquées. Si cette étape échoue, le mot de passe est tout de même le nouveau (le joueur peut se connecter) ;
-    // on le journalise (sans rien de secret) pour que l'exploitant sache qu'un code ou des sessions sont à revoir.
-    try {
-      const r = await rpc('recovery_finish', { p_uid: uid, p_nonce: nonce });
-      if (!r.ok) throw new Upstream('recovery_finish ' + r.status);
-      const out = await r.json();
-      if (!out || out.consumed !== true) log('account-recovery : ALERTE : le code n’a pas pu être marqué consommé (réservation expirée ?) : à vérifier dans recovery_log');
-      else if (out.sessions === -1) log('account-recovery : ALERTE : les sessions n’ont pas pu être révoquées côté base : à vérifier (auth.sessions)');
-    } catch (e) { log('account-recovery : ALERTE : recovery_finish a échoué :', e && e.message); }
+    // Le mot de passe est changé : le code est consommé et les sessions révoquées. Un échec passager ne doit pas laisser le code redevenir valable au bout des deux minutes de réservation :
+    // l'appel est donc tenté deux fois. Si les deux échouent, le mot de passe est tout de même le nouveau (le joueur peut se connecter) et on le journalise (sans rien de secret) pour que
+    // l'exploitant sache qu'un code ou des sessions sont à revoir.
+    let out = null;
+    for (let attempt = 0; attempt < 2 && !out; attempt++) {
+      try {
+        const r = await rpc('recovery_finish', { p_uid: uid, p_nonce: nonce });
+        if (!r.ok) throw new Upstream('recovery_finish ' + r.status);
+        out = await r.json();
+      } catch (e) { if (attempt === 1) log('account-recovery : ALERTE : recovery_finish a échoué (le code n’est pas marqué consommé) :', e && e.message); }
+    }
+    if (out && out.consumed !== true) log('account-recovery : ALERTE : le code n’a pas pu être marqué consommé (réservation expirée ?) : à vérifier dans recovery_log');
+    else if (out && out.sessions === -1) log('account-recovery : ALERTE : les sessions n’ont pas pu être révoquées côté base : à vérifier (auth.sessions)');
     return json(200, { ok: true });
   }
 

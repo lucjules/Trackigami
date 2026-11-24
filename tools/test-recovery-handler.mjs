@@ -8,6 +8,7 @@
 // Le faux serveur reproduit la SÉMANTIQUE de supabase/etape21-recuperation.sql (réservation à jeton, verrou à 5 échecs…) ; la VRAIE base est éprouvée par tools/test-etape21-sql.sh.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+const { ReadableStream } = globalThis;
 import { test, finish } from './harness.mjs';
 import { readFileSync } from 'node:fs';
 import { readStamp } from './build-stamp.mjs';
@@ -23,7 +24,7 @@ const URL_ = 'https://x.supabase.co', KEY = 'cle-de-service-secrete';
 function clock() { let t = 1_000_000; return { now: () => t, sleep: async (ms) => { t += ms; }, tick: (ms) => { t += ms; } }; }
 
 // ---- Faux Supabase : Auth (API d'administration) + recovery_begin / finish / abort, avec la logique de l'étape 21 -------------------------------------------------------
-function fakeSupabase(clk, { users = [ALICE, BOB], noCodeFor = [], rpcStatus = 200, authPut = 'ok', rateOverride = null, finishFails = false, finishSessions = 2 } = {}) {
+function fakeSupabase(clk, { users = [ALICE, BOB], noCodeFor = [], rpcStatus = 200, authPut = 'ok', rateOverride = null, finishFails = false, finishFailsOnce = false, finishSessions = 2 } = {}) {
   const st = { calls: [], rpcArgs: [], authBodies: [], passwords: new Map(), codes: new Map(), pending: new Map(), fails: new Map(), locks: new Map(), ipFails: new Map(), sessionsRevoked: [], logins: 0 };
   for (const u of users) if (!noCodeFor.includes(u.id)) st.codes.set(u.id, sha(u.code));
   const byName = (n) => users.find((u) => u.name.toLowerCase() === n.toLowerCase());
@@ -56,6 +57,7 @@ function fakeSupabase(clk, { users = [ALICE, BOB], noCodeFor = [], rpcStatus = 2
     if (u.includes('/rest/v1/rpc/recovery_finish')) {
       st.rpcArgs.push({ fn: 'finish', ...body });
       if (finishFails) return ok({ message: 'boom' }, 500);
+      if (finishFailsOnce && !st.finishTried) { st.finishTried = true; return ok({ message: 'boom' }, 500); }
       const p = st.pending.get(body.p_uid);
       if (!p || p.nonce !== body.p_nonce) return ok({ consumed: false });
       st.codes.delete(body.p_uid); st.pending.delete(body.p_uid); st.sessionsRevoked.push(body.p_uid);
@@ -303,6 +305,14 @@ test('M4 : une panne de recovery_finish est journalisée comme ALERTE, le mot de
   assert.equal(m.sb.st.passwords.get(ALICE.id), PW);
 });
 
+test('M3 : un échec PASSAGER de recovery_finish est réessayé : le code est bien consommé (il ne redevient pas valable), aucune alerte', async () => {
+  const m = make({}, { finishFailsOnce: true });
+  assert.equal((await ask(m, attempt(ALICE))).status, 200);
+  assert.ok(!m.sb.st.codes.has(ALICE.id), 'code consommé malgré le premier échec');
+  assert.equal(m.sb.st.rpcArgs.filter((a) => a.fn === 'finish').length, 2);
+  assert.ok(!m.logs.some((l) => /ALERTE/.test(l)));
+  assert.equal((await ask(m, attempt(ALICE, { password: 'un-autre-mdp-4567' }))).status, 400, 'et le rejeu est refusé');
+});
 test('M4 : sessions non révoquées côté base (-1) : alerte journalisée', async () => {
   const m = make({}, { finishSessions: -1 });
   assert.equal((await ask(m, attempt(ALICE))).status, 200);
