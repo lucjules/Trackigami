@@ -2139,9 +2139,23 @@ try {
       assert.ok(prog > 0.002 && prog < 0.5, 'avancement de Bea vu par Ana : ' + prog);
       assert.ok((await text(page, '#mp-board')).includes('Bea'), 'classement en direct');
       await shot('13-manche-en-direct');
-      // Reconnexion (E16) : coupure simulée de 3 s chez Bea ; sa place est gardée, elle revient seule, les liaisons se refont, la manche continue.
+      // TECH-046 : coupure de la SIGNALISATION seule (3 s) chez Bea : la vraie liaison WebRTC reste ouverte des deux côtés (même connexion), sa voiture
+      // n'est pas figée chez Ana (ses paquets continuent d'arriver), personne n'est « absent » ; Bea retrouve sa signalisation seule.
       const beaId = await B.evaluate(() => window.copytrack.room.selfId);
+      await app((id) => { const r = window.copytrack.room; window.__beaPc = r.mesh.links.get(id).pc; window.__snaps = 0; r.on('snapshot', (from) => { if (from === id) window.__snaps++; }); }, beaId);
       await B.evaluate(() => window.copytrack.room.signaling.simulateCut(3000));
+      assert.equal(await B.evaluate(() => window.copytrack.room.reconnecting && !window.copytrack.room.closed), true, 'Bea se sait sans signalisation');
+      const s0 = await app(() => window.__snaps);
+      await page.waitForTimeout(1500);
+      const during = await app((id) => ({ snaps: window.__snaps, link: (window.copytrack.room.members.get(id) || {}).link, samePc: window.copytrack.room.mesh.links.get(id) && window.copytrack.room.mesh.links.get(id).pc === window.__beaPc }), beaId);
+      assert.ok(during.snaps > s0 + 5, `la voiture de Bea n'est pas figée pendant la coupure de signalisation (${during.snaps - s0} paquets en 1,5 s)`);
+      assert.equal(during.link, 'open', 'chez Ana, la liaison avec Bea reste ouverte'); assert.equal(during.samePc, true, 'même connexion WebRTC');
+      assert.equal(await B.evaluate(() => window.copytrack.room.reconnecting && window.copytrack.room.list.every((m) => m.self || m.link === 'open')), true, 'chez Bea aussi, pendant la coupure');
+      await B.waitForFunction(() => !window.copytrack.room.reconnecting, null, { timeout: 30000 });
+      assert.equal(await app((id) => window.copytrack.room.mesh.links.get(id).pc === window.__beaPc && window.copytrack.room.members.get(id).link === 'open', beaId), true, 'signalisation retrouvée, liaison jamais refaite');
+      // Reconnexion (E16) : VRAIE coupure de 3 s chez Bea (signalisation ET connexions WebRTC fermées) ; sa place est gardée, elle revient seule, les liaisons
+      // se refont, la manche continue.
+      await B.evaluate(() => { const r = window.copytrack.room; r.signaling.simulateCut(3000); for (const l of r.mesh.links.values()) { try { l.pc.close(); } catch { /* déjà fermée */ } } });
       await waitApp((id) => (window.copytrack.room.members.get(id) || {}).link === 'away', beaId, 10000);
       assert.equal(await B.evaluate(() => window.copytrack.room.reconnecting && !window.copytrack.room.closed), true, 'Bea se sait coupée, la salle reste ouverte chez elle');
       assert.equal(await B.evaluate(() => window.copytrack.session && window.copytrack.session.state), 'racing', 'sa course continue');
@@ -2220,6 +2234,152 @@ try {
     } finally {
       await app(() => { if (window.copytrack.room) window.copytrack.room.leave(); window.copytrack.ui.closeModal(); if (window.copytrack.mode === 'race') window.copytrack.quitRace(); window.copytrack.showMenu('menu'); }).catch(() => {});
       await B.close();
+    }
+  });
+
+  // Phase 16 (NET_VER 5) : TROIS onglets, vrai WebRTC, signalisation locale. TECH-008 : le choix d'un circuit ne lance jamais personne (après un retour au salon,
+  // après « Arrêter le championnat », après une course unique) ; GAME-008 : un arrivant pendant une « Course » voit le circuit et « manche en cours ».
+  await test('multijoueur (TECH-008, GAME-008) : trois onglets : choisir un circuit ne lance personne ; un arrivant pendant une « Course » voit le circuit et la manche en cours', async () => {
+    const B = await hook(await ctx.newPage());
+    let C = null;
+    const join = async (p, name, code) => {
+      await p.goto(`http://127.0.0.1:${PORT}/?net=local#salle=${code}`, { waitUntil: 'load' });
+      if (await p.locator('#wl-name').isVisible()) { await p.locator('#wl-name').fill(name); await p.locator('#wl-submit').evaluate((el) => el.click()); }
+      await p.waitForFunction(() => window.copytrack && window.copytrack.room && window.copytrack.room.list.some((m) => !m.self && m.link === 'open'), null, { timeout: 30000 });
+    };
+    const mode = (p) => p.evaluate(() => [window.copytrack.mode, window.copytrack.room.state]);
+    const builtin = (i) => app((k) => ({ id: window.copytrack.builtins[k].key, name: window.copytrack.builtins[k].def.name }), i);
+    const toLobby = (p) => p.evaluate(() => { const A = window.copytrack; if (A.mode === 'race') A._leaveRaceToLobby(A.room); });
+    try {
+      await app(() => history.replaceState(null, '', '?net=local'));
+      await app(() => window.copytrack.multiMenu());
+      await page.evaluate(() => [...document.querySelectorAll('#modal-actions button')].find((b) => /Créer une salle/.test(b.textContent)).click());
+      await waitApp(() => document.querySelector('.mp-code b'));
+      const code = (await page.evaluate(() => document.querySelector('.mp-code b').textContent)).trim();
+      await join(B, 'Bea', code);
+      await waitApp(() => window.copytrack.room.list.some((m) => !m.self && m.link === 'open'), null, 20000);
+      const [t0, t1, t2] = [await builtin(0), await builtin(1), await builtin(2)];
+      // 1. Course libre, puis tout le monde revient au salon ; l'hôte change deux fois de circuit.
+      await app((t) => { const r = window.copytrack.room; r.setMode('free'); r.selectTrack(t); r.start(); }, t0);
+      await B.waitForFunction(() => window.copytrack.mode === 'race', null, { timeout: 30000 });
+      await waitApp(() => window.copytrack.mode === 'race', null, 30000);
+      await toLobby(B); await toLobby(page);
+      await B.waitForFunction(() => window.copytrack.mode === 'menu' && window.copytrack.room.state === 'lobby', null, { timeout: 15000 });
+      await app((t) => window.copytrack.room.selectTrack(t), t1);
+      await app((t) => window.copytrack.room.selectTrack(t), t2);
+      await page.waitForTimeout(3000);
+      assert.deepEqual(await mode(B), ['menu', 'lobby'], 'après un retour au salon, choisir un circuit ne lance pas l\'invitée');
+      assert.equal(await B.evaluate(() => (window.copytrack.room.track || {}).name), t2.name, 'elle voit le circuit choisi');
+      // 2. Championnat arrêté, puis l'hôte choisit un circuit.
+      await app((ts) => window.copytrack.room.startCup({ rounds: ts }), [t0, t1]);
+      await B.waitForFunction(() => window.copytrack.mode === 'race' && window.copytrack.session && window.copytrack.session.cup, null, { timeout: 30000 });
+      await app(() => window.copytrack.room.stopCup());
+      await B.waitForFunction(() => window.copytrack.mode === 'menu' && !window.copytrack.room.cup, null, { timeout: 15000 });
+      await toLobby(page);
+      await app((t) => window.copytrack.room.selectTrack(t), t0);
+      await page.waitForTimeout(3000);
+      assert.deepEqual(await mode(B), ['menu', 'lobby'], 'après « Arrêter le championnat », choisir un circuit ne lance pas l\'invitée');
+      // 3. « Course » (une manche) ; une troisième joueuse arrive pendant la course.
+      await app((t) => { const r = window.copytrack.room; r.setMode('race'); r.startCup({ rounds: [t] }); }, t1);
+      await B.waitForFunction(() => window.copytrack.mode === 'race' && window.copytrack.session && window.copytrack.session.cup, null, { timeout: 30000 });
+      await waitApp(() => window.copytrack.mode === 'race' && window.copytrack.session && window.copytrack.session.cup, null, 30000);
+      C = await hook(await ctx.newPage());
+      await join(C, 'Cyd', code);
+      await C.waitForFunction(() => document.querySelector('.mp-lobby') && /Manche en cours : tu joueras la suivante\./.test(document.querySelector('.mp-lobby').textContent), null, { timeout: 20000 });
+      const lobbyC = await C.evaluate(() => document.querySelector('.mp-lobby').textContent);
+      assert.ok(lobbyC.includes(t1.name), 'l\'arrivante voit le circuit de la course en cours : ' + lobbyC.replace(/\s+/g, ' ').slice(0, 300));
+      assert.deepEqual(await mode(C), ['menu', 'lobby'], 'elle n\'est pas lancée dans une course commencée');
+      await shot('16-arrivant-course-en-cours');
+      // Fin de la course (Bea puis Ana), retour au salon ; l'hôte choisit un autre circuit : personne n'est lancé.
+      await B.evaluate(() => window.copytrack.session._finish(30.0));
+      await app(() => window.copytrack.session._finish(31.0));
+      await waitApp(() => /Course terminée/.test((document.getElementById('mp-cup') || {}).textContent || ''), null, 20000);
+      for (const p of [B, page]) await p.evaluate(() => { const b = document.querySelector('#mp-cup [data-act="lobby"]'); if (b) b.click(); });
+      await B.waitForFunction(() => window.copytrack.mode === 'menu', null, { timeout: 15000 });
+      await waitApp(() => window.copytrack.mode === 'menu', null, 15000);
+      assert.ok((await C.evaluate(() => document.querySelector('.mp-lobby') ? document.querySelector('.mp-lobby').textContent : '')).includes(t1.name), 'après la course, l\'arrivante voit toujours le circuit');
+      await app((t) => window.copytrack.room.selectTrack(t), t2);
+      await page.waitForTimeout(3000);
+      assert.deepEqual(await mode(B), ['menu', 'lobby'], 'après une course unique terminée, choisir un circuit ne lance pas Bea');
+      assert.deepEqual(await mode(C), ['menu', 'lobby'], 'ni l\'arrivante');
+    } finally {
+      await app(() => { if (window.copytrack.room) window.copytrack.room.leave(); window.copytrack.ui.closeModal(); if (window.copytrack.mode === 'race') window.copytrack.quitRace(); window.copytrack.showMenu('menu'); }).catch(() => {});
+      await B.close(); if (C) await C.close();
+    }
+  });
+
+  // Phase 17 (TECH-010, TECH-040) : trois onglets, vrai WebRTC et vrai Web Crypto, signalisation locale. L'hôte « recharge » sa page : pendant son absence l'invitée fait
+  // l'intérim ; un imposteur qui prend l'identifiant de l'hôte sans son secret n'obtient ni liaison ni rôle ; l'hôte revient avec son secret et reprend la main.
+  await test('multijoueur (TECH-010, TECH-040) : l\'hôte recharge sa page : l\'invitée fait l\'intérim ; un imposteur qui prend son identifiant est refusé ; revenu avec son secret, l\'hôte reprend la main', async () => {
+    const A = await hook(await ctx.newPage()), B = await hook(await ctx.newPage());
+    let C = null;
+    const url = (code = '') => `http://127.0.0.1:${PORT}/?net=local${code ? '#salle=' + code : ''}`;
+    const named = async (p, name) => { if (await p.locator('#wl-name').isVisible()) { await p.locator('#wl-name').fill(name); await p.locator('#wl-submit').evaluate((el) => el.click()); } };
+    const wait = (p, fn, arg, ms = 30000) => p.waitForFunction(fn, arg, { timeout: ms });
+    try {
+      await A.goto(url(), { waitUntil: 'load' }); await named(A, 'Ana');
+      await wait(A, () => window.copytrack && window.copytrack.mode === 'menu');
+      await A.evaluate(() => { window.copytrack.settings.telemetry = false; window.copytrack.saveSettings(); window.copytrack.multiMenu(); });
+      await A.evaluate(() => [...document.querySelectorAll('#modal-actions button')].find((b) => /Créer une salle/.test(b.textContent)).click());
+      await wait(A, () => document.querySelector('.mp-code b'));
+      const code = (await A.evaluate(() => document.querySelector('.mp-code b').textContent)).trim();
+      await B.goto(url(code), { waitUntil: 'load' }); await named(B, 'Bea');
+      await wait(B, () => window.copytrack && window.copytrack.room && window.copytrack.room.list.some((m) => !m.self && m.link === 'open'));
+      await wait(A, () => window.copytrack.room.list.some((m) => !m.self && m.link === 'open'));
+      const aId = await A.evaluate(() => window.copytrack.room.selfId), commit = await A.evaluate(() => window.copytrack.room.ident.commit);
+      assert.match(commit, /^[A-Za-z0-9_-]{43}$/, 'l\'engagement (empreinte SHA-256 de la clé publique) est dans la présence');
+      assert.equal(await B.evaluate(() => window.copytrack.room.hostId), aId, 'Ana est l\'hôte pour Bea');
+      assert.equal(await B.evaluate((id) => window.copytrack.room.members.get(id).commit, aId), commit, 'Bea a vu Ana prouver son identité (même engagement)');
+      // Le secret n'est ni dans la présence, ni dans le DOM, ni dans la console : seul l'engagement est publié.
+      const secret = await A.evaluate(() => JSON.parse(sessionStorage.getItem('copytrack.mp.resume')).key.jwk.d);
+      assert.ok(secret && secret.length > 40, 'le secret de reprise est gardé dans l\'onglet');
+      assert.equal(await A.evaluate((d) => document.documentElement.outerHTML.includes(d) || JSON.stringify(window.copytrack.room.meta).includes(d) || JSON.stringify(window.copytrack.room.resumeInfo().key.pub).includes(d), secret), false, 'ni dans le DOM ni dans la présence');
+      assert.equal(await B.evaluate((d) => JSON.stringify([...window.copytrack.room.members.values()].map((m) => ({ ...m, outbox: undefined, sentLog: undefined, inbox: undefined }))).includes(d), secret), false, 'Bea n\'a jamais reçu le secret');
+      assert.equal(errors.some((e) => e.includes(secret)), false, 'le secret n\'est dans aucun message de la console');
+      // La mémoire de la place se renouvelle tant que la salle est ouverte (un salon calme n'émet aucun événement).
+      const at1 = await A.evaluate(() => JSON.parse(sessionStorage.getItem('copytrack.mp.resume')).at);
+      await A.waitForTimeout(5600);
+      assert.ok(await A.evaluate((t) => JSON.parse(sessionStorage.getItem('copytrack.mp.resume')).at > t, at1), 'la mémoire de la place est renouvelée');
+      // L'onglet d'Ana se ferme (page voisine du même site : sessionStorage gardé, aucune salle, aucun « au revoir »).
+      const t0 = Date.now();
+      await A.goto(`http://127.0.0.1:${PORT}/legal.html`, { waitUntil: 'load' });
+      await wait(B, () => window.copytrack.room.meta.host === true, null, 25000);
+      assert.ok(Date.now() - t0 < 20000, 'l\'intérim commence avant la fin des 20 s de la place d\'Ana : ' + (Date.now() - t0) + ' ms');
+      assert.equal(await B.evaluate(() => window.copytrack.room.isHost), true, 'Bea est l\'hôte (drapeau republié)');
+      // Un imposteur prend l'identifiant d'Ana, sans son secret.
+      C = await hook(await ctx.newPage());
+      await C.goto(url(), { waitUntil: 'load' });
+      await C.evaluate(async ({ c, id }) => {
+        const { Room, defaultSignaling } = await import('/js/net/room.js');
+        window.__imp = await Room.join(c, { name: 'Mallory', selfId: id, makeSignaling: (o) => defaultSignaling(o, null) });
+      }, { c: code, id: aId });
+      await C.waitForTimeout(7000);
+      assert.equal(await C.evaluate(() => window.__imp.list.some((m) => !m.self && m.link === 'open')), false, 'l\'imposteur n\'a aucune liaison ouverte');
+      assert.equal(await C.evaluate(() => window.__imp.isHost), false, 'ni le rôle d\'hôte');
+      assert.notEqual(await B.evaluate((id) => (window.copytrack.room.members.get(id) || {}).link, aId), 'open', 'pour Bea, la place d\'Ana n\'est pas rendue à l\'imposteur');
+      assert.equal(await B.evaluate((id) => (window.copytrack.room.members.get(id) || {}).commit, aId), commit, 'l\'engagement épinglé d\'Ana n\'a pas changé');
+      assert.equal(await B.evaluate(() => window.copytrack.room.isHost), true, 'Bea est toujours l\'hôte par intérim');
+      // Limite connue (supabase/MULTI.md) : tant que l'imposteur reste dans le canal, il lit les offres destinées à Ana (le filtrage par destinataire se fait chez le client) et peut
+      // y répondre pour perturber l'ouverture de la liaison du vrai joueur (déni de service : essayé, la liaison reste alors bloquée dans une partie des essais). Il ne peut pas
+      // la lui prendre. L'essai suivant se fait donc une fois l'imposteur parti.
+      await C.evaluate(() => window.__imp.leave());
+      // Ana revient avec son secret (même onglet) : même identifiant, même engagement, rôle retrouvé ; Bea redevient invitée.
+      const tBack = Date.now();
+      await A.goto(url(code), { waitUntil: 'load' }); await named(A, 'Ana');
+      // (le résumé de l'état de chacun s'ajoute à l'échec : une attente expirée dit où en était chaque onglet)
+      const brief = (p) => p.evaluate((id) => { const A = window.copytrack, r = A && A.room; return r ? { self: r.selfId === id ? 'ana' : 'autre', host: r.isHost, settled: r._settled, order: r._order, inheriting: r._inheriting, members: [...r.members.values()].map((m) => [m.id === id ? 'ana' : m.id.slice(0, 4), m.link, !!m.commit, m.returning]), saved: !!sessionStorage.getItem('copytrack.mp.resume'), links: [...r.mesh.links.values()].map((l) => ({ with: l.id === id ? 'ana' : l.id.slice(0, 4), st: l.status, init: l.initiator, pc: l.pc && l.pc.connectionState, sig: l.pc && l.pc.signalingState, remoteSet: l.remoteSet, tries: l.attempts, pend: l.pending.length })), toast: (document.querySelector('.toast, #toast') || {}).textContent } : { room: null, mode: A && A.mode, url: location.href.slice(-20), saved: !!sessionStorage.getItem('copytrack.mp.resume') }; }, aId).catch((e) => String(e));
+      try { await wait(A, () => window.copytrack && window.copytrack.room && window.copytrack.room.list.some((m) => !m.self && m.link === 'open')); }
+      catch (e) { throw new Error(e.message.split('\n')[0] + ' — ' + Math.round((Date.now() - tBack) / 1000) + ' s après le retour ; Ana : ' + JSON.stringify(await brief(A)) + ' ; Bea : ' + JSON.stringify(await brief(B)) + ' ; imposteur : ' + JSON.stringify(await brief(C))); }
+      assert.equal(await A.evaluate(() => window.copytrack.room.selfId), aId, 'même identifiant');
+      assert.equal(await A.evaluate(() => window.copytrack.room.ident.commit), commit, 'même engagement : c\'est bien son secret');
+      await wait(A, () => window.copytrack.room.isHost === true, null, 20000);
+      await wait(B, (id) => window.copytrack.room.hostId === id && window.copytrack.room.isHost === false, aId, 20000);
+      assert.equal(await B.evaluate((id) => window.copytrack.room.members.get(id).link, aId), 'open', 'Bea est de nouveau reliée à Ana');
+      assert.equal(await B.evaluate(() => window.copytrack.room.meta.host), false, 'Bea retire son drapeau');
+      assert.equal(await C.evaluate(() => window.__imp.list.some((m) => !m.self && m.link === 'open')), false, 'l\'imposteur n\'a toujours aucune liaison');
+    } finally {
+      for (const p of [A, B, C]) if (p) await p.evaluate(() => { try { if (window.copytrack && window.copytrack.room) window.copytrack.room.leave(); if (window.__imp) window.__imp.leave(); } catch { /* déjà fermée */ } }).catch(() => {});
+      await A.close(); await B.close(); if (C) await C.close();
     }
   });
 

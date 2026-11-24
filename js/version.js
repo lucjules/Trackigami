@@ -8,7 +8,7 @@ export const GAME_NAME = 'Trackigami';
 export const FILE_PREFIX = GAME_NAME.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
 //
 // VERSION : la version affichée au joueur ; à incrémenter à chaque modification livrée (package.json doit concorder : un test le vérifie).
-export const VERSION = 'bêta 0.16.13';
+export const VERSION = 'bêta 0.16.16';
 
 // PHYS_VER : la version de la PHYSIQUE. Les replays, les records, les fantômes importés, les classements en ligne et les salons
 // multijoueurs sont tous liés à ce numéro : un replay enregistré avec une autre physique ne redonne pas la même course.
@@ -20,4 +20,9 @@ export const PHYS_VER = 39;
 // s'ils ont le même PHYS_VER (même physique) ET le même NET_VER (ils se comprennent). À incrémenter dès que le format d'un message change.
 // 3 (0.9.25) : message « rules » (règles de la partie choisies par l'hôte).
 // 4 (0.9.38) : reconnexion (hello, bye, hostover ; place gardée 20 s, état du championnat renvoyé avec les arrivées de la manche).
-export const NET_VER = 4;
+// 5 (0.16.15) : époque de lancement e dans start, track, live, cup, round, rend, cupstop, finish et hello ; « track » ne lance plus ; « live » (course libre de
+//   l'hôte réellement en cours) ; finish porte son circuit ; « cupsync » et résultats de manche fusionnés (migration d'hôte) ; voir supabase/MULTI.md.
+//   (0.16.16, sans nouveau numéro : le 5 n'avait pas été publié) identité de salle et rôle d'hôte : « hi » / « hello » (défi et preuve signée par liaison), « order » et
+//   « orderq » (ordre d'arrivée), « hostover » porte l'ordre, offres et réponses WebRTC signées (« p »), engagement « c » dans la présence ; à réincrémenter si
+//   la 0.16.15 est diffusée avant. Voir supabase/MULTI.md, « Identité, rôle d'hôte et vie privée ».
+export const NET_VER = 5;

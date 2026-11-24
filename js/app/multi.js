@@ -23,11 +23,11 @@ export const multiMethods = {
     const back = code ? loadResume(normalizeCode(code)) : null;
     const L = profile().loadout || {}, car = {};
     for (const k of ['body', 'color', 'color2', 'decalColor', 'spoiler', 'led', 'decal', 'ornament', 'wheels', 'finish', 'bike']) if (typeof L[k] === 'string') car[k] = L[k];      // (0.13.1) mon apparence, vue par les autres
-    return { name: this.settings.playerName, car, makeSignaling: (o) => defaultSignaling(o, this._tokenFn()), getIce: this._iceLoader, ...(back ? { selfId: back.selfId, token: back.token } : {}) };
+    return { name: this.settings.playerName, car, makeSignaling: (o) => defaultSignaling(o, this._tokenFn()), getIce: this._iceLoader, ...(back ? { selfId: back.selfId, identity: back.key } : {}) };      // (TECH-040 : la place ne revient qu'avec le secret de reprise)
   },
 
   _bindRoom(room) {
-    room.on('start', ({ trackId, track, startLocal, cup }) => this._startMultiRace(room, track || { id: trackId }, startLocal, cup));
+    room.on('start', ({ trackId, track, startLocal, cup, e }) => this._startMultiRace(room, track || { id: trackId }, startLocal, cup, e));
     room.on('error', (e) => { this.ui.flash(e.message); });
     room.on('members', () => { this._updateBoard(); this._syncDirectory(room); });
     room.on('results', () => this._updateBoard());
@@ -42,9 +42,12 @@ export const multiMethods = {
       else this.ui.flash('L\'hôte a arrêté le championnat.', 3);
     });
     // Reconnexion (E16) : la place est gardée 20 s ; la course continue pendant ce temps.
-    const keep = () => { if (!room.closed) saveResume({ code: room.code, selfId: room.selfId, token: room.token }); };
+    const keep = () => { const r = !room.closed && room.resumeInfo(); if (r) saveResume(r); };
     keep();
     room.on('members', keep);
+    // (TECH-010) la mémoire de la place n'est valable que 20 s après sa dernière mise à jour : un salon calme n'émet aucun événement, on la renouvelle tant que la salle est ouverte.
+    const keepTimer = setInterval(keep, 5000);
+    room.on('closed', () => clearInterval(keepTimer));
     room.on('reconnecting', () => this.ui.flash('📶 Connexion perdue : reconnexion à la salle… (ta course continue)', 4));
     room.on('reconnected', () => this.ui.flash('📶 Reconnecté à la salle.', 2.4));
     room.on('away', (id) => { const m = room.members.get(id); this.ui.flash(`⏳ ${m ? m.name : 'Un joueur'} a perdu la connexion : sa place est gardée 20 s.`, 3); });
@@ -240,7 +243,7 @@ export const multiMethods = {
     const msg = document.createElement('p');
     msg.className = 'mp-err'; msg.setAttribute('role', 'alert');
     right.append(modeRow, trackRow, preview, pick, msg, note);
-    const LINK = { self: '', open: '● connecté', connecting: '… connexion', failed: '✕ liaison impossible', closed: '✕ déconnecté', incompatible: '✕ autre version', away: '⏳ reconnexion' };
+    const LINK = { self: '', open: '● connecté', connecting: '… connexion', proving: '… connexion', failed: '✕ liaison impossible', closed: '✕ déconnecté', incompatible: '✕ autre version', away: '⏳ reconnexion' };
     const MODES = { race: 'Course', cup: 'Championnat', free: 'Course libre' };
     // Choix de l'hôte, gardés d'une ouverture du salon à l'autre : circuits ajoutés à la liste, mode, nombre de manches, sélection, collisions, salon public.
     const extra = this._mpExtra = Object.assign({ mine: [], community: [], mode: 'race', rounds: 3, pool: 'all', collisions: true, pub: false }, this._mpExtra);
@@ -276,14 +279,24 @@ export const multiMethods = {
       if (start) {
         start.hidden = !host;
         start.disabled = cup ? false : !room.track;
-        start.textContent = cup ? (room.cupActive ? 'Relancer un championnat' : 'Lancer le championnat') : race ? 'Lancer la course' : room.started ? 'Relancer pour tous' : 'Lancer la course libre';
+        start.textContent = cup ? (room.cupActive ? 'Relancer un championnat' : 'Lancer le championnat') : race ? 'Lancer la course' : room.launch && room.launch.kind === 'free' ? 'Relancer pour tous' : 'Lancer la course libre';
       }
       const running = room.cupActive;
       if (!host) {
         modeRow.innerHTML = `<span>Mode</span><b>${esc(MODES[mode] || MODES.race)}</b>`;
-        trackRow.textContent = running ? `Championnat en cours : manche ${Math.min(room.cup.total, (room.cupState ? room.cupState.n : room.cup.played) + 1)} sur ${room.cup.total}.`
+        // GAME-008 : une manche tourne sans moi (arrivé pendant la course) : le circuit est visible et je sais que je jouerai la suivante.
+        const ls = room.lobbyStatus();
+        trackRow.textContent = running && !(ls && ls.running === 'race') ? `Championnat en cours : manche ${Math.min(room.cup.total, (room.cupState ? room.cupState.n : room.cup.played) + 1)} sur ${room.cup.total}.`
           : room.track ? `Circuit : ${room.track.name || room.track.id}` : 'L\'hôte choisit le circuit…';
-        note.textContent = (running ? 'Tu rejoins à la prochaine manche.' : room.started && mode === 'free' ? 'Course en cours : rejoins-la.' : 'Clique « Je suis prêt » ; l\'hôte lance la course.') + (room.rules ? ' Règles : ' + describeRules(room.rules).join(' · ') + '.' : '');
+        // « Course en cours » : la course libre que l'hôte court réellement (message live, TECH-008), jamais un souvenir ; on la rejoint d'un clic.
+        const live = !running && room.hostLive && room.state === 'lobby';
+        note.textContent = (ls ? 'Manche en cours : tu joueras la suivante.' : running ? 'Tu rejoins à la prochaine manche.' : live ? 'Course en cours : rejoins-la.' : 'Clique « Je suis prêt » ; l\'hôte lance la course.') + (room.rules ? ' Règles : ' + describeRules(room.rules).join(' · ') + '.' : '');
+        if (live) {
+          const join = Object.assign(document.createElement('button'), { type: 'button', className: 'btn primary', textContent: 'Rejoindre la course' });
+          join.dataset.mp = 'join';
+          join.onclick = () => { off(); if (!room.joinLive()) render(); };
+          pick.append(join);
+        }
         drawPreview();
         return;
       }
@@ -397,15 +410,21 @@ export const multiMethods = {
     render();
   },
 
-  async _startMultiRace(room, spec, startLocal, cup = null) {
+  // e : l'époque du lancement (room.js) ; la course la garde (opts.multi.epoch) : son arrivée ne compte que pour ce lancement (TECH-042).
+  // TECH-049 (TRANS-08) : deux départs rapprochés (un circuit lent à télécharger, puis un intégré) : seul le DERNIER demandé est lancé ; un chargement
+  // qui finit après une demande plus récente, ou après un autre lancement de la salle, est abandonné (son échec aussi : il ne ramène personne au salon).
+  async _startMultiRace(room, spec, startLocal, cup = null, e = room.epoch) {
+    const req = this._mpReq = (this._mpReq || 0) + 1;
+    const stale = () => req !== this._mpReq || room.closed || room.epoch !== e;
     let track;
     try { track = await this._resolveMultiTrack(room, spec); }
-    catch (e) { this.ui.flash(e.message || 'Circuit impossible à charger.', 4); room.backToLobby(); if (!this.ui.modalOpen) this.multiLobby(room); return; }
+    catch (err) { if (stale()) return; this.ui.flash(err.message || 'Circuit impossible à charger.', 4); room.backToLobby(); if (!this.ui.modalOpen) this.multiLobby(room); return; }
+    if (stale()) return;
     track = applyRules(track, room.rules);          // règles de la partie choisies par l'hôte (rules.js)
     this.ui.closeModal();
     this._removeCupPanel();
     // Course libre : chacun court à son rythme, le départ commun n'a de sens que pour le tout premier essai. Championnat : départ commun à chaque manche (grille).
-    this.playTrack(track, { multi: { room, startLocal: Math.min(startLocal, performance.now() + 4000), cup }, trackKey: null, seed: spec.id, difficulty: 1 });
+    this.playTrack(track, { multi: { room, startLocal: Math.min(startLocal, performance.now() + 4000), cup, epoch: e }, trackKey: null, seed: spec.id, difficulty: 1 });
     this._mountBoard(room);
   },
 
@@ -452,7 +471,8 @@ export const multiMethods = {
     const s = this.session;
     if (s && s.cup && s.multi && s.multi.room === b.room && b.room.cup) { b.el.innerHTML = this._cupBoardHtml(b.room, s); return; }
     const rows = b.room.ranking();
-    b.el.innerHTML = `<div class="mp-board-h">Salle ${esc(b.room.code)} · ${esc((b.room.track && b.room.track.name) || '')}</div>`
+    const lt = (b.room.launch && b.room.launch.track) || b.room.track;          // le circuit du lancement couru (pas le choix du salon)
+    b.el.innerHTML = `<div class="mp-board-h">Salle ${esc(b.room.code)} · ${esc((lt && lt.name) || '')}</div>`
       + rows.map((r, i) => `<div class="mp-board-r${r.self ? ' me' : ''}"><b>${r.best != null ? i + 1 : '–'}</b><span>${esc(r.name)}</span><i>${r.best != null ? formatTime(r.best / 120) : '--:--.---'}</i><em>${r.n ? '×' + r.n : ''}</em></div>`).join('')
       + '<div class="mp-board-f">R : nouvel essai · Échap : quitter</div>';
   },
@@ -530,6 +550,8 @@ export const multiMethods = {
       const tick = () => {
         const st = room.cupState;
         if (!document.body.contains(el) || !st) { clearInterval(this._cupPanel && this._cupPanel.timer); return; }
+        // (TECH-047) revenu après la clôture alors que la manche suivante est déjà partie sans lui : il la suit et jouera celle d'après
+        if (st.phase === 'racing') { const cur = cup.rounds[st.n]; next.textContent = `Manche ${st.n + 1}/${cup.total}${cur && cur.name ? ' · ' + cur.name : ''} en cours : tu joueras la suivante.`; return; }
         const left = Math.max(0, Math.ceil((st.until - room.now()) / 1000));
         const nx = cup.rounds[cup.played];
         next.textContent = `Manche suivante${nx && nx.name ? ' : ' + nx.name : ''} dans ${left} s`;

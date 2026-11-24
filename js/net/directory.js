@@ -42,20 +42,32 @@ export class PublicDirectory extends Emitter {
   }
 
   // Inscrit (ou met à jour) la fiche d'un salon.
+  // Retrait pendant l'annonce (TECH-082 : jeton ou connexion encore en cours) : la jonction est abandonnée et sa connexion fermée ; si elle a quand
+  // même abouti, elle est fermée dès son retour. Un retrait voulu n'est pas une erreur.
   async announce(info) {
     if (this.ann) { this.ann.track({ room: info }); return; }
     const sig = this.ann = this.makeSignaling({ selfId: this.selfId + 'a', observe: false });
-    try { await sig.join({ room: info }); } catch (e) { this.ann = null; throw e; }
+    try { await sig.join({ room: info }); } catch (e) {
+      try { sig.leave(); } catch { /* déjà fermée */ }
+      if (this.ann !== sig) return;                     // retirée entre-temps : rien à signaler
+      this.ann = null;
+      throw e;
+    }
+    if (this.ann !== sig) { try { sig.leave(); } catch { /* déjà fermée */ } }
   }
 
-  retract() { if (this.ann) { try { this.ann.leave(); } catch { /* déjà fermé */ } this.ann = null; } }
+  retract() { if (this.ann) { const sig = this.ann; this.ann = null; try { sig.leave(); } catch { /* déjà fermé */ } } }
 
   // Écoute la liste ; onChange(liste) à chaque évolution. Renvoie une fonction qui arrête l'écoute.
   async watch(onChange) {
     const sig = this.watcher = this.makeSignaling({ selfId: this.selfId + 'w', observe: true });
     const push = () => onChange([...sig.peers.values()].map(cleanListing).filter(Boolean).sort((a, b) => b.players - a.players || (a.code < b.code ? -1 : 1)).slice(0, MAX_LISTED));
     sig.on('join', push); sig.on('meta', push); sig.on('leave', push);
-    await sig.join({});
+    try { await sig.join({}); } catch (e) {
+      try { sig.leave(); } catch { /* déjà fermée */ }            // écoute ratée ou abandonnée : sa connexion est fermée (TECH-044)
+      if (this.watcher === sig) this.watcher = null;
+      throw e;
+    }
     push();
     return () => { try { sig.leave(); } catch { /* déjà fermé */ } if (this.watcher === sig) this.watcher = null; };
   }

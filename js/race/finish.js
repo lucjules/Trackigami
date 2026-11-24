@@ -102,7 +102,7 @@ export const finishMethods = {
     if (this.cup) {
       // Championnat : le temps part à tous, l'hôte clôt la manche ; la place et les points s'affichent dans le panneau de manche (app/multi.js).
       this._sendNet(F_FINISHED);
-      this.multi.room.reportFinish(Math.round(time / DT));
+      this.multi.room.reportFinish(Math.round(time / DT), this.multi.epoch);      // (le lancement de CETTE course : TECH-042)
       app.audio.finish(false);
       app.ui.hud.time(time, true);
       app.ui.hud.message(`🏁 ${formatTime(time)} · en attente des autres`, 8, PRIO.final);
@@ -112,7 +112,7 @@ export const finishMethods = {
       // Multijoueur : ni record, ni pièces, ni classement en ligne (le chrono y suit des règles différentes). Le temps est
       // annoncé aux autres ; on peut recommencer tout de suite (R ou T), sans jamais repasser par le salon.
       this._sendNet(F_FINISHED);
-      const best = this.multi.room.reportFinish(Math.round(time / DT));
+      const best = this.multi.room.reportFinish(Math.round(time / DT), this.multi.epoch);
       app.audio.finish(best);
       app.ui.hud.time(time, true);
       app.ui.hud.message(`🏁 ${formatTime(time)}${best ? ' · meilleur temps' : ''} · R : nouvel essai`, 6, PRIO.final);
