@@ -281,6 +281,9 @@ export class GarageSession {
   }
 
   dispose() {
+    // (TECH-063) La reconstruction de la voiture d'une modification de l'atelier est différée de 120 ms (studio.js) : on l'annule, sinon elle ajouterait une voiture
+    // orpheline à la scène suivante et rappellerait setVoice après la sortie. La modification, elle, est enregistrée en fin de dispose (setLoadout).
+    clearTimeout(this._studioT);
     const el = this.app.renderer.domElement;
     el.removeEventListener('pointerdown', this._h.down);
     window.removeEventListener('pointermove', this._h.move);

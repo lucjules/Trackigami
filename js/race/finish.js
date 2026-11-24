@@ -211,7 +211,7 @@ export const finishMethods = {
       hasNext: !!this.opts.hasNext,
       canReplay: true,
       canBoard: !!(this.trackKey && /^(b-|daily-|u-)/.test(this.trackKey) && !this.opts.spawn && !this.opts.fromEditor),
-      canHub: !!(this.trackKey && /^(b-|daily-|u-)/.test(this.trackKey) && !this.opts.spawn && !this.opts.fromEditor && app._lastDesc && app._lastDesc.key === this.trackKey),
+      canHub: !!(this.trackKey && /^(b-|daily-|u-)/.test(this.trackKey) && !this.opts.spawn && !this.opts.fromEditor && app._lastDesc && app._lastDesc.key === this.opts.trackKey),      // (TECH-064 : la clé de la fiche est celle du circuit, pas la clé « assistée » d'une course avec aides ; comme quitRace et openSessionHub)
       canShareGhost: !!(this.trackKey && (isRecord || (this.record && this.record.inputs)) && !this.opts.spawn),
     });
     app._finishCoach(this, time);
