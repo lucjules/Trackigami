@@ -1,6 +1,6 @@
 # Déployer : la procédure du propriétaire (une page)
 
-Ordre imposé : **tests → base (SQL, à la main, si besoin) → fonctions `submit-score` et `ice` → contrôle d'empreinte (barrière) → site.**
+Ordre imposé : **tests → base (SQL, à la main, si besoin) → fonctions `ice`, `submit-score` et `account-recovery` → contrôle d'empreinte (barrière) → site.**
 Le workflow `.github/workflows/deploiement.yml` fait tout, sauf le SQL. **Constat du 22 novembre 2026** (liste des workflows du dépôt, lecture seule) : le site est publié
 **depuis une branche** (workflow GitHub « pages-build-deployment »), donc **aujourd'hui le site et la fonction ne sont pas ordonnés** ; ce qui suit est à faire une fois.
 Rien de ce document n'a été exécuté sur GitHub ni sur Supabase par l'auteur : chaque vérification ci-dessous est à lire par vous.
@@ -25,8 +25,8 @@ Fusionner sur `main` → le workflow démarre → **approuver** l'environnement 
 
 - Tâche `serveur` : « jeton accepté » (liste des fonctions) ; les deux `functions deploy` terminent sans erreur ; la CLI peut exiger un `supabase/config.toml` : si elle échoue pour cette raison, rien n'est publié, ajouter un fichier minimal (`project_id`).
 - **Barrière** : « Barrière franchie » avec l'empreinte du résumé du travail. Contrôle indépendant : `node tools/check-deployed.mjs` en local (« empreinte de build identique »).
-- Tableau de bord Supabase › Edge Functions : `submit-score` et `ice` ont une nouvelle version, **Verify JWT toujours activé** (le workflow ne passe jamais `--no-verify-jwt`).
-- `ice` n'a pas d'empreinte : seule la réussite du déploiement (et sa version dans le tableau de bord) le prouve.
+- Tableau de bord Supabase › Edge Functions : `submit-score`, `ice` et `account-recovery` ont une nouvelle version, **Verify JWT toujours activé** (le workflow ne passe jamais `--no-verify-jwt`). `account-recovery` est appelée SANS session (avec la clé publique du jeu) : si la passerelle la refuse (`401 Invalid JWT`), désactiver « Verify JWT » pour cette seule fonction dans le tableau de bord (voir `supabase/COMPTES.md`, « À vérifier sur un VRAI projet »). Elle exige l'**étape SQL 21**, à lancer à la main AVANT.
+- `ice` n'a pas d'empreinte : seule la réussite du déploiement (et sa version dans le tableau de bord) le prouve. `submit-score` et `account-recovery` publient la leur (la barrière compare les deux).
 - Un temps envoyé depuis le site publié est accepté (classement mondial).
 
 ## Si la barrière échoue

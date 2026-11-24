@@ -1,6 +1,6 @@
 {
   "name": "copytrack",
-  "version": "0.16.12",
+  "version": "0.16.13",
   "private": true,
   "type": "module",
   "description": "Jeu de course contre-la-montre low-poly avec éditeur de circuits, dans le navigateur.",
@@ -15,7 +15,7 @@
     "test": "node tools/run-tests.mjs",
     "test:deno": "npx --yes deno@2.9.6 run -A tools/test-dmath.mjs && npx --yes deno@2.9.6 run -A tools/phys-fingerprint.mjs",
     "test:sql": "bash tools/test-accounts-sql.sh && bash tools/test-etape16-sql.sh && bash tools/test-securite-sql.sh && bash tools/test-etape18-sql.sh && bash tools/test-etape19-sql.sh && bash tools/test-etape20-sql.sh && bash tools/test-etape21-sql.sh",
-    "test:browser": "node tools/test-browser.mjs && node tools/test-browser-i18n.mjs && node tools/test-browser-audit.mjs  && node tools/test-browser-camera.mjs && node tools/test-browser-editeur.mjs && node tools/test-browser-boot.mjs && node tools/test-live-replay.mjs && node tools/test-browser-entrees.mjs",
+    "test:browser": "node tools/test-browser.mjs && node tools/test-browser-i18n.mjs && node tools/test-browser-audit.mjs  && node tools/test-browser-camera.mjs && node tools/test-browser-editeur.mjs && node tools/test-browser-boot.mjs && node tools/test-live-replay.mjs && node tools/test-browser-entrees.mjs && node tools/test-browser-recuperation.mjs",
     "fingerprint": "node tools/phys-fingerprint.mjs"
   },
   "license": "MIT"

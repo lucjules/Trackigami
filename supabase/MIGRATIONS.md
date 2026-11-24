@@ -61,6 +61,34 @@ Avant l'étape 6, laisser un temps de cohabitation n'est pas possible pour les t
 
 Ne jamais lancer 6 avant 3 et 5. Les étapes 2 et 6 sont **relançables sans danger** (idempotentes) et ne **suppriment aucune donnée**.
 
+### Étape 21 (code de secours : récupérer un compte sans courriel, 0.16.13, COMPLETE-003) : `etape21-recuperation.sql`
+
+**À appliquer À LA MAIN par le propriétaire du projet** (SQL Editor) : **rien n'a été exécuté sur la production** par l'auteur de ce dépôt ; elle n'est donc **pas** « appliquée » tant que le propriétaire n'a pas lancé `verify-prod.sql` ET lu ses lignes « étape 21 ».
+Pré-requis : étapes 1 à 20 ; extension pgcrypto (schéma `extensions`, présente par défaut sur Supabase ; l'étape la crée sinon). **Relançable ; ne supprime ni ne modifie aucune donnée en s'appliquant** (trois tables et six fonctions ajoutées ; `tools/test-etape21-sql.sh` compare l'empreinte de chaque table avant et après). **Compatible avec le jeu et les fonctions actuels** : à lancer **avant** de déployer `account-recovery` et de publier le jeu 0.16.13. Le jeu 0.16.13 fonctionne AVEC ou SANS elle (sans elle, le code de secours est absent et rien n'est proposé).
+
+| Objet | Rôle | Droits |
+|---|---|---|
+| `recovery_codes` | un haché `bcrypt(SHA-256(code))` par compte (contrainte : seul un haché bcrypt entre), date, réservation en cours | RLS activée, aucun droit pour `anon` ni `authenticated` |
+| `recovery_throttle` | compteurs d'échecs et verrous, clés = empreintes (pseudo saisi, adresse) ou `global` | idem |
+| `recovery_log` | journal minimal : date, compte s'il existe, issue (jamais de code, d'empreinte, d'adresse ni de pseudo inconnu) ; 30 jours | idem |
+| `recovery_code_new()` | crée / remplace le code (renvoyé UNE fois) ; exige une authentification par mot de passe de moins de 10 min (`amr`) | comptes connectés seulement |
+| `recovery_status()` | `{ account, has_code, created_at, used_at }` de SON compte, jamais le haché | comptes connectés seulement |
+| `recovery_begin / finish / abort / purge` | essai de récupération, consommation + révocation des sessions, levée d'une réservation, nettoyage | `service_role` seulement (fonction `account-recovery`) |
+
+**Ordre d'application** (jamais l'inverse) : 1. `verify-prod.sql` (état avant : lignes « étape 21 » en `MANQUE` ; **`MANQUE`/`ÉCART` ailleurs = s'arrêter**) ; 2. sauvegarde (Database › Backups) ; 3. `etape21-recuperation.sql` ; 4. `verify-prod.sql` : **toutes** les lignes « étape 21 » à `ok` ; 5. déployer `account-recovery` (workflow `deploiement.yml`, ou `npm run build:function` puis `supabase/functions/account-recovery/index.ts`) ; 6. `node tools/check-deployed.mjs` : « account-recovery : empreinte de build identique » ; 7. publier le jeu 0.16.13 ; 8. essai de bout en bout et vérifications de `COMPTES.md` (« À vérifier sur un VRAI projet »).
+
+**Vérifications de production attendues** (à lire par le propriétaire ; rien de ceci n'a été constaté) :
+
+| Vérification | Attendu |
+|---|---|
+| `verify-prod.sql`, lignes « étape 21 » | `ok` ×3 (tables fermées, droits des fonctions, pgcrypto) ; la ligne d'info donne le nombre de comptes sans code (tous, juste après l'étape) |
+| `select has_table_privilege('anon', 'public.recovery_codes', 'select'), has_table_privilege('authenticated', 'public.recovery_codes', 'select'), has_function_privilege('anon', 'public.recovery_code_new()', 'execute'), has_function_privilege('authenticated', 'public.recovery_begin(text,text,text)', 'execute');` | `f, f, f, f` |
+| `verify-prod.sql`, « fonctions appelables SANS session hors liste » | `ok` (aucune fonction `recovery_*` pour `anon`) |
+| Conseils Supabase (*Advisors*) | seulement les fonctions `security definer` appelables (c'est l'API du jeu : `recovery_code_new`, `recovery_status`) |
+| `select count(*) from recovery_codes where code_hash is not null and code_hash !~ '^\$2'` | `0` (aucun code en clair) |
+
+**Retour arrière** (aucune donnée de joueur n'est touchée) : `revoke execute on function public.recovery_code_new(), public.recovery_status() from authenticated;` ferme la création et l'affichage de l'état ; la fonction `account-recovery` répondrait encore, retirer aussi `revoke execute on function public.recovery_begin(text,text,text) from service_role;` (elle répond alors `503`) ; les tables et leurs lignes peuvent rester (fermées à tous). Rien n'est à défaire côté jeu : sans les fonctions, le code de secours disparaît des écrans. Test : `tools/test-etape21-sql.sh` (`npm run test:sql`) et `tools/test-securite-sql.sh` (elle rejoue les attaques sur la base après l'étape 21).
+
 ### Étape 20 (droits suivis, règles du jeu et de la base alignées, 0.16.12) : `etape20-droits-et-regles.sql`
 
 **À appliquer À LA MAIN par le propriétaire du projet** (SQL Editor) : **rien n'a été exécuté sur la production** par l'auteur de ce dépôt ; elle n'est donc **pas** « appliquée » tant que le propriétaire n'a pas lancé `verify-prod.sql` ET lu ses lignes « étape 20 » et « lisibilité ».
@@ -164,7 +192,7 @@ Ce que corrige l'étape 17 (détail, preuves et gravité : `docs/AUDIT-PHASE5-SE
 
 ## Déploiement automatique : base → fonction → site
 
-Depuis la 0.16.3, les fonctions se déploient par `.github/workflows/deploiement.yml` (procédure, secret et réglages : [docs/DEPLOIEMENT.md](../docs/DEPLOIEMENT.md)). **Ordre : 1. étape SQL (à la main, SQL Editor, compatible avec l'ancienne fonction) ; 2. fonctions `ice` puis `submit-score` ; 3. barrière `tools/check-deployed.mjs` ; 4. site.** Le site n'est publié que si la barrière passe. **Fenêtre résiduelle inévitable** : les pages déjà ouvertes gardent l'ancien code jusqu'au rechargement ; si `PHYS_VER` change, leurs temps sont refusés (message : « ton jeu n'est plus à jour, recharge la page »). Un site publié AVANT sa fonction (publication par branche, ou fonction pas encore à jour) affiche « le serveur est en cours de mise à jour, réessaie dans quelques minutes ».
+Depuis la 0.16.3, les fonctions se déploient par `.github/workflows/deploiement.yml` (procédure, secret et réglages : [docs/DEPLOIEMENT.md](../docs/DEPLOIEMENT.md)). **Ordre : 1. étape SQL (à la main, SQL Editor, compatible avec l'ancienne fonction) ; 2. fonctions `ice`, `submit-score` puis `account-recovery` (0.16.13) ; 3. barrière `tools/check-deployed.mjs` ; 4. site.** Le site n'est publié que si la barrière passe. **Fenêtre résiduelle inévitable** : les pages déjà ouvertes gardent l'ancien code jusqu'au rechargement ; si `PHYS_VER` change, leurs temps sont refusés (message : « ton jeu n'est plus à jour, recharge la page »). Un site publié AVANT sa fonction (publication par branche, ou fonction pas encore à jour) affiche « le serveur est en cours de mise à jour, réessaie dans quelques minutes ».
 Cette automatisation n'a jamais tourné sur GitHub ni sur Supabase : tant qu'un déploiement n'a pas été lu et vérifié par le propriétaire, la procédure manuelle ci-dessous reste valable.
 
 ### Contrôle des droits de lecture (TECH-021)
@@ -179,7 +207,7 @@ Les tests (`tools/test-securite-sql.sh`) exécutent les mêmes lectures pour de 
 npm run build:function
 ```
 
-Colle ensuite le contenu de `supabase/functions/submit-score/index.ts` et de `supabase/functions/ice/index.ts` dans les fonctions du même nom (Supabase > Edge Functions). `SUPABASE_URL` et `SUPABASE_SERVICE_ROLE_KEY` sont fournies par Supabase ; `ice` en a besoin (elle **refuse** de répondre sans elles). Réglage facultatif : `ALLOWED_ORIGIN` (restreint les appels navigateur au site du jeu).
+Colle ensuite le contenu de `supabase/functions/submit-score/index.ts`, de `supabase/functions/ice/index.ts` et (0.16.13) de `supabase/functions/account-recovery/index.ts` dans les fonctions du même nom (Supabase > Edge Functions ; `account-recovery` exige l'étape SQL 21). `SUPABASE_URL` et `SUPABASE_SERVICE_ROLE_KEY` sont fournies par Supabase ; `ice` en a besoin (elle **refuse** de répondre sans elles). Réglage facultatif : `ALLOWED_ORIGIN` (restreint les appels navigateur au site du jeu).
 
 ## Preuves observables (à lancer par toi, résultat à lire)
 
