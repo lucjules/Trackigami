@@ -12,7 +12,10 @@ import { Room, cleanCarMeta, newRoomCode, normalizeCode, ROOM_RE } from '../js/n
 import { RaceLogic } from '../js/raceLogic.js';
 import { Track } from '../js/track.js';
 import { PHYS_VER, NET_VER } from '../js/version.js';
-import { test, finish } from './harness.mjs';
+import { test, finish, bugConnu, precondition } from './harness.mjs';
+import { VirtualClock, FakeRealtime, FakeRTCNet } from './fake-realtime.mjs';
+import { PublicDirectory, LOBBY_CODE } from '../js/net/directory.js';
+import { createIceLoader } from '../js/net/ice.js';
 
 const snap = (steps, x, o = {}) => ({ steps, flags: 0, tele: 0, vehicle: 'car', seq: steps, pos: { x, y: 1, z: 0 }, quat: new THREE.Quaternion(), vel: { x: 0, y: 0, z: 0 }, cp: 0, lap: 1, ...o });
 // Reçoit une suite de paquets (émetteur à 20 Hz) avec une latence fixe de 30 ms.
@@ -444,5 +447,261 @@ await test('nouvel essai : l\'horloge d\'envoi ne recule pas et la téléportati
   // le piège : si l\'horloge reculait, les paquets du nouvel essai seraient rejetés comme périmés
   const bad = new SnapshotBuffer(); feed.call(null, bad, [snap(600, 0)]); assert.equal(bad.push(unpackSnapshot(packSnapshot(snap(5, 0, { tele: 1 }))), 5000), false, 'rappel : une horloge qui recule est refusée');
 });
+
+// ---- Banc simulé : horloge virtuelle, faux Supabase Realtime (présence par connexion), faux WebRTC (tools/fake-realtime.mjs) ----------------------------
+// Chaque scénario remplace setTimeout / setInterval / Date.now par l'horloge virtuelle le temps de son exécution : les battements de 25 s, le délai de 6 s, la place
+// gardée 20 s, l'expiration d'un jeton se jouent en quelques millisecondes. Le comportement réel du serveur n'est PAS observé ici (voir supabase/MULTI.md).
+const URL_RT = 'https://fake.supabase.co', KEY_RT = 'cle-publique';
+const topicOf = (code) => 'realtime:copytrack-room-' + code;
+async function scenario(fn) {
+  const clock = new VirtualClock(); const restore = clock.install();
+  const rt = new FakeRealtime(clock), rtc = new FakeRTCNet(clock);
+  const rooms = [];
+  const sigOf = (client, o = {}) => ({ code, selfId, observe }) => new SupabaseSignaling({ code, selfId, observe, WebSocketImpl: rt.socket(client), url: URL_RT, key: KEY_RT, getToken: o.getToken || rt.tokenSource(client, o.ttl || 3600000) });
+  const opts = (client, o = {}) => ({ name: client[0].toUpperCase() + client.slice(1), selfId: client, now: clock.now, makeSignaling: sigOf(client, o), makeMesh: (m) => new PeerMesh({ ...m, RTC: rtc.pc(client) }), ...(o.getIce ? { getIce: o.getIce } : {}) });
+  const w = {
+    clock, rt, rtc, rooms, sigOf,
+    host: async (client, code = 'ABC234', o) => { const r = await clock.until(Room.create({ ...opts(client, o), code })); rooms.push(r); return r; },
+    join: async (client, code = 'ABC234', o) => { const r = await clock.until(Room.join(code, opts(client, o))); rooms.push(r); return r; },
+    linked: (a, b) => !!(a.members.get(b.selfId) && a.members.get(b.selfId).link === 'open' && b.members.get(a.selfId) && b.members.get(a.selfId).link === 'open'),
+    raw: (client, selfId, o = {}) => new SupabaseSignaling({ code: o.code || 'ABC234', selfId, observe: !!o.observe, WebSocketImpl: rt.socket(client), url: URL_RT, key: KEY_RT, getToken: o.getToken || null }),
+  };
+  try { await fn(w); } finally {
+    for (const r of rooms) { try { r.leave(); } catch { /* déjà sortie */ } }
+    try { await clock.advance(500); } catch { /* rien */ }
+    restore();
+  }
+}
+const pres = (w, code = 'ABC234') => w.rt.presence(topicOf(code));
+
+console.log('Banc simulé : présence par connexion (TECH-011)');
+await bugConnu('TECH-011', async () => {
+  const sig = new SupabaseSignaling({ code: 'ABC234', selfId: 'me', WebSocketImpl: FakeWS, url: 'https://x.supabase.co', key: 'K' });
+  const left = []; sig.on('leave', (id) => left.push(id));
+  const p = sig.join({ name: 'Moi' });
+  await new Promise((r) => setTimeout(r, 20));
+  const ws = FakeWS.last, j = ws.sent[0], T = j.topic;
+  ws.recv({ topic: T, event: 'phx_reply', payload: { status: 'ok', response: {} }, ref: j.ref });
+  ws.recv({ topic: T, event: 'presence_state', payload: { bob: { metas: [{ phx_ref: 'b1', name: 'Bob' }] } } });
+  await p;
+  try {
+    precondition(sig.peers.has('bob'), 'Bob présent');
+    // Bob se reconnecte : sa nouvelle connexion (b2) arrive AVANT que le serveur ait fermé l'ancienne (b1) ; il met à jour sa présence sur la nouvelle (b3 remplace b2).
+    ws.recv({ topic: T, event: 'presence_diff', payload: { joins: { bob: { metas: [{ phx_ref: 'b2', name: 'Bob' }] } }, leaves: {} } });
+    ws.recv({ topic: T, event: 'presence_diff', payload: { joins: { bob: { metas: [{ phx_ref: 'b3', phx_ref_prev: 'b2', name: 'Bob', ready: true }] } }, leaves: { bob: { metas: [{ phx_ref: 'b2', name: 'Bob' }] } } } });
+    // Le serveur ferme enfin l'ancienne connexion.
+    ws.recv({ topic: T, event: 'presence_diff', payload: { joins: {}, leaves: { bob: { metas: [{ phx_ref: 'b1', name: 'Bob' }] } } } });
+    assert.ok(sig.peers.has('bob'), 'Bob a encore une connexion : il est toujours là');
+    assert.deepEqual(left, [], 'aucun départ annoncé');
+    assert.equal(sig.peers.get('bob').ready, true, 'métadonnées de la connexion la plus récente');
+    ws.recv({ topic: T, event: 'presence_diff', payload: { joins: {}, leaves: { bob: { metas: [{ phx_ref: 'b3', name: 'Bob' }] } } } });
+    assert.deepEqual(left, ['bob'], 'sa dernière connexion fermée : il part');
+  } finally { sig.leave(); }
+}, 'présence : join, meta, leave pour une même clé (deux connexions) : le pair est conservé');
+
+await bugConnu('TECH-011', () => scenario(async (w) => {
+  const ana = await w.host('ana'), bea = await w.join('bea');
+  await w.clock.advance(2000);
+  precondition(w.linked(ana, bea), 'liaison ouverte');
+  w.rt.cut('bea', 1000);                                 // le réseau de Bea saute 1 s : son navigateur voit la fermeture, le serveur ne retire l'ancienne connexion qu'après 30 s
+  await w.clock.advance(8000);
+  precondition(!bea.reconnecting && !bea.closed, 'Bea est revenue par une nouvelle connexion');
+  precondition(pres(w).get('bea') === 2, 'le serveur a deux connexions de la clé « bea »');
+  await w.clock.advance(30000);                          // le serveur retire l'ancienne connexion
+  assert.ok(ana.signaling.peers.has('bea'), 'Ana voit toujours Bea');
+  await w.clock.advance(25000);
+  assert.ok(ana.members.has('bea') && ana.members.get('bea').link === 'open', 'Bea n\'est ni marquée absente ni retirée : ' + JSON.stringify(ana.members.get('bea') && ana.members.get('bea').link));
+}), 'reconnexion avant que le serveur ait fermé l\'ancienne connexion : aucun faux départ, liaison gardée');
+
+console.log('Banc simulé : fermeture, erreur, expiration, battements (TECH-012)');
+const lossCase = (label, hurt) => bugConnu('TECH-012', () => scenario(async (w) => {
+  const ana = await w.host('ana'), bea = await w.join('bea');
+  await w.clock.advance(2000);
+  precondition(w.linked(ana, bea), 'liaison ouverte');
+  let lost = 0; bea.on('reconnecting', () => lost++);
+  const joins = w.rt.count('bea', 'phx_join');
+  await hurt(w);
+  assert.ok(lost >= 1, label + ' : la perte est détectée (_lost)');
+  await w.clock.advance(20000);
+  assert.ok(w.rt.count('bea', 'phx_join') > joins, 'une nouvelle connexion a été tentée');
+  assert.equal(bea.reconnecting, false, 'reconnectée'); assert.equal(bea.closed, false);
+  assert.ok(pres(w).has('bea') && ana.signaling.peers.has('bea'), 'de nouveau présente');
+}), label + ' : _lost se déclenche et la reconnexion démarre');
+await lossCase('phx_close', async (w) => { w.rt.pushClose('bea'); await w.clock.advance(500); });
+await lossCase('phx_error', async (w) => { w.rt.pushError('bea'); await w.clock.advance(500); });
+await lossCase('message « system » : jeton expiré', async (w) => { w.rt.expire('bea'); await w.clock.advance(500); });
+await lossCase('battements sans réponse (connexion morte sans fermeture)', async (w) => { w.rt.cut('bea', 15000, { mode: 'silent' }); await w.clock.advance(40000); });
+await bugConnu('TECH-012', () => scenario(async (w) => {
+  const ana = await w.host('ana', 'ABC234', { ttl: 120000 }), bea = await w.join('bea', 'ABC234', { ttl: 120000 });     // jetons de 2 minutes
+  let lost = 0; for (const r of [ana, bea]) r.on('reconnecting', () => lost++);
+  for (let t = 0; t < 6; t++) { await w.clock.advance(60000); assert.ok(pres(w).has('ana') && pres(w).has('bea'), `toujours présents après ${t + 1} min`); }
+  assert.ok(w.rt.count('ana', 'access_token') >= 2 && w.rt.count('bea', 'access_token') >= 2, 'jeton du canal renouvelé avant expiration');
+  assert.equal(lost, 0, 'aucune coupure : le serveur n\'a jamais fermé le canal');
+}), 'jeton d\'accès du canal renouvelé avant expiration (jetons de 2 min, 6 min de jeu)');
+
+console.log('Banc simulé : tentatives abandonnées (TECH-044, TECH-082)');
+await bugConnu('TECH-044', () => scenario(async (w) => {
+  w.rt.joinDelay = 8000;                                 // la réponse arrive après le délai de 6 s du client
+  const sig = w.raw('zed', 'zed');
+  await assert.rejects(w.clock.until(sig.join({ name: 'Zed' }), 7000), /ne répond pas/);
+  await w.clock.advance(60000);
+  assert.equal(pres(w).has('zed'), false, 'aucune présence publiée par la réponse tardive');
+  assert.equal(w.rt.connections('zed'), 0, 'connexion fermée');
+  assert.equal(w.rt.count('zed', 'heartbeat'), 0, 'aucun battement');
+}), 'délai dépassé puis réponse tardive : connexion fermée, aucune présence publiée');
+await bugConnu('TECH-044', () => scenario(async (w) => {
+  const ana = await w.host('ana'), bea = await w.join('bea');
+  await w.clock.advance(2000);
+  w.rt.joinDelay = 8000;                                 // la première tentative de reconnexion de Bea n'aura sa réponse qu'après son délai
+  w.rt.cut('bea', 500);
+  await w.clock.advance(5000);
+  w.rt.joinDelay = 0;
+  await w.clock.advance(60000);
+  precondition(!bea.closed && !bea.reconnecting, 'Bea reconnectée');
+  assert.equal(w.rt.connections('bea'), 1, 'une seule connexion : la tentative abandonnée est fermée');
+  assert.equal(pres(w).get('bea'), 1, 'une seule présence');
+  void ana;
+}), 'reconnexion : la tentative abandonnée (délai) ne laisse ni connexion ni présence fantôme');
+await bugConnu('TECH-044', () => scenario(async (w) => {
+  w.rt.joinDelay = 8000;
+  const dir = new PublicDirectory({ makeSignaling: ({ selfId, observe }) => w.raw('obs', selfId, { code: LOBBY_CODE, observe }), selfId: 'o' });
+  await assert.rejects(w.clock.until(dir.watch(() => {}), 7000));
+  await w.clock.advance(60000);
+  assert.equal(w.rt.connections('obs'), 0, 'connexion de l\'annuaire fermée');
+  assert.equal(w.rt.count('obs', 'heartbeat'), 0, 'aucun battement');
+}), 'annuaire : l\'écoute qui dépasse le délai est fermée');
+const listing = (code) => ({ code, host: 'Ana', track: 'Un', players: 1, max: 8, mode: 'free', round: 0, rounds: 0, v: PHYS_VER, net: NET_VER });
+await bugConnu('TECH-082', () => scenario(async (w) => {
+  const slow = async () => { await new Promise((r) => setTimeout(r, 500)); return w.rt.issueToken('hote', 3600000); };      // jeton lent à venir
+  const dir = new PublicDirectory({ makeSignaling: ({ selfId, observe }) => w.raw('hote', selfId, { code: LOBBY_CODE, observe, getToken: slow }), selfId: 'h' });
+  const p = dir.announce(listing('ABC234'));
+  await w.clock.advance(100);
+  dir.retract();                                         // l'hôte décoche « Salon public » pendant l'annonce
+  const r = await w.clock.until(p.then(() => 'ok', (e) => e), 10000);
+  await w.clock.advance(3000);
+  assert.equal(pres(w, LOBBY_CODE).size, 0, 'aucun salon listé');
+  assert.equal(w.rt.connections('hote'), 0, 'connexion fermée');
+  assert.equal(r, 'ok', 'un retrait voulu n\'est pas une erreur');
+  const watcher = new PublicDirectory({ makeSignaling: ({ selfId, observe }) => w.raw('obs', selfId, { code: LOBBY_CODE, observe }), selfId: 'o' });
+  let rows = null; const stop = await w.clock.until(watcher.watch((x) => { rows = x; }));
+  assert.deepEqual(rows, [], 'l\'annuaire est vide');
+  stop();
+}), 'retrait pendant l\'annonce : aucun salon listé');
+
+console.log('Banc simulé : signalisation des seuls membres (TECH-045)');
+await bugConnu('TECH-045', () => scenario(async (w) => {
+  const ana = await w.host('ana');
+  const intrus = w.raw('intrus', 'intrus', { observe: true });       // abonné au canal, absent de la présence
+  await w.clock.until(intrus.join({}));
+  const forge = (from, data) => intrus._send(intrus.topic, 'broadcast', { type: 'broadcast', event: 'signal', payload: { from, to: 'ana', data } });
+  for (let i = 0; i < 7; i++) forge('faux' + i, { k: 'ice', c: { candidate: 'candidate:1 u1s1' } });
+  await w.clock.advance(1000);
+  assert.equal(ana.mesh.links.size, 0, 'sept messages d\'un non-membre : aucun lien');
+  const bea = await w.join('bea');
+  await w.clock.advance(3000);
+  assert.ok(w.linked(ana, bea), 'un vrai joueur se relie toujours');
+  bea.leave();                                          // départ (au revoir) ; un candidat ICE tardif de sa part ne doit rien recréer
+  await w.clock.advance(1000);
+  precondition(!ana.members.has('bea'), 'Bea est partie');
+  forge('bea', { k: 'ice', c: { candidate: 'candidate:2 u2s1' } });
+  forge('bea', { k: 'desc', d: { type: 'offer', sdp: 'v=0' } });
+  await w.clock.advance(1000);
+  assert.equal(ana.mesh.links.has('bea'), false, 'aucun lien recréé pour un joueur parti');
+  intrus.leave();
+}), 'un message de signalisation d\'un non-membre ne crée aucun lien ; un candidat tardif d\'un joueur parti non plus');
+
+console.log('Banc simulé : liens de jeu découplés de la signalisation (TECH-046)');
+const racing = (w, r) => { let tick = 0; return w.clock.setInterval(() => { if (!r.closed) r.sendSnapshot(snap(tick += 6, tick / 10)); }, 50); };
+await bugConnu('TECH-046', () => scenario(async (w) => {
+  const ana = await w.host('ana'), bea = await w.join('bea');
+  await w.clock.advance(2000);
+  precondition(w.linked(ana, bea), 'liaison ouverte');
+  const pcA = ana.mesh.links.get('bea').pc, pcB = bea.mesh.links.get('ana').pc;
+  let snaps = 0; ana.on('snapshot', (id) => { if (id === 'bea') snaps++; });
+  const send = racing(w, bea);
+  w.rt.cut('bea', 5000);                                 // coupure de 5 s de la SIGNALISATION seule
+  const seen = [];
+  for (let i = 0; i < 12; i++) {
+    const before = snaps;
+    if (i === 4) bea.reportFinish(4321);                 // une arrivée (course libre) pendant la coupure
+    await w.clock.advance(500);
+    seen.push([ana.members.get('bea').link, bea.members.get('ana').link, snaps - before]);
+  }
+  w.clock.clearInterval(send);
+  assert.ok(seen.every(([a, b, n]) => a === 'open' && b === 'open' && n > 0), 'liens ouverts et voiture non figée pendant la coupure : ' + JSON.stringify(seen));
+  assert.ok(ana.mesh.links.get('bea').pc === pcA && bea.mesh.links.get('ana').pc === pcB, 'mêmes connexions WebRTC');
+  assert.equal(ana.results.get('bea') && ana.results.get('bea').n, 1, 'l\'arrivée envoyée pendant la coupure est reçue');
+  await w.clock.advance(10000);
+  assert.equal(bea.reconnecting, false, 'signalisation retrouvée');
+}), 'coupure de la signalisation (5 s) : liens WebRTC ouverts, voitures non figées, arrivée reçue');
+await bugConnu('TECH-046', () => scenario(async (w) => {
+  const ana = await w.host('ana'), bea = await w.join('bea');
+  await w.clock.advance(2000);
+  precondition(w.linked(ana, bea), 'liaison ouverte');
+  w.rt.cut('bea', 12000); w.rtc.cut('bea');              // vraie coupure du réseau de Bea (signalisation ET pair à pair), 12 s
+  w.clock.setTimeout(() => w.rtc.heal('bea'), 12000);
+  await w.clock.advance(4000);
+  bea.reportFinish(4321);                                // arrivée annoncée pendant la coupure
+  await w.clock.advance(40000);
+  assert.ok(w.linked(ana, bea), 'liaison refaite après la coupure');
+  assert.equal(ana.results.get('bea') && ana.results.get('bea').n, 1, 'l\'arrivée faite pendant la coupure est renvoyée et comptée');
+}), 'vraie coupure (signalisation et liens) : liaison refaite, arrivée renvoyée après reconnexion');
+await bugConnu('TECH-046', () => scenario(async (w) => {
+  const ana = await w.host('ana'), bea = await w.join('bea');
+  await w.clock.advance(2000);
+  precondition(w.linked(ana, bea), 'liaison ouverte');
+  w.rtc.cut('bea');                                      // seul le chemin pair à pair tombe (40 s) ; la signalisation marche
+  await w.clock.advance(40000);
+  w.rtc.heal('bea');
+  await w.clock.advance(20000);
+  assert.ok(w.linked(ana, bea), 'la liaison en panne est refaite et rouverte des deux côtés : ' + ana.members.get('bea').link + ' / ' + bea.members.get('ana').link);
+}), 'panne du lien seul : détectée, refaite quand le chemin revient');
+
+console.log('Banc simulé : serveurs ICE (TECH-050)');
+await bugConnu('TECH-050', () => scenario(async (w) => {
+  const loader = () => { let n = 0; return createIceLoader({ url: 'https://x.test/ice', key: 'k', fallback: [{ urls: ['stun:s.example:3478'] }], now: w.clock.now,
+    fetchImpl: async () => { n++; return new Response(JSON.stringify({ iceServers: [{ urls: ['turn:t.example:3478'], username: 'u' + n, credential: 'c' + n }], ttl: 600 }), { status: 200 }); } }); };
+  const ana = await w.host('ana', 'ABC234', { getIce: loader() });
+  await w.clock.advance(500000);                         // 500 s : au-delà des 3/4 de la durée de vie (600 s) des identifiants
+  const bea = await w.join('bea', 'ABC234', { getIce: loader() });
+  await w.clock.advance(3000);
+  precondition(w.linked(ana, bea), 'liaison ouverte');
+  const cfg = ana.mesh.links.get('bea').pc.getConfiguration();
+  assert.equal(cfg.iceServers[0].credential, 'c2', 'la liaison créée après 500 s utilise des identifiants TURN redemandés');
+}), 'serveurs ICE redemandés quand leur durée est presque écoulée');
+
+console.log('Banc simulé : capacité (TECH-086)');
+await bugConnu('TECH-086', () => scenario(async (w) => {
+  w.rt.ghostMs = 2000;
+  const ids = ['ana', 'bea', 'cid', 'dan', 'eve', 'fay', 'gus', 'hal'];
+  const rooms = [await w.host('ana')];
+  for (const id of ids.slice(1)) rooms.push(await w.join(id));
+  await w.clock.advance(5000);
+  precondition(rooms.every((r) => r.members.size === 7 && [...r.members.values()].every((m) => m.link === 'open')), 'huit joueurs reliés');
+  w.rt.cut('hal', 13000); w.rtc.cut('hal');              // Hal perd le réseau : sa place est gardée
+  w.clock.setTimeout(() => w.rtc.heal('hal'), 13000);
+  await w.clock.advance(12500);
+  precondition(rooms[0].members.get('hal').link === 'away', 'Hal est absent (place gardée)');
+  const ivy = await w.join('ivy');                       // un 9e arrive
+  await w.clock.advance(1500);
+  assert.equal(rooms[0].members.has('ivy'), false, 'le 9e n\'est pas admis : la salle est pleine, place gardée comprise');
+  assert.ok(rooms.slice(0, 7).every((r) => !r.mesh.links.has('ivy')), 'aucun lien pour le 9e');
+  await w.clock.advance(15000);
+  assert.ok(rooms.slice(0, 7).every((r) => r.members.get('hal') && r.members.get('hal').link === 'open'), 'Hal revenu retrouve sa place et ses liaisons');
+  void ivy;
+}), 'salle à 8 avec un absent : le 9e est refusé, l\'absent retrouve sa place');
+
+test('banc : aucun jeton dans les journaux (connexion, renouvellement, expiration)', () => scenario(async (w) => {
+  const out = [];
+  const saved = {}; for (const k of ['log', 'warn', 'error', 'info', 'debug']) { saved[k] = console[k]; console[k] = (...a) => { out.push(a.map(String).join(' ')); }; }
+  try {
+    const ana = await w.host('ana', 'ABC234', { ttl: 120000 }); const bea = await w.join('bea', 'ABC234', { ttl: 120000 });
+    await w.clock.advance(300000); w.rt.expire('bea'); await w.clock.advance(20000);
+    void ana; void bea;
+  } finally { for (const k of Object.keys(saved)) console[k] = saved[k]; }
+  precondition(w.rt.issued.length >= 2, 'des jetons ont circulé');
+  const leaks = out.filter((line) => w.rt.issued.some((t) => line.includes(t) || line.includes(t.split('.')[1])));
+  assert.deepEqual(leaks, []);
+}));
 
 await finish('Tous les tests réseau passent.');
