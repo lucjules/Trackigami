@@ -62,9 +62,19 @@ export class ProgressTracker {
   }
 }
 
-// Avancement de repli (circuit sans ligne centrale : circuit de joueur) : checkpoints franchis sur le total + 1 (l'arrivée), tours compris.
-export function checkpointProgress(collected, cps, lap, laps) {
-  return Math.max(0, Math.min(1, ((Math.max(1, lap) - 1) * (cps + 1) + collected) / (Math.max(1, laps) * (cps + 1))));
+// Avancement de repli (circuit sans ligne centrale : circuit de joueur) : checkpoints franchis sur le total + 1 (l'arrivée), tours compris. frac (0 à 1) : la part
+// du tronçon en cours déjà faite (legFraction) ; sans elle, un circuit sans checkpoint restait à 0 % jusqu'à l'arrivée (TECH-089 c).
+export function checkpointProgress(collected, cps, lap, laps, frac = 0) {
+  const f = Math.max(0, Math.min(0.99, +frac || 0));
+  return Math.max(0, Math.min(1, ((Math.max(1, lap) - 1) * (cps + 1) + collected + f) / (Math.max(1, laps) * (cps + 1))));
+}
+
+// Part faite du tronçon en cours, à vol d'oiseau : de anchor (le dernier point de passage : départ, checkpoint, ligne d'un tour) à target (le prochain objectif).
+export function legFraction(pos, anchor, target) {
+  if (!pos || !anchor || !target) return 0;
+  const full = Math.hypot(target.x - anchor.x, target.z - anchor.z);
+  if (!(full > 1)) return 0;
+  return Math.max(0, Math.min(0.99, 1 - Math.hypot(target.x - pos.x, target.z - pos.z) / full));
 }
 
 // Place d'une voiture sur la grille de départ. sp : { x, y, z, yaw, … } (le point de départ du circuit) ; slot : 0, 1, 2… dans l'ordre de la grille (le premier devant) ;

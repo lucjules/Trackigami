@@ -1438,7 +1438,7 @@ await test('téléportation au même pas que le paquet périodique (TECH-089 a) 
   const w = new SnapshotBuffer();
   w.push(pk(snap(6, 10, { seq: 65535 })), 50); assert.notEqual(w.push(pk(snap(6, 900, { tele: 1, seq: 0 })), 51), false, 'séquence 65535 puis 0 : plus récent');
 });
-await bugConnu('TECH-089', () => {
+await test('circuit sans ligne centrale (TECH-089 c) : avancement non nul et croissant, checkpoints et tours compris', () => {
   const tr = new Track('t'); tr.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); tr.add({ t: 'finish', x: 0, z: -3, l: 0, r: 0 });     // circuit de joueur : pas de ligne centrale, aucun checkpoint
   const logic = new RaceLogic(tr);
   const sp = logic.spawnPoint(), fin = { x: 16, z: -3 * 32 + 16 };
@@ -1447,7 +1447,20 @@ await bugConnu('TECH-089', () => {
   precondition(!S.progress.available && logic.cps.length === 0, 'ni ligne centrale ni checkpoint');
   S._updateProgress();
   assert.ok(S.prog > 0.25 && S.prog < 0.75, 'à mi-chemin du départ à l\'arrivée : avancement ' + S.prog);
-}, '(c) circuit sans ligne centrale ni checkpoint : avancement non nul');
+  let last = -1;
+  for (let k = 0; k <= 10; k++) { S.phys.pos = { x: sp.x + (fin.x - sp.x) * k / 10, y: sp.y, z: sp.z + (fin.z - sp.z) * k / 10 }; S._updateProgress(); assert.ok(S.prog >= last, 'croissant'); last = S.prog; }
+  assert.ok(last < 1, 'jamais 100 % avant l\'arrivée');
+  // un checkpoint : sa part de la course, puis le tronçon suivant
+  const t2 = new Track('t2'); t2.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); t2.add({ t: 'checkpoint', x: 0, z: -2, l: 0, r: 0 }); t2.add({ t: 'finish', x: 0, z: -4, l: 0, r: 0 });
+  const lg2 = new RaceLogic(t2);
+  precondition(lg2.cps.length === 1, 'un checkpoint');
+  const S2 = Object.assign(Object.create(netMethods), { track: t2, logic: lg2, progress: new ProgressTracker(t2.path), state: 'racing', prog: 0, _jumped: false, phys: { pos: { x: 16, y: 0, z: -48 } } });
+  S2._updateProgress(); const before = S2.prog;
+  assert.ok(before > 0.15 && before < 0.5, 'avant le checkpoint : ' + before);
+  lg2.collected.add(lg2.cps[0]); lg2.respawn = { ...lg2.respawn, x: 16, z: -2 * 32 + 16 };
+  S2.phys.pos = { x: 16, y: 0, z: -2 * 32 + 16 - 16 }; S2._updateProgress();
+  assert.ok(S2.prog > 0.5 && S2.prog < 1, 'checkpoint pris, en route vers l\'arrivée : ' + S2.prog);
+});
 await bugConnu('TECH-089', () => scenario(async (w) => {
   const [ana, bea] = await freeRace(w, 'ana', 'bea');
   let n = 0; ana.on('results', () => n++);

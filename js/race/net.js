@@ -2,7 +2,8 @@
 // Ces méthodes s'ajoutent au prototype de RaceSession (voir race.js) : `this` est l'instance.
 import { RemoteCar } from '../remoteCar.js';
 import { F_BOOST, F_GROUNDED } from '../net/snapshot.js';
-import { checkpointProgress } from '../net/progress.js';
+import { checkpointProgress, legFraction } from '../net/progress.js';
+import { PIECES, tileCenter } from '../pieces.js';
 import { PRIO } from '../hudMessages.js';
 import { DEFAULT_LOADOUT } from '../cosmetics.js';
 import { softCollide, presentState, PROTECT_S } from '../net/collide.js';
@@ -110,8 +111,21 @@ export const netMethods = {
     const lg = this.logic;
     if (this.state === 'finished' && !this._dnf) this.prog = 1;
     else if (this.progress.available) this.prog = Math.min(0.999, this.progress.update(this.phys.pos, this.progress.lapRange(lg.lap, lg.laps), this._jumped));
-    else this.prog = Math.min(0.999, checkpointProgress(lg.collected.size, lg.cps.length, lg.lap, lg.laps));
+    else this.prog = Math.min(0.999, checkpointProgress(lg.collected.size, lg.cps.length, lg.lap, lg.laps, this._legFrac()));
     this._jumped = false;
+  },
+
+  // TECH-089 (c) : sans ligne centrale, la part du tronçon en cours : du dernier point de passage (point de retour : départ, checkpoint, ligne) vers le checkpoint restant
+  // le plus proche, ou l'arrivée quand ils sont tous pris (les checkpoints se prennent dans n'importe quel ordre).
+  _legFrac() {
+    const lg = this.logic, pos = this.phys.pos;
+    if (!this._legs) {
+      const tiles = (lg.track && lg.track.tiles) || [];
+      this._legs = { cps: new Map(lg.cps.map((t) => [t, tileCenter(t)])), fin: tiles.filter((t) => PIECES[t.t] && PIECES[t.t].special === 'finish').map((t) => tileCenter(t)) };
+    }
+    const near = (list) => { let best = null, bd = Infinity; for (const c of list) { const d = Math.hypot(c.x - pos.x, c.z - pos.z); if (d < bd) { bd = d; best = c; } } return best; };
+    const left = [...this._legs.cps].filter(([t]) => !lg.collected.has(t)).map(([, c]) => c);
+    return legFraction(pos, lg.respawn, near(left.length ? left : this._legs.fin));
   },
 
   // Avancement d'un autre joueur d'après son dernier paquet.
