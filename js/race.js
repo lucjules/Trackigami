@@ -673,7 +673,7 @@ export class RaceSession {
     if (this.miniMap) this.miniMap.draw(this._miniPoints(), performance.now());
     if (this.multi) {
       const now = performance.now();
-      for (const rc of this.remote.values()) rc.update(now, app.camera.position);
+      this._updateRemotes(now, app.camera.position);
       if (this.cup && now - (this._boardT || 0) > 250) { this._boardT = now; app._updateBoard(); }       // classement en direct : 4 fois par seconde suffisent
     }
     app.scenery.update(this.renderPos, app.camera);
@@ -740,8 +740,7 @@ export class RaceSession {
     safe(() => { if (this.ghostCar) this.ghostCar.dispose(); });
     safe(() => { for (const g of this.ghosts || []) g.car.dispose(); });
     safe(() => { if (this.rivals) this._clearRivals(); });
-    safe(() => { if (this.multi && this._onSnap) { this.multi.room.off('snapshot', this._onSnap); this.multi.room.off('left', this._onLeft); } });
-    safe(() => { for (const rc of this.remote ? this.remote.values() : []) rc.dispose(); });
+    safe(() => this._teardownRemotes());
     safe(() => { if (this.trailRib) this.trailRib.dispose(); });
     safe(() => { if (this.envFx) this.envFx.dispose(); });
     safe(() => this.app.camera.up.set(0, 1, 0));
@@ -762,11 +761,7 @@ export class RaceSession {
     for (const g of this.ghosts) g.car.dispose();
     this._clearRivals();
     if (this._rec) this._cancelVideo();
-    if (this.multi) {
-      this.multi.room.off('snapshot', this._onSnap); this.multi.room.off('left', this._onLeft);
-      for (const rc of this.remote.values()) rc.dispose();
-      this.remote.clear();
-    }
+    if (this.multi) this._teardownRemotes();
     if (this.trailRib) { this.trailRib.dispose(); this.trailRib = null; }
     if (this.envFx) { this.envFx.dispose(); this.envFx = null; }
     this.ghostCar.dispose();

@@ -7,21 +7,54 @@ import { PRIO } from '../hudMessages.js';
 import { softCollide, presentState, PROTECT_S } from '../net/collide.js';
 export const netMethods = {
   // ---- Multijoueur : voitures des autres joueurs (RemoteCar), alimentées par les paquets WebRTC ----------------------------
+  // TECH-009 (TRANS-06) : une voiture distante naît à l'arrivée d'un membre en course (évènement « members ») ou à son premier paquet, et renaît après un départ suivi
+  // d'un retour (même identifiant). Avant, elles étaient créées une seule fois d'après room.list au départ : un arrivant (ou un revenu) restait invisible.
   _setupRemotes() {
     const room = this.multi.room;
-    const ids = room.list.map((m) => m.id).sort();
-    const add = (m) => {
-      if (m.self || this.remote.has(m.id) || m.link === 'incompatible') return;
-      // (0.13.1) à son apparence ; une vraie voiture dans une course à départ commun (championnat), un fantôme de sa couleur en course libre
-      const rc = new RemoteCar(this.app.scene, { id: m.id, name: m.name, colorIndex: ids.indexOf(m.id), car: m.car, opaque: !!this.cup },
-        { onTeleport: (pos) => this.app.particles.burst(pos.x, pos.y + 1.5, pos.z, 16, 6, 0.5, 0.6, '#9fe3ff', 0) });
-      this.remote.set(m.id, rc);
-    };
-    room.list.forEach(add);
-    this._onSnap = (id, snap, now) => { const rc = this.remote.get(id); if (rc) rc.push(snap, now); };
-    this._onLeft = (id) => { const rc = this.remote.get(id); if (rc) { rc.dispose(); this.remote.delete(id); } };
+    this._onSnap = (id, snap, now) => { const rc = this.remote.get(id) || this._addRemote(id); if (rc) rc.push(snap, now); };
+    this._onLeft = (id) => this._dropRemote(id);
+    this._onMembers = () => this._syncRemotes();
     room.on('snapshot', this._onSnap);
     room.on('left', this._onLeft);
+    room.on('members', this._onMembers);
+    for (const m of room.list) if (!m.self) this._addRemote(m.id);
+  },
+
+  // Voiture d'un membre de la salle (null : inconnu, soi-même, autre version).
+  _addRemote(id) {
+    const room = this.multi.room;
+    if (this.remote.has(id)) return this.remote.get(id);
+    const m = room.members.get(id);
+    if (!m || id === room.selfId || m.link === 'incompatible') return null;
+    // (0.13.1) à son apparence ; une vraie voiture dans une course à départ commun (championnat), un fantôme de sa couleur en course libre. Couleur de repli : son
+    // rang dans la liste triée des identifiants (la même chez tous tant que la salle ne change pas).
+    const ids = room.list.map((x) => x.id).sort();
+    const rc = new RemoteCar(this.app.scene, { id, name: m.name, colorIndex: Math.max(0, ids.indexOf(id)), car: m.car, opaque: !!this.cup },
+      { onTeleport: (pos) => this.app.particles.burst(pos.x, pos.y + 1.5, pos.z, 16, 6, 0.5, 0.6, '#9fe3ff', 0) });
+    this.remote.set(id, rc);
+    return rc;
+  },
+
+  _dropRemote(id) { const rc = this.remote.get(id); if (rc) { rc.dispose(); this.remote.delete(id); } },
+
+  // La salle a changé : un membre arrivé (ou revenu) EN COURSE et relié a sa voiture (cachée jusqu'à son premier paquet) ; un membre parti perd la sienne.
+  _syncRemotes() {
+    const room = this.multi.room;
+    for (const m of room.members.values()) if (m.racing && m.link === 'open' && !this.remote.has(m.id)) this._addRemote(m.id);
+    for (const id of [...this.remote.keys()]) if (!room.members.has(id)) this._dropRemote(id);
+  },
+
+  // Une image : chaque voiture distante suit son tampon d'interpolation.
+  _updateRemotes(now, camPos) {
+    for (const rc of this.remote.values()) rc.update(now, camPos);
+  },
+
+  // Fin de session (dispose, construction interrompue) : écouteurs retirés, voitures libérées.
+  _teardownRemotes() {
+    const room = this.multi && this.multi.room;
+    if (room && this._onSnap) { room.off('snapshot', this._onSnap); room.off('left', this._onLeft); room.off('members', this._onMembers); }
+    for (const rc of this.remote ? this.remote.values() : []) rc.dispose();
+    if (this.remote) this.remote.clear();
   },
 
   // État de la voiture locale, envoyé aux autres (20 fois par seconde, et à chaque téléportation / arrivée).

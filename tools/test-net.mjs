@@ -1198,7 +1198,7 @@ const freeRace = async (w, ...names) => {
 const frames = async (w, list, ms, step = 50) => { for (let t = 0; t < ms; t += step) { await w.clock.advance(step); for (const S of list) frame(S, w.clock.now()); } };
 
 console.log('Phase 18 : voitures distantes (TECH-009, TECH-043)');
-await bugConnu('TECH-009', () => scenario(async (w) => {
+await test('un arrivant en pleine course libre (TECH-009, TRANS-06) : toutes les voitures distantes visibles de part et d\'autre', () => scenario(async (w) => {
   const [ana, bea] = await freeRace(w, 'ana', 'bea');
   const SA = raceSide(ana), SB = raceSide(bea);
   const sends = [racing(w, ana), racing(w, bea)];
@@ -1214,8 +1214,8 @@ await bugConnu('TECH-009', () => scenario(async (w) => {
   assert.ok(shown(SA, 'cid') && shown(SB, 'cid'), 'et elle est visible');
   for (const s of sends) w.clock.clearInterval(s);
   for (const S of [SA, SB, SC]) teardown(S);
-}), 'un arrivant en pleine course libre : toutes les voitures distantes visibles de part et d\'autre');
-await bugConnu('TECH-009', () => scenario(async (w) => {
+}));
+await test('un joueur parti puis revenu avec le même identifiant réapparaît (TECH-009)', () => scenario(async (w) => {
   const [ana, , cid] = await freeRace(w, 'ana', 'bea', 'cid');
   const SA = raceSide(ana);
   const sends = [racing(w, cid)];
@@ -1234,7 +1234,7 @@ await bugConnu('TECH-009', () => scenario(async (w) => {
   assert.ok(shown(SA, 'cid'), 'Ana revoit Cid');
   for (const s of sends) w.clock.clearInterval(s);
   teardown(SA); teardown(SC);
-}), 'un joueur parti puis revenu avec le même identifiant réapparaît');
+}));
 await bugConnu('TECH-043', () => scenario(async (w) => {
   const [ana, bea] = await freeRace(w, 'ana', 'bea');
   const SA = raceSide(ana);
