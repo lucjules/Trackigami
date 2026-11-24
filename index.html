@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <!-- Politique de sécurité du contenu (phase 5) : le jeu garde la session des joueurs dans le navigateur, un script injecté par un texte venu d'un autre joueur pourrait la voler ; la
-       politique n'autorise que les scripts du site (ni script en ligne, ni eval), et que deux serveurs extérieurs : Supabase (classements, comptes) et Google Fonts (police). Les images de
-       plaque (https) et les vignettes (data:, blob:) restent permises. Si tu héberges ta propre version : voir js/config.js (ajoute ton projet Supabase à connect-src).
+       politique n'autorise que les scripts du site (ni script en ligne, ni eval), et qu'un serveur extérieur : le projet Supabase, en https (classements, comptes) ET en wss (salons
+       multijoueur : Realtime ; une source https:// n'autorise PAS wss:// dans Chrome, 0.16.18). Les images de plaque (https) et les vignettes (data:, blob:) restent permises. Si tu
+       héberges ta propre version : voir js/config.js (ajoute ton projet Supabase à connect-src, en https:// et en wss://).
        Un test (tools/test-securite-client.mjs) vérifie que cette ligne reste cohérente avec js/config.js et qu'index.html ne contient ni script ni gestionnaire en ligne. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: data:; connect-src 'self' https://vakhnbmqnwvkekwuntbz.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: data:; connect-src 'self' https://vakhnbmqnwvkekwuntbz.supabase.co wss://vakhnbmqnwvkekwuntbz.supabase.co; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">

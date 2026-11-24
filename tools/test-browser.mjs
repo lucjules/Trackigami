@@ -2071,6 +2071,31 @@ try {
     await waitApp(() => window.copytrack.mode === 'menu');
   });
 
+  // 0.16.18 : la politique de sécurité de la page (index.html) laisse passer le WebSocket de la signalisation des salons. Les essais à plusieurs onglets utilisent ?net=local
+  // (sans Supabase) et ne l'ouvraient jamais : la politique n'autorisait que https://<projet> et Chrome refusait wss://<projet> ; « Créer une salle » et « Rejoindre » échouaient
+  // TOUJOURS (« Connexion au serveur de salons impossible. »). Ici, la vraie SupabaseSignaling sous la vraie politique : aucun refus ; un autre serveur, lui, reste refusé.
+  // (Le réseau de l'essai ne joint pas Supabase : on juge la politique, pas la connexion.)
+  await test('salons (0.16.18) : la politique de sécurité de la page autorise le WebSocket de la signalisation (wss://<projet Supabase>), et seulement lui', async () => {
+    const r = await page.evaluate(async () => {
+      const seen = [], urls = [];
+      const on = (e) => { if (e.violatedDirective.startsWith('connect-src')) seen.push(e.blockedURI); };
+      document.addEventListener('securitypolicyviolation', on);
+      const [{ SupabaseSignaling }, { ONLINE }] = await Promise.all([import('/js/net/signaling.js'), import('/js/online.js')]);
+      class Spy extends WebSocket { constructor(u) { super(u); urls.push(u); } }
+      const sig = new SupabaseSignaling({ code: 'ABC234', selfId: 'essai-csp', WebSocketImpl: Spy });
+      const err = await Promise.race([sig.join({ name: 'Essai' }).then(() => null, (e) => e.message), new Promise((res) => setTimeout(() => res('(en attente)'), 2500))]);
+      try { sig.leave(); } catch { /* déjà fermée */ }
+      const before = seen.length;
+      try { const w = new WebSocket('wss://exemple-interdit.invalid/x'); w.onerror = () => {}; } catch { /* refus immédiat */ }
+      await new Promise((res) => setTimeout(res, 500));
+      document.removeEventListener('securitypolicyviolation', on);
+      return { url: urls[0] || '', origin: ONLINE.url, blocked: seen.slice(0, before), control: seen.slice(before), err };
+    });
+    assert.ok(r.url.startsWith(r.origin.replace(/^https:/, 'wss:') + '/realtime/v1/websocket'), 'la signalisation ouvre bien wss://<projet>/realtime : ' + r.url.slice(0, 80));
+    assert.deepEqual(r.blocked, [], 'la politique ne refuse pas la signalisation des salons (erreur de jonction : ' + r.err + ')');
+    assert.ok(r.control.some((u) => u.startsWith('wss://exemple-interdit.invalid')), 'un autre serveur reste refusé (la politique est bien active) : ' + JSON.stringify(r.control));
+  });
+
   // TECH-083 (TRANS-09) : les écouteurs du salon sont retirés à la fermeture de sa fenêtre, quelle qu'elle soit (Échap, départ d'une course : closeModal, autre fenêtre).
   await test('multijoueur (TECH-083) : ouvrir puis fermer le salon 10 fois (Échap, fermeture par un départ, fenêtre remplacée) : nombre d\'écouteurs de la salle stable', async () => {
     try {
