@@ -380,8 +380,9 @@ export const multiMethods = {
     const sub = () => { if (document.body.contains(body)) render(); };
     for (const e of EVENTS) room.on(e, sub);
     const off = () => { for (const e of EVENTS) room.off(e, sub); };
+    // TECH-083 (TRANS-09) : retirés à la fermeture de la fenêtre, quelle qu'elle soit (Échap, départ d'une course, fenêtre remplacée), pas seulement par ses boutons.
     this.ui.modal({
-      title: 'Salle multijoueur', body, wide: true, panelClass: 'mp-lobby-panel',
+      title: 'Salle multijoueur', body, wide: true, panelClass: 'mp-lobby-panel', onClose: off,
       actions: [
         { label: 'Lancer la course', primary: true, attrs: { 'data-mp': 'start' }, onClick: () => {
           const mode = extra.mode;

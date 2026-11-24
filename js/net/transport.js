@@ -46,6 +46,9 @@ const NEGOTIATION_MS = 12000;               // offre sans réponse (ou connexion
 const MAX_NEGOTIATIONS = 4;                 // au-delà : « failed » (la salle l'affiche ; la liaison est refaite si l'autre revient)
 const MAX_PENDING = 64;                     // candidats ICE gardés en attente de la description distante
 const ICE_WAIT_MS = 2500;                   // serveurs ICE : on n'attend jamais plus longtemps leur réponse (on garde alors les derniers connus)
+// TECH-089 (f) : messages de signalisation d'un joueur qui n'est pas (ou pas encore) membre, gardés un instant sans rien ouvrir : la présence d'un joueur qui revient
+// peut arriver APRÈS son offre (deux canaux de Realtime, sans ordre garanti). Rejoués, et vérifiés comme les autres, dès qu'il devient membre (addPeer).
+const HOLD_MS = 5000, HOLD_IDS = 16, HOLD_PER_ID = 24;
 
 const descJSON = (d) => (d && d.toJSON ? d.toJSON() : d);
 // Empreinte DTLS d'une description : elle identifie la connexion qui l'a produite (une relance ICE la garde, une connexion neuve en a une autre).
@@ -82,6 +85,7 @@ export class PeerMesh {
     this.sealIce = sealIce; this.vetIce = vetIce;
     this.isMember = isMember || ((id) => !!(this.signaling && this.signaling.peers && this.signaling.peers.has(id)));
     this.links = new Map();
+    this._held = new Map();                    // id → [{ at, data }] (HOLD_MS)
     this.stats = { sent: 0, recv: 0, skipped: 0 };
     this._listen(signaling);
   }
@@ -98,7 +102,23 @@ export class PeerMesh {
     const link = new PeerLink(id, this.selfId < id);
     this.links.set(id, link);
     this._enqueue(link, () => this._setup(link));
+    const held = this._held.get(id), now = Date.now();
+    this._held.delete(id);
+    for (const e of held || []) if (now - e.at <= HOLD_MS) this._enqueue(link, () => this._handle(link, e.data));
     return link;
+  }
+
+  _hold(from, data) {
+    if (from.length > 64) return;
+    const now = Date.now();
+    for (const [id, q] of this._held) if (!q.length || now - q[q.length - 1].at > HOLD_MS) this._held.delete(id);
+    let q = this._held.get(from);
+    if (!q) {
+      if (this._held.size >= HOLD_IDS) this._held.delete(this._held.keys().next().value);
+      q = []; this._held.set(from, q);
+    }
+    q.push({ at: now, data });
+    if (q.length > HOLD_PER_ID) q.shift();
   }
 
   // Liaison refaite à neuf (connexion neuve, nouvelle négociation) : après une vraie panne, ou quand l'autre a refait la sienne.
@@ -264,7 +284,8 @@ export class PeerMesh {
     if (!data || typeof data !== 'object' || typeof from !== 'string' || from === this.selfId) return;
     let link = this.links.get(from);
     // TECH-045 : un message d'un inconnu (identifiant inventé, joueur parti dont un candidat ICE arrive en retard) n'ouvre rien ; seul un membre présent le peut.
-    if (!link) { if (!this.isMember(from)) return; link = this.addPeer(from); if (!link) return; }
+    // TECH-089 (f) : il est seulement gardé un instant (borné), au cas où sa présence arrive juste après.
+    if (!link) { if (!this.isMember(from)) { this._hold(from, data); return; } link = this.addPeer(from); if (!link) return; }
     this._enqueue(link, () => this._handle(link, data));
   }
 

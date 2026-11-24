@@ -18,6 +18,11 @@ import { VirtualClock, FakeRealtime, FakeRTCNet } from './fake-realtime.mjs';
 import { PublicDirectory, LOBBY_CODE } from '../js/net/directory.js';
 import { createIceLoader } from '../js/net/ice.js';
 import { createIdentity, prove, proofText, descText, iceText, identityBusy } from '../js/net/identity.js';
+import { readFileSync } from 'node:fs';
+import { netMethods } from '../js/race/net.js';
+import { softCollide, presentState, MAX_DV_TOTAL, MAX_IMPULSE } from '../js/net/collide.js';
+import { ProgressTracker } from '../js/net/progress.js';
+import { DEFAULT_LOADOUT } from '../js/cosmetics.js';
 
 const snap = (steps, x, o = {}) => ({ steps, flags: 0, tele: 0, vehicle: 'car', seq: steps, pos: { x, y: 1, z: 0 }, quat: new THREE.Quaternion(), vel: { x: 0, y: 0, z: 0 }, cp: 0, lap: 1, ...o });
 // Reçoit une suite de paquets (émetteur à 20 Hz) avec une latence fixe de 30 ms.
@@ -1151,6 +1156,345 @@ await test('arrivant (TECH-010) : l\'ordre d\'arrivée est celui de la majorité
   assert.equal(dan.hostId, 'ana', 'l\'arrivant croit la majorité (Ana et Bea), pas Cid');
   assert.deepEqual(dan._order.slice(0, 3), ['ana', 'bea', 'cid']);
   assert.equal(dan.isHost, false); assert.ok(w.linked(dan, ana));
+}));
+
+// ---- Phase 18 (LOT-8c) : voitures distantes, collisions douces, ressources ---------------------------------------------------------------------------
+// Le côté « course » d'un joueur : les méthodes de js/race/net.js (celles de RaceSession) sur un objet minimal, branché sur une vraie salle du banc (ou sur une
+// salle factice pour les paquets forgés). frame() fait ce que fait RaceSession.render pour les voitures distantes ; teardown() ce que fait RaceSession.dispose.
+const CAM = new THREE.Vector3();
+function raceSide(room, { cup = null } = {}) {
+  const S = Object.assign(Object.create(netMethods), {
+    app: { scene: new THREE.Scene(), particles: { burst() {} } },
+    multi: { room }, cup, remote: new Map(), tick: 100000, protectUntil: 0, netTick: 0, teleSeq: 0, state: 'racing',
+    phys: { mode: 'car', pos: { x: 0, y: 1, z: 0 }, vel: { x: 0, y: 0, z: 0 } },
+  });
+  S._setupRemotes();
+  return S;
+}
+const frame = (S, now) => { if (S._updateRemotes) S._updateRemotes(now, CAM); else for (const rc of S.remote.values()) rc.update(now, CAM); };
+const teardown = (S) => {
+  if (S._teardownRemotes) { S._teardownRemotes(); return; }
+  S.multi.room.off('snapshot', S._onSnap); S.multi.room.off('left', S._onLeft);
+  for (const rc of S.remote.values()) rc.dispose();
+  S.remote.clear();
+};
+const shown = (S, id) => !!(S.remote.get(id) && S.remote.get(id).group.visible);
+// Collisionnable : notre voiture, posée à 0,5 m de la voiture distante (immobile), en est-elle poussée ?
+const pushedBy = (S, id, now) => {
+  const rc = S.remote.get(id);
+  if (!rc) return false;
+  S.phys.pos = { x: rc.pos.x + 0.5, y: rc.pos.y, z: rc.pos.z }; S.phys.vel = { x: 0, y: 0, z: 0 };
+  S._collide(now);
+  return Math.hypot(S.phys.vel.x, S.phys.vel.z) > 0;
+};
+const freeRace = async (w, ...names) => {
+  const [host, ...guests] = [await w.host(names[0]), ...await Promise.all(names.slice(1).map((n) => w.join(n)))];
+  await w.clock.advance(3000);
+  precondition([host, ...guests].every((a) => [host, ...guests].every((b) => a === b || w.linked(a, b))), 'tous reliés');
+  host.selectTrack({ id: 'b-un-a1', name: 'Un' }); host.start(); await w.clock.advance(500);
+  precondition(guests.every((g) => g.state === 'racing'), 'course libre lancée chez tous');
+  return [host, ...guests];
+};
+const frames = async (w, list, ms, step = 50) => { for (let t = 0; t < ms; t += step) { await w.clock.advance(step); for (const S of list) frame(S, w.clock.now()); } };
+
+// Salle factice (sans réseau) pour les paquets fabriqués à la main et les règles : membres, liste, règles ; 'snapshot' émis par le test.
+function fakeRoom(members, { rules = null } = {}) {
+  const r = new Emitter();
+  r.selfId = 'moi'; r.rules = rules; r.closed = false; r.members = new Map(members.map((m) => [m.id, { link: 'open', racing: true, rtt: 0, name: m.id, ...m }]));
+  Object.defineProperty(r, 'list', { get: () => [{ id: 'moi', self: true, link: 'self', rtt: 0 }, ...r.members.values()] });
+  r.sendSnapshot = () => {};
+  return r;
+}
+const pk = (s) => unpackSnapshot(packSnapshot(s));
+
+console.log('Phase 18 : voitures distantes (TECH-009, TECH-043)');
+await test('un arrivant en pleine course libre (TECH-009, TRANS-06) : toutes les voitures distantes visibles de part et d\'autre', () => scenario(async (w) => {
+  const [ana, bea] = await freeRace(w, 'ana', 'bea');
+  const SA = raceSide(ana), SB = raceSide(bea);
+  const sends = [racing(w, ana), racing(w, bea)];
+  const cid = await w.join('cid');
+  await w.clock.advance(4000);
+  precondition(cid.state === 'racing' && w.linked(cid, ana) && w.linked(cid, bea), 'Cid, arrivé pendant la course, y est entré et est relié');
+  const SC = raceSide(cid); sends.push(racing(w, cid));
+  let got = 0; ana.on('snapshot', (id) => { if (id === 'cid') got++; });
+  await frames(w, [SA, SB, SC], 2000);
+  precondition(got >= 30, 'Ana a reçu les paquets de Cid : ' + got);
+  assert.ok(shown(SC, 'ana') && shown(SC, 'bea'), 'Cid voit Ana et Bea');
+  assert.ok(SA.remote.has('cid') && SB.remote.has('cid'), `Ana et Bea ont une voiture pour Cid (${got} paquets reçus)`);
+  assert.ok(shown(SA, 'cid') && shown(SB, 'cid'), 'et elle est visible');
+  for (const s of sends) w.clock.clearInterval(s);
+  for (const S of [SA, SB, SC]) teardown(S);
+}));
+await test('un joueur parti puis revenu avec le même identifiant réapparaît (TECH-009)', () => scenario(async (w) => {
+  const [ana, , cid] = await freeRace(w, 'ana', 'bea', 'cid');
+  const SA = raceSide(ana);
+  const sends = [racing(w, cid)];
+  await frames(w, [SA], 1000);
+  precondition(shown(SA, 'cid'), 'Ana voit Cid');
+  const saved = cid.resumeInfo().key;
+  w.clock.clearInterval(sends[0]); cid.leave();                   // Cid part (au revoir) …
+  await frames(w, [SA], 2000);
+  precondition(!SA.remote.has('cid'), 'sa voiture est retirée');
+  const back = await w.join('cid', 'ABC234', { selfId: 'cid', identity: saved });     // … et revient avec le même identifiant
+  await w.clock.advance(4000);
+  precondition(back.state === 'racing' && w.linked(back, ana), 'Cid est revenu dans la course');
+  const SC = raceSide(back); sends.push(racing(w, back), racing(w, ana));
+  await frames(w, [SA, SC], 2000);
+  assert.ok(shown(SC, 'ana'), 'Cid voit Ana');
+  assert.ok(shown(SA, 'cid'), 'Ana revoit Cid');
+  for (const s of sends) w.clock.clearInterval(s);
+  teardown(SA); teardown(SC);
+}));
+await test('lien mort (TECH-043) : la voiture distante est masquée et non collisionnable après ≈ 0,5 s', () => scenario(async (w) => {
+  const [ana, bea] = await freeRace(w, 'ana', 'bea');
+  const SA = raceSide(ana);
+  const send = racing(w, bea);
+  await frames(w, [SA], 1000);
+  precondition(shown(SA, 'bea') && pushedBy(SA, 'bea', w.clock.now()), 'voiture de Bea visible et collisionnable');
+  w.rtc.cut('bea');                                             // le lien de jeu meurt (la présence reste)
+  await frames(w, [SA], 600);
+  precondition(ana.signaling.peers.has('bea'), 'Bea est toujours dans l\'annuaire');
+  assert.ok(!shown(SA, 'bea'), 'sans paquet depuis 0,6 s : masquée');
+  assert.ok(!pushedBy(SA, 'bea', w.clock.now()), 'et plus collisionnable');
+  w.rtc.heal('bea');                                            // le chemin revient (avant toute détection de panne) : ses paquets aussi
+  await frames(w, [SA], 1000);
+  assert.ok(shown(SA, 'bea') && pushedBy(SA, 'bea', w.clock.now()), 'paquets revenus : de nouveau visible et collisionnable');
+  w.clock.clearInterval(send); teardown(SA);
+}));
+await test('joueur revenu au salon (TECH-043) : sa voiture disparaît de la piste', () => scenario(async (w) => {
+  const [ana, bea] = await freeRace(w, 'ana', 'bea');
+  const SA = raceSide(ana);
+  const send = racing(w, bea);
+  await frames(w, [SA], 1000);
+  precondition(shown(SA, 'bea'), 'voiture de Bea visible');
+  w.clock.clearInterval(send); bea.backToLobby();               // Bea revient au salon (sa course est fermée : plus de paquets)
+  await frames(w, [SA], 1500);
+  precondition(ana.members.get('bea') && ana.members.get('bea').racing === false, 'Ana sait que Bea est au salon');
+  assert.ok(!shown(SA, 'bea') && !pushedBy(SA, 'bea', w.clock.now()), 'plus sur la piste, plus collisionnable');
+  assert.equal(SA.remote.has('bea'), false, 'sa voiture est retirée');
+  teardown(SA);
+}));
+await test('lien non ouvert ou joueur hors course (TECH-043) : masquée et hors des collisions même avec des paquets récents ; paquets en route après le retour au salon ignorés', () => {
+  const room = fakeRoom([{ id: 'zoe' }]);
+  const S = raceSide(room);
+  let t = 0;
+  const feedZoe = (ms) => { for (let k = 0; k < ms / 50; k++) { t += 6; room.emit('snapshot', 'zoe', pk(snap(t, 0)), t * DT * 1000); frame(S, t * DT * 1000 + 1); } };
+  feedZoe(1000);
+  precondition(shown(S, 'zoe') && pushedBy(S, 'zoe', t * DT * 1000 + 1), 'visible et collisionnable');
+  room.members.get('zoe').link = 'connecting';
+  feedZoe(200);
+  assert.ok(!shown(S, 'zoe') && !pushedBy(S, 'zoe', t * DT * 1000 + 1), 'lien non ouvert : masquée, hors des collisions');
+  room.members.get('zoe').link = 'open';
+  feedZoe(200);
+  precondition(shown(S, 'zoe'), 'lien rouvert : visible');
+  room.members.get('zoe').racing = false;                        // au salon (présence), ses derniers paquets encore récents
+  frame(S, t * DT * 1000 + 1);
+  assert.ok(!shown(S, 'zoe') && !pushedBy(S, 'zoe', t * DT * 1000 + 1), 'hors course : masquée, hors des collisions');
+  frame(S, t * DT * 1000 + 600);
+  assert.equal(S.remote.has('zoe'), false, 'plus aucun paquet : retirée');
+  room.emit('snapshot', 'zoe', pk(snap(t - 6, 0)), t * DT * 1000 + 700);       // un paquet d'avant, arrivé en retard
+  assert.equal(S.remote.has('zoe'), false, 'un paquet d\'avant le retour au salon ne la recrée pas');
+  room.members.get('zoe').racing = true;
+  room.emit('snapshot', 'zoe', pk(snap(6, 0)), t * DT * 1000 + 3000);         // nouvelle course (son horloge repart de zéro)
+  frame(S, t * DT * 1000 + 3101);
+  assert.ok(S.remote.has('zoe'), 'nouvelle course : la voiture renaît');
+  teardown(S);
+});
+
+
+console.log('Phase 18 : collisions douces (TECH-041)');
+// Deux voitures sur une ligne ; chaque joueur voit l'autre avec D de retard (interpolation + latence), ramenée à l'instant présent (presentState), comme RaceSession._collide.
+function duel(va, vb, gap, D, steps = 480) {
+  const lag = Math.round(D / DT);
+  const A = { pos: { x: -gap, y: 0, z: 0 }, vel: { x: va, y: 0, z: 0 } }, B = { pos: { x: 0, y: 0, z: 0 }, vel: { x: vb, y: 0, z: 0 } };
+  const hA = [], hB = [], mA = new Map(), mB = new Map();
+  for (let k = lag; k > 0; k--) { hA.push({ pos: { x: A.pos.x - va * k * DT, y: 0, z: 0 }, vel: { x: va, y: 0, z: 0 } }); hB.push({ pos: { x: B.pos.x - vb * k * DT, y: 0, z: 0 }, vel: { x: vb, y: 0, z: 0 } }); }
+  let maxDv = 0;
+  for (let i = 0; i < steps; i++) {
+    hA.push({ pos: { ...A.pos }, vel: { ...A.vel } }); hB.push({ pos: { ...B.pos }, vel: { ...B.vel } });
+    const oB = hB[hB.length - 1 - lag], oA = hA[hA.length - 1 - lag];
+    const a0 = A.vel.x, b0 = B.vel.x;
+    softCollide(A, [{ id: 'b', ...presentState(oB, D) }], { memo: mA });
+    softCollide(B, [{ id: 'a', ...presentState(oA, D) }], { memo: mB });
+    maxDv = Math.max(maxDv, Math.abs(A.vel.x - a0), Math.abs(B.vel.x - b0));
+    A.pos.x += A.vel.x * DT; B.pos.x += B.vel.x * DT;
+  }
+  return { vA: A.vel.x, vB: B.vel.x, maxDv };
+}
+const STEP_CAP = MAX_DV_TOTAL;     // m/s : variation de vitesse maximale par pas de 1/120 s, toutes voitures confondues (2,5 m/s : 300 m/s², ≈ 31 g)
+await test('face-à-face 2 × 50 m/s (TECH-041) : Δv plafonnée par pas, échange symétrique, jamais amplifié', () => {
+  assert.equal(STEP_CAP, 2.5);
+  for (const D of [0, 0.1, 0.25]) {
+    const r = duel(50, -50, 6, D);
+    assert.ok(r.maxDv <= STEP_CAP + 1e-9, `face-à-face 2 × 50 m/s (retard ${D} s) : Δv par pas ${r.maxDv.toFixed(2)} m/s`);
+    assert.ok(Math.abs(r.vA + r.vB) < 0.5, `échange symétrique : ${r.vA.toFixed(2)} / ${r.vB.toFixed(2)}`);
+    assert.ok(r.vA >= -50 * 0.35 - 0.5 && r.vB <= 50 * 0.35 + 0.5, `jamais renvoyées plus vite que la restitution ne le permet (± 17,5 m/s) : ${r.vA.toFixed(2)} / ${r.vB.toFixed(2)}`);
+    assert.ok(Math.abs(r.vA) <= 50 + 1e-9 && Math.abs(r.vB) <= 50 + 1e-9, 'aucune voiture ne sort du choc plus vite qu\'elle n\'y est entrée');
+  }
+});
+await test('rebond cohérent (TECH-041) : la vitesse de l\'autre (avant sa propre réaction) est prise en compte, l\'échange n\'est pas doublé', () => {
+  const f = duel(20, -20, 6, 0.1);
+  assert.ok(f.maxDv <= STEP_CAP + 1e-9, 'face-à-face 2 × 20 : Δv par pas ' + f.maxDv.toFixed(2));
+  assert.ok(Math.abs(f.vA + 7) < 1 && Math.abs(f.vB - 7) < 1, `face-à-face 2 × 20 m/s : rebond de ± 7 m/s (restitution 0,35) : ${f.vA.toFixed(2)} / ${f.vB.toFixed(2)}`);
+  const r = duel(40, 30, 3, 0.1);
+  assert.ok(Math.abs(r.vA - 33.25) < 1 && Math.abs(r.vB - 36.75) < 1, `rattrapage 40 → 30 m/s : 33,25 / 36,75 attendus, ${r.vA.toFixed(2)} / ${r.vB.toFixed(2)} (l'échange n'est pas doublé)`);
+  for (const D of [0, 0.25]) {
+    const q = duel(60, 30, 3, D);
+    assert.ok(Math.abs(q.vA - 40) < 1 && Math.abs(q.vB - 50) < 1 && q.maxDv <= STEP_CAP + 1e-9, `rattrapage 60 → 30 m/s (retard ${D} s) : 40 / 50 attendus, ${q.vA.toFixed(2)} / ${q.vB.toFixed(2)}`);
+  }
+});
+await test('sept voitures empilées (TECH-041) : plafond global par pas, impulsion par contact bornée', () => {
+  const self = { pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 } };
+  const side = []; for (let k = 0; k < 7; k++) side.push({ id: 's' + k, pos: { x: 1.0, y: 0, z: (k - 3) * 0.2 }, vel: { x: -40, y: 0, z: 0 } });
+  softCollide(self, side, { memo: new Map() });
+  const dv = Math.hypot(self.vel.x, self.vel.z);
+  assert.ok(dv <= STEP_CAP + 1e-9, `sept voitures empilées du même côté : Δv en un pas ${dv.toFixed(2)} m/s`);
+  // tout autour (sept voitures qui convergent) et pendant tout le contact : chaque pas reste sous le plafond, chaque contact sous MAX_IMPULSE
+  const me = { pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 } }, memo = new Map();
+  const ring = []; for (let k = 0; k < 7; k++) { const a = k * 2 * Math.PI / 7 + 0.3; ring.push({ id: 'r' + k, pos: { x: Math.cos(a) * 1.2, y: 0, z: Math.sin(a) * 1.2 }, vel: { x: -Math.cos(a) * 90, y: 0, z: -Math.sin(a) * 90 } }); }
+  let worst = 0;
+  for (let i = 0; i < 120; i++) { const vx = me.vel.x, vz = me.vel.z; softCollide(me, ring, { memo }); worst = Math.max(worst, Math.hypot(me.vel.x - vx, me.vel.z - vz)); for (const c of memo.values()) assert.ok(c.imp <= MAX_IMPULSE + 1e-9, 'impulsion d\'un contact : ' + c.imp); }
+  assert.ok(worst <= STEP_CAP + 1e-9, 'pire pas : ' + worst.toFixed(2));
+});
+await test('paquets forgés (TECH-041) : 600 m/s annoncés, ou une vitesse sans rapport avec le déplacement : rejetés, la voiture n\'est pas propulsée', () => {
+  // Un client modifié envoie des paquets qui « suivent » notre voiture en annonçant 600 m/s vers elle (le paquet en permet ± 655).
+  const room = fakeRoom([{ id: 'evil' }]);
+  const S = raceSide(room);
+  const lead = 0.1;
+  let t = 0, maxSpeed = 0;
+  for (let i = 0; i < 240; i++) {
+    if (i % 6 === 0) { t += 6; room.emit('snapshot', 'evil', pk(snap(t, S.phys.pos.x - 600 * lead - 0.5, { vel: { x: 600, y: 0, z: 0 }, pos: { x: S.phys.pos.x - 600 * lead - 0.5, y: 1, z: 0 } })), t * DT * 1000); }
+    frame(S, t * DT * 1000 + 100);
+    const v = S.phys.vel; S._collide(t * DT * 1000 + 100);
+    S.phys.pos = { x: S.phys.pos.x + v.x * DT, y: 1, z: S.phys.pos.z + v.z * DT };
+    maxSpeed = Math.max(maxSpeed, Math.hypot(S.phys.vel.x, S.phys.vel.z));
+  }
+  teardown(S);
+  assert.ok(maxSpeed <= 30, 'des paquets fabriqués ne propulsent pas la voiture : ' + maxSpeed.toFixed(1) + ' m/s');
+  // Vitesse plausible (140 m/s) mais voiture immobile, posée sur la nôtre : rejetée aussi (elle ne se déplace pas comme elle le dit).
+  const room2 = fakeRoom([{ id: 'evil' }]), S2 = raceSide(room2);
+  let t2 = 0, max2 = 0;
+  for (let i = 0; i < 240; i++) {
+    if (i % 6 === 0) { t2 += 6; room2.emit('snapshot', 'evil', pk(snap(t2, 0, { vel: { x: 140, y: 0, z: 0 }, pos: { x: -14.5, y: 1, z: 0 } })), t2 * DT * 1000); }
+    frame(S2, t2 * DT * 1000 + 100);
+    S2.phys.pos = { x: 0, y: 1, z: 0 }; S2._collide(t2 * DT * 1000 + 100);
+    max2 = Math.max(max2, Math.hypot(S2.phys.vel.x, S2.phys.vel.z));
+  }
+  teardown(S2);
+  assert.ok(max2 <= 1, 'une voiture immobile qui annonce 140 m/s ne pousse pas : ' + max2.toFixed(1) + ' m/s');
+  // et un client honnête à 80 m/s reste crédible
+  const buf = new SnapshotBuffer();
+  feed(buf, [0, 6, 12, 18].map((k) => snap(k, k * DT * 80, { vel: { x: 80, y: 0, z: 0 } })));
+  assert.equal(buf.sample(18 * DT * 1000 + 130).bad, false, 'vitesse cohérente avec le déplacement : crédible');
+});
+await test('supabase/MULTI.md dit le vrai plafond des collisions (TECH-041)', () => {
+  const doc = readFileSync(new URL('../supabase/MULTI.md', import.meta.url), 'utf8');
+  assert.ok(!/plafonn[ée]+ à ~4 g/.test(doc), 'supabase/MULTI.md dit encore « poussée plafonnée à ~4 g »');
+  assert.ok(doc.includes('2,5 m/s par pas') && doc.includes('31 g'), 'le plafond réel (2,5 m/s par pas, ≈ 31 g) est écrit');
+});
+
+console.log('Phase 18 : ressources et défauts mineurs (TECH-087, TECH-088, TECH-089)');
+await test('onglet masqué 10 minutes (TECH-087, TRANS-09) : tampon d\'interpolation borné, et la voiture repart dès le retour au premier plan', () => {
+  const rc = new RemoteCar(new THREE.Scene(), { id: 'a', name: 'A' });
+  for (let i = 0; i < 12000; i++) rc.push(pk(snap(i * 6, i)), i * 50);          // 10 minutes à 20 Hz, onglet masqué : aucune image, donc aucun sample()
+  const n = rc.buffer.samples.length, span = rc.buffer.latest.t - rc.buffer.samples[0].t;
+  assert.ok(n <= 64, 'tampon d\'interpolation borné : ' + n + ' paquets gardés');
+  assert.ok(span >= 1.4 && span <= 1.6, 'les 1,5 dernières secondes : ' + span.toFixed(2) + ' s');
+  assert.ok(rc.update(12000 * 50 + 100, CAM) && Math.abs(rc.pos.x - 11998) < 1.5, 'retour au premier plan : la voiture est à sa place récente : ' + rc.pos.x.toFixed(1));
+  const flood = new SnapshotBuffer();
+  for (let i = 0; i < 5000; i++) flood.push(pk(snap(i, i)), i);                        // un paquet par pas (6 fois trop serré)
+  assert.ok(flood.samples.length <= 64, 'paquets serrés : ' + flood.samples.length);
+  rc.dispose();
+});
+await test('règle « voitures identiques » (TECH-088) : les voitures distantes aussi ont l\'apparence d\'origine ; sans la règle, chacune garde la sienne', () => {
+  const plain = fakeRoom([{ id: 'zoe', car: { color: '#ff0000', color2: '#00ff00', body: 'muscle' } }]);
+  const P = raceSide(plain, { cup: { n: 0, total: 1, collisions: true } });
+  plain.emit('snapshot', 'zoe', pk(snap(6, 0)), 0);
+  assert.equal('#' + P.remote.get('zoe').baseColor.getHexString(), '#ff0000', 'sans la règle : sa couleur');
+  assert.equal(P.remote.get('zoe').opaque, true, 'vraie voiture en championnat');
+  teardown(P);
+  const room = fakeRoom([{ id: 'zoe', car: { color: '#ff0000', color2: '#00ff00', body: 'muscle' } }], { rules: { sameCars: 1 } });
+  const S = raceSide(room, { cup: { n: 0, total: 1, collisions: true } });
+  room.emit('snapshot', 'zoe', pk(snap(6, 0)), 0);
+  const rc = S.remote.get('zoe');
+  precondition(rc, 'voiture de Zoé créée');
+  const col = '#' + rc.baseColor.getHexString();
+  teardown(S);
+  assert.equal(col, DEFAULT_LOADOUT.color, 'règle « voitures identiques » : la voiture de Zoé a l\'apparence d\'origine');
+});
+await test('téléportation au même pas que le paquet périodique (TECH-089 a) : pas de paquet perdu, la voiture apparaît sans attendre le paquet suivant', () => {
+  const buf = new SnapshotBuffer();
+  feed(buf, [snap(0, 0, { seq: 1 }), snap(6, 10, { seq: 2 })]);
+  const tp = pk(snap(6, 5000, { tele: 1, seq: 3 }));                // téléportation envoyée au même pas que le paquet périodique (même horloge)
+  const ok = buf.push(tp, 6 * DT * 1000 + 31);
+  assert.notEqual(ok, false, 'le paquet de téléportation n\'est pas jeté comme doublon');
+  assert.equal(buf.samples.at(-1).pos.x, 5000);
+  assert.equal(buf.samples.length, 2, 'il remplace le paquet périodique du même pas');
+  let seen = 0; for (let ms = 0; ms < 400; ms += 8) { const o = buf.sample(ms + 30); if (o.teleported) { seen++; assert.equal(o.pos.x, 5000); } }
+  assert.equal(seen, 1, 'téléportation vue une fois, à son instant');
+  assert.equal(buf.push(pk(snap(6, 10, { seq: 2 })), 6 * DT * 1000 + 40), false, 'le périodique (plus ancien) arrivé après ne la défait pas');
+  assert.equal(buf.push(pk(snap(6, 5000, { tele: 1, seq: 3 })), 6 * DT * 1000 + 41), false, 'un vrai doublon reste ignoré');
+  // numéros de séquence qui reviennent à zéro (16 bits)
+  const w = new SnapshotBuffer();
+  w.push(pk(snap(6, 10, { seq: 65535 })), 50); assert.notEqual(w.push(pk(snap(6, 900, { tele: 1, seq: 0 })), 51), false, 'séquence 65535 puis 0 : plus récent');
+});
+await test('circuit sans ligne centrale (TECH-089 c) : avancement non nul et croissant, checkpoints et tours compris', () => {
+  const tr = new Track('t'); tr.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); tr.add({ t: 'finish', x: 0, z: -3, l: 0, r: 0 });     // circuit de joueur : pas de ligne centrale, aucun checkpoint
+  const logic = new RaceLogic(tr);
+  const sp = logic.spawnPoint(), fin = { x: 16, z: -3 * 32 + 16 };
+  const S = Object.assign(Object.create(netMethods), { track: tr, logic, progress: new ProgressTracker(tr.path), state: 'racing', prog: 0, _jumped: false,
+    phys: { pos: { x: (sp.x + fin.x) / 2, y: sp.y, z: (sp.z + fin.z) / 2 } } });
+  precondition(!S.progress.available && logic.cps.length === 0, 'ni ligne centrale ni checkpoint');
+  S._updateProgress();
+  assert.ok(S.prog > 0.25 && S.prog < 0.75, 'à mi-chemin du départ à l\'arrivée : avancement ' + S.prog);
+  let last = -1;
+  for (let k = 0; k <= 10; k++) { S.phys.pos = { x: sp.x + (fin.x - sp.x) * k / 10, y: sp.y, z: sp.z + (fin.z - sp.z) * k / 10 }; S._updateProgress(); assert.ok(S.prog >= last, 'croissant'); last = S.prog; }
+  assert.ok(last < 1, 'jamais 100 % avant l\'arrivée');
+  // un checkpoint : sa part de la course, puis le tronçon suivant
+  const t2 = new Track('t2'); t2.add({ t: 'start', x: 0, z: 0, l: 0, r: 0 }); t2.add({ t: 'checkpoint', x: 0, z: -2, l: 0, r: 0 }); t2.add({ t: 'finish', x: 0, z: -4, l: 0, r: 0 });
+  const lg2 = new RaceLogic(t2);
+  precondition(lg2.cps.length === 1, 'un checkpoint');
+  const S2 = Object.assign(Object.create(netMethods), { track: t2, logic: lg2, progress: new ProgressTracker(t2.path), state: 'racing', prog: 0, _jumped: false, phys: { pos: { x: 16, y: 0, z: -48 } } });
+  S2._updateProgress(); const before = S2.prog;
+  assert.ok(before > 0.15 && before < 0.5, 'avant le checkpoint : ' + before);
+  lg2.collected.add(lg2.cps[0]); lg2.respawn = { ...lg2.respawn, x: 16, z: -2 * 32 + 16 };
+  S2.phys.pos = { x: 16, y: 0, z: -2 * 32 + 16 - 16 }; S2._updateProgress();
+  assert.ok(S2.prog > 0.5 && S2.prog < 1, 'checkpoint pris, en route vers l\'arrivée : ' + S2.prog);
+});
+await test('un flot de messages fiables est borné (TECH-089 e) ; le débit d\'un joueur honnête passe', () => scenario(async (w) => {
+  const [ana, bea] = await freeRace(w, 'ana', 'bea');
+  let n = 0; ana.on('results', () => n++);
+  for (let i = 0; i < 2000; i++) bea.mesh.sendCtl({ k: 'finish', e: bea.epoch, t: 'b-un-a1', steps: 5000 + i });
+  await w.clock.advance(1000);
+  precondition(n > 0, 'les arrivées de Bea sont reçues');
+  assert.ok(n <= 200, `débit des messages fiables borné : ${n} tableaux reconstruits pour 2000 « finish » en un instant`);
+  await w.clock.advance(5000);                                    // le seau se remplit : Bea est de nouveau entendue normalement
+  const before = ana.results.get('bea').n;
+  bea.reportFinish(4000); await w.clock.advance(500);
+  assert.equal(ana.results.get('bea').n, before + 1, 'une arrivée normale, après le flot, est comptée');
+  assert.ok(w.linked(ana, bea), 'les pings passent : la liaison reste ouverte');
+}));
+await test('offre d\'un joueur qui revient arrivée avant sa présence (TECH-089 f) : gardée un instant, la liaison se refait sans attendre la renégociation', () => scenario(async (w) => {
+  // (f) Abe (initiateur de la liaison : le plus petit identifiant) recharge sa page et revient avec son secret ; chez Zoé, sa présence arrive 400 ms APRÈS son offre WebRTC.
+  const zoe = await w.host('zoe'), abe = await w.join('abe');
+  await w.clock.advance(3000);
+  precondition(w.linked(zoe, abe), 'reliés');
+  const saved = abe.resumeInfo().key;
+  abe._dispose();
+  await w.clock.advance(4000);
+  precondition(zoe.members.get('abe') && zoe.members.get('abe').link === 'away', 'Abe absent chez Zoé');
+  const push = w.rt._push.bind(w.rt);
+  w.rt._push = (s, m) => { if (s.client === 'zoe' && m.event === 'presence_diff' && JSON.stringify(m.payload.joins || {}).includes('abe')) w.clock.setTimeout(() => push(s, m), 400); else push(s, m); };
+  const back = await w.join('abe', 'ABC234', { selfId: 'abe', identity: saved });
+  await w.clock.advance(3000);
+  assert.ok(w.linked(zoe, back), 'relié dans les 3 s (offre arrivée avant la présence : gardée, pas perdue) : ' + (zoe.members.get('abe') || {}).link);
+  // Un identifiant qui ne devient jamais membre : ses messages gardés n'ouvrent rien et sont oubliés (TECH-045 tient toujours).
+  for (let i = 0; i < 40; i++) zoe.mesh._onSignal('intrus' + (i % 20), { k: 'desc', d: { type: 'offer', sdp: 'x' } });
+  assert.equal(zoe.mesh.links.has('intrus1'), false, 'aucune liaison pour un inconnu');
+  assert.ok(zoe.mesh._held.size <= 16 && [...zoe.mesh._held.values()].every((q) => q.length <= 24), 'mémoire bornée : ' + zoe.mesh._held.size);
+  await w.clock.advance(6000);
+  zoe.mesh._onSignal('intrus19', { k: 'ice', c: { candidate: 'x' } });
+  assert.ok(!zoe.mesh._held.has('intrus1'), 'oubliés après 5 s');
 }));
 
 await finish('Tous les tests réseau passent.');

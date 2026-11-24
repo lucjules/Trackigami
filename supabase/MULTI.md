@@ -1,8 +1,9 @@
 # Multijoueur en direct : installation et fonctionnement
 
-Jusqu'à 8 joueurs, deux modes au choix de l'hôte :
+Jusqu'à 8 joueurs, trois modes au choix de l'hôte :
 - **Course libre** : le même circuit, chacun à son rythme, vus en **voitures fantômes** (aucune collision), chacun avec son chrono (voir « Boucle de jeu asynchrone » plus bas) ;
-- **Championnat** : plusieurs circuits à la suite, départ commun sur une grille, points par place, classement général, collisions douces en option (voir « Championnat »).
+- **Championnat** : plusieurs circuits à la suite, départ commun sur une grille, points par place, classement général, collisions douces en option (voir « Championnat ») ;
+- **Course** : un championnat d'une seule manche (départ commun, classement à l'arrivée, revanche).
 
 Menu principal > *Multijoueur* : *Créer une salle* (code de 6 caractères), *Rejoindre* par code, ou *Salons publics* (liste, sans code).
 
@@ -127,7 +128,16 @@ Les circuits sont tirés au sort **sans doublon et du plus facile au plus dur** 
 - **Pas de nouvel essai** en manche (`R` = retour au checkpoint, le chrono continue). Quitter la manche = quitter la salle (les autres continuent sans toi).
 - **Classement en direct** : chaque paquet d'état porte l'avancement (0 à 1) de la voiture sur la ligne centrale du circuit (`js/net/progress.js` ; sans ligne centrale : checkpoints franchis).
 - **Collisions douces** (option) : `js/net/collide.js`. Chaque voiture est un disque de 1,15 m de rayon ; chaque joueur applique SA moitié du choc à SA voiture d'après la position affichée de l'autre
-  (poussée plafonnée à ~4 g, rien en looping, rien 2 s après un retour au checkpoint, rien contre une voiture arrivée). Pas de physique rejouable : aucun record n'en dépend.
+  (rien en looping, rien 2 s après un retour au checkpoint, rien contre une voiture arrivée, ni contre une voiture dont les paquets n'arrivent plus depuis 0,5 s, dont le lien n'est pas
+  ouvert ou dont le joueur est revenu au salon). Pas de physique rejouable : aucun record n'en dépend. **Plafonds réels** (0.16.17, TECH-041) : la variation de vitesse due aux
+  collisions est d'au plus **2,5 m/s par pas** de 1/120 s, **toutes voitures confondues** (300 m/s², ≈ 31 g) ; la poussée de séparation (chevauchement) d'au plus 0,32 m/s par pas
+  (≈ 4 g) ; l'impulsion d'un contact d'au plus 30 m/s. L'impulsion est calculée **une fois par contact** (vitesse d'approche du début du contact, restitution 0,35) en supposant
+  que l'autre reçoit la même en sens contraire tant que sa réaction n'est pas visible (l'affichage a ~100 ms de retard) : l'échange n'est plus doublé (rattrapage 40 → 30 m/s :
+  33,2 / 36,8 ; face-à-face 2 × 20 m/s : rebond de ± 7 m/s). Au-delà de ≈ 2 × 30 m/s d'approche (face-à-face à pleine vitesse), le plafond par pas ne suffit pas à arrêter les
+  voitures dans le chevauchement : elles se traversent en perdant chacune la même vitesse. Une vitesse annoncée au-delà de 150 m/s, ou sans rapport (plus de 40 m/s d'écart)
+  avec le déplacement depuis le paquet précédent (ou invérifiable : premier paquet, premier après une téléportation ou un trou de plus de 0,3 s), n'est pas crue : la voiture est
+  hors des collisions tant que ce paquet est affiché.
+  *Avant 0.16.17*, ce document annonçait une poussée limitée à environ 4 g : seule la poussée de séparation l'était ; le terme de choc ajoutait jusqu'à 8 m/s par pas et par voiture.
 - **Hôte parti ou absent** : le suivant dans l'ordre d'arrivée (voir « Identité, rôle d'hôte et vie privée ») devient hôte et reprend la clôture et les départs (l'état du championnat est copié chez tous). Un joueur qui arrive en cours de route
   reçoit le championnat (`cup`), voit le circuit et « Manche en cours : tu joueras la suivante » (GAME-008), suit la manche sans la courir et part à la suivante. Un `rend` manqué est
   rattrapé par le résultat joint au `round` suivant, ou par l'état que l'hôte renvoie quand la liaison se rouvre : le joueur revenu après la clôture voit les résultats de SA manche,
@@ -311,10 +321,36 @@ Choisis par l'hôte dans le salon :
 ## Rendu des adversaires
 
 - Tampon de 100 ms : chaque adversaire est affiché tel qu'il était il y a 100 ms, interpolé (position : Hermite avec les
-  vitesses, orientation : slerp). Paquets perdus : interpolation linéaire, puis arrêt sur place après 0,25 s.
+  vitesses, orientation : slerp). Paquets perdus : interpolation linéaire, puis arrêt sur place après 0,25 s. Le tampon est purgé à chaque paquet reçu
+  (1,5 s gardées, 64 paquets au plus) : un onglet masqué, qui ne dessine rien, ne le fait plus grossir (0.16.17, TECH-087).
+- **Cycle de vie d'une voiture distante** (0.16.17, TECH-009, TECH-043, `js/race/net.js`) : elle naît à l'arrivée d'un membre en course (relié) ou à son premier
+  paquet, et renaît après un départ suivi d'un retour (même identifiant) : un arrivant en pleine course libre est vu de tous. Elle n'est **montrée** (et n'entre
+  dans les collisions) que si un paquet est arrivé depuis moins de **0,5 s**, que son lien est ouvert et que sa présence dit qu'il court ; elle est **retirée** quand
+  il est revenu au salon (présence `racing: false`) et que ses paquets ont cessé ; un paquet d'avant ce retour, arrivé en retard, ne la recrée pas. Pendant le
+  **décompte** d'un départ commun, chacun envoie déjà son état : la grille est visible avant le GO (TECH-089 b). La règle « voitures identiques » vaut aussi pour
+  elles (TECH-088). Une course prête moins de 1 s avant le GO prévu (circuit long à charger) a quand même un décompte de 3 s (TECH-089 d).
 - Retour au checkpoint d'un adversaire : un compteur de téléportation voyage dans chaque paquet ; la voiture reste sur
-  place puis **apparaît** à son nouvel emplacement, sans jamais glisser (même si le paquet de la téléportation est perdu).
+  place puis **apparaît** à son nouvel emplacement, sans jamais glisser (même si le paquet de la téléportation est perdu). Un paquet envoyé au même pas que le
+  paquet périodique le remplace s'il est plus récent (numéro de séquence) au lieu d'être jeté comme doublon (TECH-089 a).
+- Classement en direct sur un circuit **sans ligne centrale** (circuit de joueur) : checkpoints franchis, plus la part faite du tronçon en cours (du dernier point de
+  passage au checkpoint restant le plus proche, ou à l'arrivée) : plus de 0 % jusqu'à l'arrivée sur un circuit sans checkpoint (TECH-089 c).
+- Débits : 80 paquets d'état par seconde et par joueur au plus ; messages fiables : 120 d'un coup puis 40 par seconde (TECH-089 e). La signalisation d'un joueur qui
+  n'est pas encore membre (sa présence arrive après son offre) est gardée 5 s sans rien ouvrir, puis rejouée quand il le devient (TECH-089 f : sinon la liaison
+  attendait la renégociation, 12 s).
 - Plus un adversaire est loin de votre caméra (30 m à 260 m), plus sa voiture et son nom s'assombrissent.
+
+### À vérifier sur de vraies machines (voitures distantes et collisions, 0.16.17 ; observé seulement sur le banc et dans deux onglets d'un même Chromium)
+
+1. **Ressenti des collisions** à trois ou quatre machines sur des réseaux différents (latences de 30 à 150 ms) : rattrapages, contacts latéraux, voitures serrées au départ.
+   Le plafond de 2,5 m/s par pas (≈ 31 g) et la restitution de 0,35 sont des choix : trop durs ou trop mous ? Un face-à-face à pleine vitesse traverse (voir « Collisions
+   douces ») : acceptable en jeu ?
+2. **Seuil de 0,5 s** : sur un Wi-Fi qui saute, la voiture d'un adversaire clignote-t-elle (masquée puis revue) ? Relever la plus longue pause entre deux paquets
+   (`copytrack.session.remote`, `buffer.lastRecvMs`) ; augmenter `STALE_MS` (`js/net/interp.js`) si c'est fréquent.
+3. **Arrivant en pleine course libre** (troisième machine) : vu de tous dès son départ, avec sa couleur ; son nom au classement en direct.
+4. **Retour au salon** d'un joueur en course libre : sa voiture disparaît chez les autres en moins d'une seconde, sans réapparaître.
+5. **Grille au décompte** : les voitures de la grille visibles chez chacun avant le GO ; **chargement lent** (circuit de la communauté sur un réseau lent) : décompte de 3 s.
+6. **Vitesse annoncée crédible** : sur des circuits à tremplins, loopings et boosts, la voiture d'un adversaire ne sort pas des collisions à tort (une vitesse annoncée
+   qui s'écarte de plus de 40 m/s de son déplacement entre deux paquets la fait ignorer pendant ce paquet).
 
 ## Tests
 
@@ -330,6 +366,10 @@ Choisis par l'hôte dans le salon :
   secret ; retour non relié sans remise à zéro du délai ; successeur sans drapeau ; client modifié annonçant `host: true` ; preuve de remplacement sans secret ; preuve rejouée sur une autre liaison, une
   seconde fois, dans une autre salle ; descriptions et candidats signés ; ordre usurpé ; majorité de l'arrivant ; deux salons simultanés) ; `test-manche` (hôte qui recharge en pleine manche) ; `test-legal` (page
   Confidentialité) ; `test-browser` (trois onglets, vrai WebRTC et vrai Web Crypto : intérim, imposteur refusé, hôte revenu avec son secret). Chaque défaut a d'abord été reproduit (`bugConnu`).
+  Voitures distantes et collisions (0.16.17) : `test-net` (arrivant en pleine course libre vu de part et d'autre ; joueur parti puis revenu ; lien mort : masquée et hors des collisions
+  à 0,6 s ; retour au salon ; lien non ouvert ; face-à-face 2 × 50 et 2 × 20 m/s, rattrapages 40 → 30 et 60 → 30 avec 0, 0,1 et 0,25 s de retard ; sept voitures ; paquets forgés ;
+  tampon borné onglet masqué ; voitures identiques ; téléportation au même pas ; avancement sans ligne centrale ; flot de messages fiables ; offre avant la présence) ;
+  `test-browser` (écouteurs du salon stables sur 10 ouvertures ; deux onglets : grille visible au décompte, décompte après un chargement trop long, retour au salon).
 - Essai à deux ou trois onglets sans serveur : `?net=local` dans l'URL (signalisation par BroadcastChannel ; le WebRTC est réel).
 
 ## Limites de l'architecture actuelle (à lire avant d'attendre plus)

@@ -41,6 +41,10 @@ export const MAX_PLAYERS = 8;
 const START_DELAY_MS = 4000;                                // entre « Lancer » et « GO »
 const CODE_CHUNK = 12000;                                          // un message fiable ne dépasse pas ~12 Ko (compatibilité entre navigateurs)
 const MAX_PACKETS_PER_SEC = 80;                                    // au-delà, un joueur inonde : on ignore l'excédent
+// Messages fiables (TECH-089 e) : un seau de CTL_BURST jetons par joueur, rempli de CTL_PER_SEC par seconde. Un joueur honnête en envoie au plus quelques dizaines d'un
+// coup (à la vérification d'une liaison : ordre, règles, circuit en 34 morceaux au plus, course en cours, messages renvoyés, meilleur temps), puis un toutes les
+// deux secondes (ping) ; au-delà, l'excédent est ignoré : un flot de « finish » ne fait plus reconstruire le classement à chaque message.
+const CTL_BURST = 120, CTL_PER_SEC = 40;
 export const FINISH_GRACE_MS = 30000;                              // championnat : temps laissé aux autres après la première arrivée
 export const MAX_ROUND_MS = 600000;                                // championnat : une manche ne dure jamais plus de 10 minutes
 export const RESULTS_MS = 12000;                                   // championnat : affichage des résultats avant la manche suivante
@@ -120,6 +124,7 @@ export class Room extends Emitter {
     this.buffers = new Map();           // id → SnapshotBuffer (rempli par setBufferFactory : la voiture distante)
     this.bufferFactory = null;
     this._rate = new Map();
+    this._ctlRate = new Map();          // id → seau à jetons des messages fiables (TECH-089 e)
     this.cup = null;                    // championnat en cours ou terminé (Championship) ; null en mode libre
     this.cupState = null;               // manche en cours : { phase: 'racing' | 'results' | 'done', n, roster, finishes, t0, firstAt, until }
     this.closed = false;
@@ -642,6 +647,7 @@ export class Room extends Emitter {
       return;
     }
     if (kind === 'state') return this._onState(from, data);
+    if (!this._ctlBudget(from)) return;
     switch (data.k) {
       case 'ping': this.mesh.sendCtl({ k: 'pong', id: data.id }, from); break;
       case 'hi': this._onHi(from, data); break;                    // (l'autre refait sa vérification : il a refait sa liaison)
@@ -704,6 +710,17 @@ export class Room extends Emitter {
       }
       default: break;
     }
+  }
+
+  // Seau à jetons des messages fiables d'un joueur (voir CTL_BURST) : vrai si ce message peut être traité.
+  _ctlBudget(from) {
+    const now = this.now();
+    let b = this._ctlRate.get(from);
+    if (!b) { b = { n: CTL_BURST, at: now }; this._ctlRate.set(from, b); }
+    b.n = Math.min(CTL_BURST, b.n + Math.max(0, now - b.at) * CTL_PER_SEC / 1000); b.at = now;
+    if (b.n < 1) return false;
+    b.n -= 1;
+    return true;
   }
 
   _pingAll() {
