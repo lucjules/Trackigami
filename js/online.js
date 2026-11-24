@@ -18,7 +18,7 @@
 //   Renouvellement (jeton à usage unique) : relire la session enregistrée, puis renouveler sous verrou entre onglets (navigator.locks ; repli : bail
 //   `copytrack.authLease`), écouter l'évènement « storage ». Un vrai refus du serveur (jeton révoqué) : compte → « session expirée » ; invité → une
 //   nouvelle identité, ANNONCÉE (onNotice). Aucun jeton n'est jamais écrit dans un journal.
-import { getJSON, setJSON, getGlobal, setGlobal, scopedKey, globalKey } from './storage.js';
+import { getJSON, setJSON, getGuestJSON, getGlobal, setGlobal, scopedKey, globalKey } from './storage.js';
 import { CONFIG } from './config.js';
 import { MAX_PUBLISH_CHARS, MAX_PUBLISH_PIECES } from './constants.js';
 import { PHYS_VER } from './version.js';
@@ -220,6 +220,19 @@ class OnlineClient {
   async _refresh(s) {
     return this._norm(await this._fetch('/auth/v1/token?grant_type=refresh_token', { method: 'POST', body: { refresh_token: s && s.refresh_token }, auth: false }));
   }
+
+  // Les AUTRES identités en ligne connues de cet appareil, pour l'export des données (TECH-032) : l'invité gardé à côté d'un compte connecté (inscription sans conversion, ou
+  // connexion à un compte existant : sa session anonyme reste dans la portée de l'invité). Sa session sert à lire SES tables privées tant que son jeton est valable ; sinon (jeton
+  // périmé : on ne le renouvelle pas ici, ce serait consommer son jeton de renouvellement pour un export) seules les tables publiques sont lues, et l'export le dit.
+  otherIdentities() {
+    if (this.kind !== 'account') return [];
+    const g = getGuestJSON('online.session', null);
+    const uid = g && g.user && g.user.id;
+    if (typeof uid !== 'string' || uid === this.uid) return [];
+    return [{ label: 'guest', uid, token: fresh(g) ? g.access_token : null }];
+  }
+  // Lecture avec un jeton donné (jamais celui de la session courante) : export de l'identité de l'invité.
+  restWith(token, path) { return this._fetch(path, { auth: false, headers: { Authorization: 'Bearer ' + token } }); }
 
   // Appel REST authentifié (utilisé par account.js).
   rest(path, opts = {}) { return this._fetch(path, opts); }

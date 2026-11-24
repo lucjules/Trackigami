@@ -121,6 +121,22 @@ set role authenticated; select public.as_user('00000000-0000-0000-0000-000000000
 select public.chk('A6c TECH-021 : authenticated lit les colonnes du classement mondial, ghost_veh comprise (requête réelle), mais ni inputs ni ghost', public.rows_of($$select time, player, updated_at, has_ghost, ghost_veh, splits, track_name from scores$$) >= 0
   and public.rows_of($$select inputs from scores$$) = -1 and public.rows_of($$select ghost from scores$$) = -1);
 reset role;
+-- TECH-032 : l'export des données du joueur (js/dataExport.js) lit chaque table avec les colonnes que le rôle du jeu PEUT lire. Avant : `select=*` sur scores (inputs, ghost, ghost_veh non
+-- accordées) était refusé par PostgreSQL : la table des temps du joueur était TOUJOURS en erreur. Chaque requête est exécutée pour de bon sous authenticated (rows_of renvoie -1 sur un refus).
+set role authenticated; select public.as_user('00000000-0000-0000-0000-0000000000b0');
+select public.chk('A6d TECH-032 : chaque requête de l''export du joueur (EXPORT_TABLES de js/dataExport.js, track_likes comprise) réussit sous authenticated',
+  (select count(*) from unnest(string_to_array(:'expq', ';')) x where public.rows_of(format('select %s from public.%I', split_part(x, '|', 2), split_part(x, '|', 1))) < 0) = 0
+  and :'expq' like '%track_likes|%' and :'expq' like '%scores|%');
+select public.chk('A6e TECH-032 : …et l''ancienne lecture « select * from scores » est bien refusée (ce que l''export demandait avant), sans que le droit ait été élargi',
+  public.rows_of($$select * from scores$$) = -1 and public.rows_of($$select inputs from scores$$) = -1 and public.rows_of($$select ghost from scores$$) = -1);
+select public.chk('A6f TECH-032 : l''export du joueur ne rend QUE ses lignes de scores et de « j''aime » (bob ne voit pas celles d''alice)',
+  public.rows_of($$select track_key from scores where player = '00000000-0000-0000-0000-0000000000b0'$$) = 0 and public.rows_of($$select track_id from track_likes where player = '00000000-0000-0000-0000-00000000a11c'$$) = 0
+  and public.rows_of($$select track_id from track_likes where player = '00000000-0000-0000-0000-0000000000b0'$$) = 0);
+select public.as_user('00000000-0000-0000-0000-00000000a11c');
+select public.chk('A6g TECH-032 : témoin : alice exporte SON temps (b-test-1) et SON « j''aime » avec les colonnes de l''export',
+  public.rows_of($$select track_key,player,time,phys_ver,track_name,updated_at,has_ghost,splits from scores where player = '00000000-0000-0000-0000-00000000a11c'$$) = 1
+  and public.rows_of($$select track_id,player from track_likes where player = '00000000-0000-0000-0000-00000000a11c'$$) = 1);
+reset role;
 select public.chk('A7 tables internes illisibles de anon et authenticated : rate_hits, submit_rate, track_binds, run_stats, moderators, comment_reports, mode_reports, track_reports, track_plays, mode_plays', not exists (
   select 1 from unnest(array['rate_hits', 'submit_rate', 'track_binds', 'run_stats', 'moderators', 'comment_reports', 'mode_reports', 'track_reports', 'track_plays', 'mode_plays']) t
   where has_table_privilege('anon', 'public.' || t, 'select') or has_table_privilege('authenticated', 'public.' || t, 'select')));
@@ -326,7 +342,10 @@ SQL
 # La liste des fonctions que le CLIENT lit sans session (js/online.js, PUBLIC_RPC) : la base doit les ouvrir à anon (TECH-031 ; une fonction retirée de la liste attendue du jeu ne passerait plus).
 PUBRPC="$(node --input-type=module -e "import('./js/online.js').then((m) => console.log(m.PUBLIC_RPC.join(',')))")"
 [ -n "$PUBRPC" ] || { echo "ÉCHEC : liste PUBLIC_RPC introuvable dans js/online.js"; exit 1; }
-$P -d $DB -v pubrpc="$PUBRPC" -f "$TMP/attaques.sql" > /dev/null 2>"$TMP/err.txt" || true
+# Les requêtes de l'export des données du joueur (js/dataExport.js, EXPORT_TABLES) : table|colonnes, séparées par « ; » (TECH-032). Chacune est exécutée pour de bon sous le rôle du jeu.
+EXPQ="$(node --input-type=module -e "import('./js/dataExport.js').then((m) => console.log(m.EXPORT_TABLES.map(([t, , c]) => t + '|' + (c || '*')).join(';')))")"
+[ -n "$EXPQ" ] || { echo "ÉCHEC : EXPORT_TABLES introuvable dans js/dataExport.js"; exit 1; }
+$P -d $DB -v pubrpc="$PUBRPC" -v expq="$EXPQ" -f "$TMP/attaques.sql" > /dev/null 2>"$TMP/err.txt" || true
 
 # F. Concurrence : vraies sessions simultanées (psql en parallèle) sur les compteurs (j'aime, signalements, parties). Six manches de huit pilotes chacune : avant l'étape 17,
 #    des mises à jour étaient PERDUES (likes = 7 pour 8 lignes, reports = 6 pour 8 lignes), de façon non déterministe : d'où plusieurs manches.

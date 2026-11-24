@@ -194,4 +194,25 @@ await test('TECH-080 b : les messages de délai sont traduits en anglais', async
   } finally { I.setLang('fr'); }
 });
 
+await test('TECH-032 : l’identité d’invité gardée à côté d’un compte est connue de l’export (jeton valable : lecture complète ; périmé : seulement le public) ; jamais pour un invité', async () => {
+  reset(); freshDevice('export');
+  const guestSess = { access_token: 'at-guest', refresh_token: 'rt-guest', expires_at: Math.floor(Date.now() / 1000) + 3600, user: { id: '7a1c0e55-2222-4333-8444-555566667777' } };
+  storage.setJSON('online.session', guestSess);
+  assert.deepEqual(online.otherIdentities(), [], 'invité : son identité est la courante, pas une autre');
+  online.useAccount({ access_token: 'at-compte', refresh_token: 'rt-compte', expires_at: Math.floor(Date.now() / 1000) + 3600, user: { id: '0b9f3c2e-1111-4222-8333-444455556666' } });
+  try {
+    const [o] = online.otherIdentities();
+    assert.equal(o.uid, '7a1c0e55-2222-4333-8444-555566667777'); assert.equal(o.token, 'at-guest');
+    storage.setJSON('online.session', { ...guestSess, expires_at: Math.floor(Date.now() / 1000) - 5 });
+    assert.equal(online.otherIdentities()[0].token, null, 'jeton périmé : pas de lecture complète (on ne consomme pas son jeton de renouvellement pour un export)');
+    storage.setJSON('online.session', { ...guestSess, user: { id: '0b9f3c2e-1111-4222-8333-444455556666' } });
+    assert.deepEqual(online.otherIdentities(), [], 'l’invité converti EST le compte : rien d’autre à exporter');
+  } finally { online.useGuest(); storage.setJSON('online.session', null); }
+});
+await test('TECH-032 : restWith lit avec le jeton donné, jamais celui de la session courante, sans rien créer', async () => {
+  reset(); freshDevice('restwith'); world.ghostVeh = true;
+  await online.restWith('at-guest', '/rest/v1/scores?select=track_key&player=eq.x');
+  assert.equal(world.calls.at(-1).authorization, 'Bearer at-guest'); assert.equal(signups(), 0);
+});
+
 await finish('Lectures en ligne : classement avec ou sans droit de colonne.');

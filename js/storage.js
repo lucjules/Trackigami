@@ -83,6 +83,11 @@ export function getJSON(key, fallback) { return read(key, fallback); }
 // Le texte stocké d'une clé (ou null) et son nom complet dans le navigateur (évènement « storage » d'un autre onglet : profile.js, TECH-027).
 export function getRaw(key) { try { return localStorage.getItem(PREFIX + key); } catch { return null; } }
 export const scopedKey = (key) => PREFIX + key;
+// Une clé de la portée de l'INVITÉ, quelle que soit la portée courante (un compte connecté ne la voit pas autrement) : l'export des données retrouve ainsi l'identité en ligne de l'invité
+// gardée à côté d'un compte (TECH-032). Lecture seule.
+export function getGuestJSON(key, fallback = null) {
+  try { const v = localStorage.getItem(GUEST_PREFIX + key); return v == null ? fallback : JSON.parse(v); } catch { return fallback; }
+}
 // quiet : écriture qui NE relance PAS la synchronisation du compte (le profil relu après une synchronisation : sinon chaque synchronisation en rappelait une autre, TECH-007).
 export function setJSON(key, value, { quiet = false } = {}) { return write(key, value, quiet); }
 
