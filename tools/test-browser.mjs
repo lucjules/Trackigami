@@ -2237,6 +2237,77 @@ try {
     }
   });
 
+  // Phase 16 (NET_VER 5) : TROIS onglets, vrai WebRTC, signalisation locale. TECH-008 : le choix d'un circuit ne lance jamais personne (après un retour au salon,
+  // après « Arrêter le championnat », après une course unique) ; GAME-008 : un arrivant pendant une « Course » voit le circuit et « manche en cours ».
+  await test('multijoueur (TECH-008, GAME-008) : trois onglets : choisir un circuit ne lance personne ; un arrivant pendant une « Course » voit le circuit et la manche en cours', async () => {
+    const B = await hook(await ctx.newPage());
+    let C = null;
+    const join = async (p, name, code) => {
+      await p.goto(`http://127.0.0.1:${PORT}/?net=local#salle=${code}`, { waitUntil: 'load' });
+      if (await p.locator('#wl-name').isVisible()) { await p.locator('#wl-name').fill(name); await p.locator('#wl-submit').evaluate((el) => el.click()); }
+      await p.waitForFunction(() => window.copytrack && window.copytrack.room && window.copytrack.room.list.some((m) => !m.self && m.link === 'open'), null, { timeout: 30000 });
+    };
+    const mode = (p) => p.evaluate(() => [window.copytrack.mode, window.copytrack.room.state]);
+    const builtin = (i) => app((k) => ({ id: window.copytrack.builtins[k].key, name: window.copytrack.builtins[k].def.name }), i);
+    const toLobby = (p) => p.evaluate(() => { const A = window.copytrack; if (A.mode === 'race') A._leaveRaceToLobby(A.room); });
+    try {
+      await app(() => history.replaceState(null, '', '?net=local'));
+      await app(() => window.copytrack.multiMenu());
+      await page.evaluate(() => [...document.querySelectorAll('#modal-actions button')].find((b) => /Créer une salle/.test(b.textContent)).click());
+      await waitApp(() => document.querySelector('.mp-code b'));
+      const code = (await page.evaluate(() => document.querySelector('.mp-code b').textContent)).trim();
+      await join(B, 'Bea', code);
+      await waitApp(() => window.copytrack.room.list.some((m) => !m.self && m.link === 'open'), null, 20000);
+      const [t0, t1, t2] = [await builtin(0), await builtin(1), await builtin(2)];
+      // 1. Course libre, puis tout le monde revient au salon ; l'hôte change deux fois de circuit.
+      await app((t) => { const r = window.copytrack.room; r.setMode('free'); r.selectTrack(t); r.start(); }, t0);
+      await B.waitForFunction(() => window.copytrack.mode === 'race', null, { timeout: 30000 });
+      await waitApp(() => window.copytrack.mode === 'race', null, 30000);
+      await toLobby(B); await toLobby(page);
+      await B.waitForFunction(() => window.copytrack.mode === 'menu' && window.copytrack.room.state === 'lobby', null, { timeout: 15000 });
+      await app((t) => window.copytrack.room.selectTrack(t), t1);
+      await app((t) => window.copytrack.room.selectTrack(t), t2);
+      await page.waitForTimeout(3000);
+      assert.deepEqual(await mode(B), ['menu', 'lobby'], 'après un retour au salon, choisir un circuit ne lance pas l\'invitée');
+      assert.equal(await B.evaluate(() => (window.copytrack.room.track || {}).name), t2.name, 'elle voit le circuit choisi');
+      // 2. Championnat arrêté, puis l'hôte choisit un circuit.
+      await app((ts) => window.copytrack.room.startCup({ rounds: ts }), [t0, t1]);
+      await B.waitForFunction(() => window.copytrack.mode === 'race' && window.copytrack.session && window.copytrack.session.cup, null, { timeout: 30000 });
+      await app(() => window.copytrack.room.stopCup());
+      await B.waitForFunction(() => window.copytrack.mode === 'menu' && !window.copytrack.room.cup, null, { timeout: 15000 });
+      await toLobby(page);
+      await app((t) => window.copytrack.room.selectTrack(t), t0);
+      await page.waitForTimeout(3000);
+      assert.deepEqual(await mode(B), ['menu', 'lobby'], 'après « Arrêter le championnat », choisir un circuit ne lance pas l\'invitée');
+      // 3. « Course » (une manche) ; une troisième joueuse arrive pendant la course.
+      await app((t) => { const r = window.copytrack.room; r.setMode('race'); r.startCup({ rounds: [t] }); }, t1);
+      await B.waitForFunction(() => window.copytrack.mode === 'race' && window.copytrack.session && window.copytrack.session.cup, null, { timeout: 30000 });
+      await waitApp(() => window.copytrack.mode === 'race' && window.copytrack.session && window.copytrack.session.cup, null, 30000);
+      C = await hook(await ctx.newPage());
+      await join(C, 'Cyd', code);
+      await C.waitForFunction(() => document.querySelector('.mp-lobby') && /Manche en cours : tu joueras la suivante\./.test(document.querySelector('.mp-lobby').textContent), null, { timeout: 20000 });
+      const lobbyC = await C.evaluate(() => document.querySelector('.mp-lobby').textContent);
+      assert.ok(lobbyC.includes(t1.name), 'l\'arrivante voit le circuit de la course en cours : ' + lobbyC.replace(/\s+/g, ' ').slice(0, 300));
+      assert.deepEqual(await mode(C), ['menu', 'lobby'], 'elle n\'est pas lancée dans une course commencée');
+      await shot('16-arrivant-course-en-cours');
+      // Fin de la course (Bea puis Ana), retour au salon ; l'hôte choisit un autre circuit : personne n'est lancé.
+      await B.evaluate(() => window.copytrack.session._finish(30.0));
+      await app(() => window.copytrack.session._finish(31.0));
+      await waitApp(() => /Course terminée/.test((document.getElementById('mp-cup') || {}).textContent || ''), null, 20000);
+      for (const p of [B, page]) await p.evaluate(() => { const b = document.querySelector('#mp-cup [data-act="lobby"]'); if (b) b.click(); });
+      await B.waitForFunction(() => window.copytrack.mode === 'menu', null, { timeout: 15000 });
+      await waitApp(() => window.copytrack.mode === 'menu', null, 15000);
+      assert.ok((await C.evaluate(() => document.querySelector('.mp-lobby') ? document.querySelector('.mp-lobby').textContent : '')).includes(t1.name), 'après la course, l\'arrivante voit toujours le circuit');
+      await app((t) => window.copytrack.room.selectTrack(t), t2);
+      await page.waitForTimeout(3000);
+      assert.deepEqual(await mode(B), ['menu', 'lobby'], 'après une course unique terminée, choisir un circuit ne lance pas Bea');
+      assert.deepEqual(await mode(C), ['menu', 'lobby'], 'ni l\'arrivante');
+    } finally {
+      await app(() => { if (window.copytrack.room) window.copytrack.room.leave(); window.copytrack.ui.closeModal(); if (window.copytrack.mode === 'race') window.copytrack.quitRace(); window.copytrack.showMenu('menu'); }).catch(() => {});
+      await B.close(); if (C) await C.close();
+    }
+  });
+
   // E22 : aides à la conduite (catégorie « assisté »), animations réduites, caméra libre de l'éditeur, parcours complet au tactile.
   await test('aides à la conduite : course rangée dans « assisté » sans médailles, commandes effectives enregistrées ; animations réduites ; caméra libre', async () => {
     await app(() => { const A = window.copytrack; A.settings.aids = { autoGas: true, antiSpin: true }; A.saveSettings(); A.playBuiltin(0); });
