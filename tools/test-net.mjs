@@ -1461,14 +1461,19 @@ await test('circuit sans ligne centrale (TECH-089 c) : avancement non nul et cro
   S2.phys.pos = { x: 16, y: 0, z: -2 * 32 + 16 - 16 }; S2._updateProgress();
   assert.ok(S2.prog > 0.5 && S2.prog < 1, 'checkpoint pris, en route vers l\'arrivée : ' + S2.prog);
 });
-await bugConnu('TECH-089', () => scenario(async (w) => {
+await test('un flot de messages fiables est borné (TECH-089 e) ; le débit d\'un joueur honnête passe', () => scenario(async (w) => {
   const [ana, bea] = await freeRace(w, 'ana', 'bea');
   let n = 0; ana.on('results', () => n++);
   for (let i = 0; i < 2000; i++) bea.mesh.sendCtl({ k: 'finish', e: bea.epoch, t: 'b-un-a1', steps: 5000 + i });
   await w.clock.advance(1000);
   precondition(n > 0, 'les arrivées de Bea sont reçues');
   assert.ok(n <= 200, `débit des messages fiables borné : ${n} tableaux reconstruits pour 2000 « finish » en un instant`);
-}), '(e) un flot de messages fiables est borné');
+  await w.clock.advance(5000);                                    // le seau se remplit : Bea est de nouveau entendue normalement
+  const before = ana.results.get('bea').n;
+  bea.reportFinish(4000); await w.clock.advance(500);
+  assert.equal(ana.results.get('bea').n, before + 1, 'une arrivée normale, après le flot, est comptée');
+  assert.ok(w.linked(ana, bea), 'les pings passent : la liaison reste ouverte');
+}));
 await bugConnu('TECH-089', () => scenario(async (w) => {
   // (f) Abe (initiateur de la liaison : le plus petit identifiant) recharge sa page et revient avec son secret ; chez Zoé, sa présence arrive 400 ms APRÈS son offre WebRTC.
   const zoe = await w.host('zoe'), abe = await w.join('abe');
