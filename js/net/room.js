@@ -55,6 +55,7 @@ const MAX_PROOF_FAILS = 3;                                         // preuves re
 // tient pour acquis quand tous les présents l'ont donné, ou au bout de BOOT_MS. Un onglet rechargé qui revient avec son secret attend au plus INHERIT_MS
 // l'état de la salle (du joueur qui faisait l'intérim) avant de reprendre son rôle d'hôte. ORDER_SLACK_MS : marge entre les horloges des membres (une place
 // gardée depuis plus de RESUME_MS - ORDER_SLACK_MS peut déjà avoir été rendue chez l'hôte).
+const HOST_GRACE_MS = 6000;                                        // une liaison tombée depuis plus longtemps : le joueur n'est plus tenu pour présent (rôle d'hôte compris)
 const BOOT_MS = 5000;
 const INHERIT_MS = 4000;
 const ORDER_SLACK_MS = 5000;
@@ -269,6 +270,7 @@ export class Room extends Emitter {
     if (!m || m.link === 'away' || m.link === 'incompatible') return;
     for (const e of m.sentLog || []) if (e.at >= (m.heardAt || 0)) this._queue(m, e.msg);
     m.sentLog = [];
+    if (m.downAt == null) { m.downAt = this.now(); this.schedule(() => this._checkHost(), HOST_GRACE_MS + 50); }       // (la grâce échue, le rôle d'hôte est recalculé aussitôt, sans attendre le battement)
     if (m.listed !== false && !this.reconnecting) { m.link = 'connecting'; this._relink(id); }
     else { this._markAway(id); this.emit('away', id); }
     this.emit('members');
@@ -396,12 +398,16 @@ export class Room extends Emitter {
   }
 
   // ---- Ordre d'arrivée (TECH-010) ----------------------------------------------------------------------------------------
-  // Présent pour le rôle d'hôte : ni absent (place gardée), ni revenu sans preuve, ni d'une autre version. Pendant MA coupure, je ne juge pas les autres
-  // (comme pour leurs places : _expireAway) : un joueur coupé ne se croit pas hôte parce qu'il ne voit plus personne.
+  // Présent pour le rôle d'hôte : ni absent (place gardée), ni revenu sans preuve, ni d'une autre version, ni coupé depuis plus de HOST_GRACE_MS (le serveur
+  // garde la présence d'une connexion morte jusqu'à 30 s : un hôte dont la liaison est tombée ne doit pas rester l'hôte tout ce temps). Pendant MA coupure, je
+  // ne juge pas les autres (comme pour leurs places : _expireAway) : un joueur coupé ne se croit pas hôte parce qu'il ne voit plus personne.
   _presentForHost(id) {
     if (id === this.selfId) return !this._inheritingNow();
     const m = this.members.get(id);
-    return !!m && m.link !== 'incompatible' && !m.returning && (m.link !== 'away' || this.reconnecting);
+    if (!m || m.link === 'incompatible' || m.returning) return false;
+    if (this.reconnecting || m.link === 'open') return true;
+    if (m.link === 'away') return false;
+    return m.downAt == null || this.now() - m.downAt < HOST_GRACE_MS;
   }
   _inheritingNow() { return this._inheriting && (this._inheritUntil == null || this.now() < this._inheritUntil); }
   _orderPayload() { return (this._order || [this.selfId]).map((id) => [id, id === this.selfId ? (this.ident && this.ident.commit) || null : this._pins.get(id) || this._orderCommits.get(id) || null]); }
@@ -547,7 +553,7 @@ export class Room extends Emitter {
     const m = { id, name: String(meta.name || '?').slice(0, 20), host: !!meta.host, ready: !!meta.ready, car: cleanCarMeta(meta.car), want: meta.want === 'rematch' ? 'rematch' : null, mode: MODES.includes(meta.mode) ? meta.mode : null, racing: !!meta.racing, v: meta.v, net: meta.net, t: meta.t || 0, link: prev && !back ? prev.link : 'connecting', rtt: prev ? prev.rtt : 0, everOpen: !!(prev && prev.everOpen),
       listed: true, heardAt: prev ? prev.heardAt : 0, unanswered: prev ? prev.unanswered : 0, outbox: prev ? prev.outbox : [], sentLog: prev ? prev.sentLog : [],
       commit: prev ? prev.commit : null, nonce: prev && !back ? prev.nonce : null, inbox: prev && !back ? prev.inbox : [], provingSince: prev ? prev.provingSince : 0,
-      proofFails: prev ? prev.proofFails || 0 : 0, returning: !!(prev && (back || prev.returning)), awaySince: prev ? prev.awaySince : undefined };
+      downAt: prev ? prev.downAt : null, proofFails: prev ? prev.proofFails || 0 : 0, returning: !!(prev && (back || prev.returning)), awaySince: prev ? prev.awaySince : undefined };
     if (rejoin && prev && prev.awaySince != null && prev.awaySince >= this._lostAt) { m.returning = false; m.awaySince = null; }
     this.members.set(id, m);
     if (back) this._checkHost();
@@ -860,7 +866,7 @@ export class Room extends Emitter {
     this._see(d.e);
     if (this._inheriting && this._inheritUntil == null) this._inheritUntil = this.now() + INHERIT_MS;
     this._onProved(id);
-    m.returning = false; m.awaySince = null;
+    m.returning = false; m.awaySince = null; m.downAt = null;
     m.link = 'open'; m.everOpen = true; m.heardAt = this.now(); m.unanswered = 0; m.sentLog = [];
     this._enorder(id);
     const q = m.inbox || []; m.inbox = [];

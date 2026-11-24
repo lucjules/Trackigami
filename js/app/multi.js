@@ -45,6 +45,9 @@ export const multiMethods = {
     const keep = () => { const r = !room.closed && room.resumeInfo(); if (r) saveResume(r); };
     keep();
     room.on('members', keep);
+    // (TECH-010) la mémoire de la place n'est valable que 20 s après sa dernière mise à jour : un salon calme n'émet aucun événement, on la renouvelle tant que la salle est ouverte.
+    const keepTimer = setInterval(keep, 5000);
+    room.on('closed', () => clearInterval(keepTimer));
     room.on('reconnecting', () => this.ui.flash('📶 Connexion perdue : reconnexion à la salle… (ta course continue)', 4));
     room.on('reconnected', () => this.ui.flash('📶 Reconnecté à la salle.', 2.4));
     room.on('away', (id) => { const m = room.members.get(id); this.ui.flash(`⏳ ${m ? m.name : 'Un joueur'} a perdu la connexion : sa place est gardée 20 s.`, 3); });

@@ -6,8 +6,8 @@
 //     des délais habituels), son temps compte s'il arrive ;
 //   - à son retour, chacun lui envoie « hello » ; l'hôte lui renvoie l'état complet (règles, circuit ou championnat avec les arrivées de la manche,
 //     temps du mode libre) ; lui renvoie l'arrivée qu'il aurait annoncée pendant la coupure ;
-//   - un hôte qui prend la suite d'un hôte parti l'annonce (« hostover ») et se marque hôte : l'ancien, s'il revient après coup, ne reprend pas
-//     la main avec un état périmé.
+//   - un hôte absent est remplacé par le suivant de l'ordre d'arrivée (« hostover », TECH-010) dès que sa liaison est tombée ; s'il revient dans les RESUME_MS avec
+//     son secret, il reprend la main APRÈS avoir reçu l'état de la salle de celui qui l'a tenue ; passé ce délai, sa place est rendue et il n'est plus hôte.
 // Un onglet rechargé retrouve sa place s'il revient dans les RESUME_MS : identifiant et SECRET DE REPRISE (clé privée de son identité de salle, identity.js) sont
 // gardés en sessionStorage, propre à l'onglet ; le secret n'est jamais affiché, journalisé ni envoyé : seule une preuve faite avec lui part (TECH-040).
 export const RESUME_MS = 20000;

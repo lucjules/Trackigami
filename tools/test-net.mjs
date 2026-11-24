@@ -1050,6 +1050,23 @@ await test('arrivant (TECH-010) : le premier avis reçu n\'est pas cru d\'office
     assert.equal(dan.hostId, 'ana');
   } finally { for (const r of [ana, bea, cid, dan]) r.leave(); }
 });
+await test('hôte dont la liaison est tombée (TECH-010) : sa présence fantôme (30 s côté serveur) ne le garde pas hôte ; le suivant prend la main avant la fin de ses 20 s et clôt la manche', () => scenario(async (w) => {
+  const ana = await w.host('ana'), bea = await w.join('bea'), cid = await w.join('cid');
+  await w.clock.advance(3000);
+  precondition(allLinked(w, [ana, bea, cid]), 'trois joueurs reliés');
+  ana.startCup({ rounds: CUP2 }); await w.clock.advance(500);
+  ana.reportFinish(4000); await w.clock.advance(300);
+  const t0 = w.clock.now();
+  w.rt.mute('ana'); w.rt.cut('ana', 60000, { mode: 'silent' }); w.rtc.cut('ana');           // son réseau tombe sans un mot : le serveur garde sa présence 30 s
+  await w.clock.advance(1000);
+  precondition(bea.signaling.peers.has('ana'), 'sa présence fantôme est toujours dans l\'annuaire');
+  bea.reportFinish(4100); cid.reportFinish(4200);
+  let at = null;
+  while (w.clock.now() - t0 < 19500 && at == null) { await w.clock.advance(500); if (bea.cupState.phase === 'results') at = w.clock.now() - t0; }
+  assert.ok(at != null, 'la manche est close avant la fin des 20 s de l\'hôte');
+  assert.equal(bea.isHost, true); assert.equal(cid.hostId, 'bea');
+  assert.ok(bea.signaling.peers.has('ana') || at < 30000, 'sans attendre que le serveur retire sa présence');
+}));
 await test('deux salons en même temps (TECH-010, TECH-040) : chacun a son hôte, son ordre et ses identités ; rien ne passe de l\'un à l\'autre', () => scenario(async (w) => {
   const ana = await w.host('ana', 'AAA234'), bob = await w.host('bob', 'BBB234');
   const bea = await w.join('bea', 'AAA234'), cid = await w.join('cid', 'BBB234');

@@ -2308,6 +2308,73 @@ try {
     }
   });
 
+  // Phase 17 (TECH-010, TECH-040) : trois onglets, vrai WebRTC et vrai Web Crypto, signalisation locale. L'hôte « recharge » sa page : pendant son absence l'invitée fait
+  // l'intérim ; un imposteur qui prend l'identifiant de l'hôte sans son secret n'obtient ni liaison ni rôle ; l'hôte revient avec son secret et reprend la main.
+  await test('multijoueur (TECH-010, TECH-040) : l\'hôte recharge sa page : l\'invitée fait l\'intérim ; un imposteur qui prend son identifiant est refusé ; revenu avec son secret, l\'hôte reprend la main', async () => {
+    const A = await hook(await ctx.newPage()), B = await hook(await ctx.newPage());
+    let C = null;
+    const url = (code = '') => `http://127.0.0.1:${PORT}/?net=local${code ? '#salle=' + code : ''}`;
+    const named = async (p, name) => { if (await p.locator('#wl-name').isVisible()) { await p.locator('#wl-name').fill(name); await p.locator('#wl-submit').evaluate((el) => el.click()); } };
+    const wait = (p, fn, arg, ms = 30000) => p.waitForFunction(fn, arg, { timeout: ms });
+    try {
+      await A.goto(url(), { waitUntil: 'load' }); await named(A, 'Ana');
+      await wait(A, () => window.copytrack && window.copytrack.mode === 'menu');
+      await A.evaluate(() => { window.copytrack.settings.telemetry = false; window.copytrack.saveSettings(); window.copytrack.multiMenu(); });
+      await A.evaluate(() => [...document.querySelectorAll('#modal-actions button')].find((b) => /Créer une salle/.test(b.textContent)).click());
+      await wait(A, () => document.querySelector('.mp-code b'));
+      const code = (await A.evaluate(() => document.querySelector('.mp-code b').textContent)).trim();
+      await B.goto(url(code), { waitUntil: 'load' }); await named(B, 'Bea');
+      await wait(B, () => window.copytrack && window.copytrack.room && window.copytrack.room.list.some((m) => !m.self && m.link === 'open'));
+      await wait(A, () => window.copytrack.room.list.some((m) => !m.self && m.link === 'open'));
+      const aId = await A.evaluate(() => window.copytrack.room.selfId), commit = await A.evaluate(() => window.copytrack.room.ident.commit);
+      assert.match(commit, /^[A-Za-z0-9_-]{43}$/, 'l\'engagement (empreinte SHA-256 de la clé publique) est dans la présence');
+      assert.equal(await B.evaluate(() => window.copytrack.room.hostId), aId, 'Ana est l\'hôte pour Bea');
+      assert.equal(await B.evaluate((id) => window.copytrack.room.members.get(id).commit, aId), commit, 'Bea a vu Ana prouver son identité (même engagement)');
+      // Le secret n'est ni dans la présence, ni dans le DOM, ni dans la console : seul l'engagement est publié.
+      const secret = await A.evaluate(() => JSON.parse(sessionStorage.getItem('copytrack.mp.resume')).key.jwk.d);
+      assert.ok(secret && secret.length > 40, 'le secret de reprise est gardé dans l\'onglet');
+      assert.equal(await A.evaluate((d) => document.documentElement.outerHTML.includes(d) || JSON.stringify(window.copytrack.room.meta).includes(d) || JSON.stringify(window.copytrack.room.resumeInfo().key.pub).includes(d), secret), false, 'ni dans le DOM ni dans la présence');
+      assert.equal(await B.evaluate((d) => JSON.stringify([...window.copytrack.room.members.values()].map((m) => ({ ...m, outbox: undefined, sentLog: undefined, inbox: undefined }))).includes(d), secret), false, 'Bea n\'a jamais reçu le secret');
+      assert.equal(errors.some((e) => e.includes(secret)), false, 'le secret n\'est dans aucun message de la console');
+      // La mémoire de la place se renouvelle tant que la salle est ouverte (un salon calme n'émet aucun événement).
+      const at1 = await A.evaluate(() => JSON.parse(sessionStorage.getItem('copytrack.mp.resume')).at);
+      await A.waitForTimeout(5600);
+      assert.ok(await A.evaluate((t) => JSON.parse(sessionStorage.getItem('copytrack.mp.resume')).at > t, at1), 'la mémoire de la place est renouvelée');
+      // L'onglet d'Ana se ferme (page voisine du même site : sessionStorage gardé, aucune salle, aucun « au revoir »).
+      const t0 = Date.now();
+      await A.goto(`http://127.0.0.1:${PORT}/legal.html`, { waitUntil: 'load' });
+      await wait(B, () => window.copytrack.room.meta.host === true, null, 25000);
+      assert.ok(Date.now() - t0 < 20000, 'l\'intérim commence avant la fin des 20 s de la place d\'Ana : ' + (Date.now() - t0) + ' ms');
+      assert.equal(await B.evaluate(() => window.copytrack.room.isHost), true, 'Bea est l\'hôte (drapeau republié)');
+      // Un imposteur prend l'identifiant d'Ana, sans son secret.
+      C = await hook(await ctx.newPage());
+      await C.goto(url(), { waitUntil: 'load' });
+      await C.evaluate(async ({ c, id }) => {
+        const { Room, defaultSignaling } = await import('/js/net/room.js');
+        window.__imp = await Room.join(c, { name: 'Mallory', selfId: id, makeSignaling: (o) => defaultSignaling(o, null) });
+      }, { c: code, id: aId });
+      await C.waitForTimeout(7000);
+      assert.equal(await C.evaluate(() => window.__imp.list.some((m) => !m.self && m.link === 'open')), false, 'l\'imposteur n\'a aucune liaison ouverte');
+      assert.equal(await C.evaluate(() => window.__imp.isHost), false, 'ni le rôle d\'hôte');
+      assert.notEqual(await B.evaluate((id) => (window.copytrack.room.members.get(id) || {}).link, aId), 'open', 'pour Bea, la place d\'Ana n\'est pas rendue à l\'imposteur');
+      assert.equal(await B.evaluate((id) => (window.copytrack.room.members.get(id) || {}).commit, aId), commit, 'l\'engagement épinglé d\'Ana n\'a pas changé');
+      assert.equal(await B.evaluate(() => window.copytrack.room.isHost), true, 'Bea est toujours l\'hôte par intérim');
+      // Ana revient avec son secret (même onglet) : même identifiant, même engagement, rôle retrouvé ; Bea redevient invitée.
+      await A.goto(url(code), { waitUntil: 'load' }); await named(A, 'Ana');
+      await wait(A, () => window.copytrack && window.copytrack.room && window.copytrack.room.list.some((m) => !m.self && m.link === 'open'));
+      assert.equal(await A.evaluate(() => window.copytrack.room.selfId), aId, 'même identifiant');
+      assert.equal(await A.evaluate(() => window.copytrack.room.ident.commit), commit, 'même engagement : c\'est bien son secret');
+      await wait(A, () => window.copytrack.room.isHost === true, null, 20000);
+      await wait(B, (id) => window.copytrack.room.hostId === id && window.copytrack.room.isHost === false, aId, 20000);
+      assert.equal(await B.evaluate((id) => window.copytrack.room.members.get(id).link, aId), 'open', 'Bea est de nouveau reliée à Ana');
+      assert.equal(await B.evaluate(() => window.copytrack.room.meta.host), false, 'Bea retire son drapeau');
+      assert.equal(await C.evaluate(() => window.__imp.list.some((m) => !m.self && m.link === 'open')), false, 'l\'imposteur n\'a toujours aucune liaison');
+    } finally {
+      for (const p of [A, B, C]) if (p) await p.evaluate(() => { try { if (window.copytrack && window.copytrack.room) window.copytrack.room.leave(); if (window.__imp) window.__imp.leave(); } catch { /* déjà fermée */ } }).catch(() => {});
+      await A.close(); await B.close(); if (C) await C.close();
+    }
+  });
+
   // E22 : aides à la conduite (catégorie « assisté »), animations réduites, caméra libre de l'éditeur, parcours complet au tactile.
   await test('aides à la conduite : course rangée dans « assisté » sans médailles, commandes effectives enregistrées ; animations réduites ; caméra libre', async () => {
     await app(() => { const A = window.copytrack; A.settings.aids = { autoGas: true, antiSpin: true }; A.saveSettings(); A.playBuiltin(0); });
