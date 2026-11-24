@@ -2071,6 +2071,34 @@ try {
     await waitApp(() => window.copytrack.mode === 'menu');
   });
 
+  // TECH-083 (TRANS-09) : les écouteurs du salon sont retirés à la fermeture de sa fenêtre, quelle qu'elle soit (Échap, départ d'une course : closeModal, autre fenêtre).
+  await test('multijoueur (TECH-083) : ouvrir puis fermer le salon 10 fois (Échap, fermeture par un départ, fenêtre remplacée) : nombre d\'écouteurs de la salle stable', async () => {
+    try {
+      await app(() => history.replaceState(null, '', '?net=local'));
+      await app(() => window.copytrack.multiMenu());
+      await page.evaluate(() => [...document.querySelectorAll('#modal-actions button')].find((b) => /Créer une salle/.test(b.textContent)).click());
+      await waitApp(() => window.copytrack.room && document.querySelector('.mp-code b'));
+      const count = () => app(() => { let n = 0; for (const a of window.copytrack.room._h.values()) n += a.length; return n; });
+      const n0 = await count();
+      const ways = [
+        async () => { await page.keyboard.press('Escape'); await waitApp(() => !window.copytrack.ui.modalOpen); },
+        async () => { await app(() => window.copytrack.ui.closeModal()); },                                  // (ce que fait un départ de course)
+        async () => { await app(() => window.copytrack.ui.modal({ title: 'Autre', body: 'x' })); await app(() => window.copytrack.ui.closeModal()); },
+      ];
+      for (let i = 0; i < 10; i++) {
+        await ways[i % ways.length]();
+        await app(() => window.copytrack.multiLobby(window.copytrack.room));
+        await waitApp(() => window.copytrack.ui.modalOpen && document.querySelector('.mp-code b'));
+      }
+      const n1 = await count();
+      assert.equal(n1, n0, `écouteurs de la salle : ${n0} au départ, ${n1} après 10 ouvertures et fermetures`);
+      await app(() => window.copytrack.room.emit('members'));                                             // et le salon ouvert se redessine toujours
+      assert.ok(await app(() => document.querySelectorAll('.mp-cards .mp-card').length === 1), 'le salon ouvert suit encore la salle');
+    } finally {
+      await app(() => { if (window.copytrack.room) window.copytrack.room.leave(); window.copytrack.ui.closeModal(); window.copytrack.showMenu('menu'); }).catch(() => {});
+    }
+  });
+
   // Deux onglets du même navigateur : vraie liaison WebRTC, signalisation par BroadcastChannel (?net=local). Les temps d'arrivée sont donnés par le test (_finish) : on
   // vérifie le branchement complet (salon, grille, classement en direct, collisions, clôture par l'hôte, points, manche suivante, podium), pas la conduite.
   await test('multijoueur : championnat à deux onglets (grille, avancement, collisions, résultats, manche suivante, podium)', async () => {
