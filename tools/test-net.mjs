@@ -1197,6 +1197,16 @@ const freeRace = async (w, ...names) => {
 };
 const frames = async (w, list, ms, step = 50) => { for (let t = 0; t < ms; t += step) { await w.clock.advance(step); for (const S of list) frame(S, w.clock.now()); } };
 
+// Salle factice (sans réseau) pour les paquets fabriqués à la main et les règles : membres, liste, règles ; 'snapshot' émis par le test.
+function fakeRoom(members, { rules = null } = {}) {
+  const r = new Emitter();
+  r.selfId = 'moi'; r.rules = rules; r.closed = false; r.members = new Map(members.map((m) => [m.id, { link: 'open', racing: true, rtt: 0, name: m.id, ...m }]));
+  Object.defineProperty(r, 'list', { get: () => [{ id: 'moi', self: true, link: 'self', rtt: 0 }, ...r.members.values()] });
+  r.sendSnapshot = () => {};
+  return r;
+}
+const pk = (s) => unpackSnapshot(packSnapshot(s));
+
 console.log('Phase 18 : voitures distantes (TECH-009, TECH-043)');
 await test('un arrivant en pleine course libre (TECH-009, TRANS-06) : toutes les voitures distantes visibles de part et d\'autre', () => scenario(async (w) => {
   const [ana, bea] = await freeRace(w, 'ana', 'bea');
@@ -1235,7 +1245,7 @@ await test('un joueur parti puis revenu avec le même identifiant réapparaît (
   for (const s of sends) w.clock.clearInterval(s);
   teardown(SA); teardown(SC);
 }));
-await bugConnu('TECH-043', () => scenario(async (w) => {
+await test('lien mort (TECH-043) : la voiture distante est masquée et non collisionnable après ≈ 0,5 s', () => scenario(async (w) => {
   const [ana, bea] = await freeRace(w, 'ana', 'bea');
   const SA = raceSide(ana);
   const send = racing(w, bea);
@@ -1246,9 +1256,12 @@ await bugConnu('TECH-043', () => scenario(async (w) => {
   precondition(ana.signaling.peers.has('bea'), 'Bea est toujours dans l\'annuaire');
   assert.ok(!shown(SA, 'bea'), 'sans paquet depuis 0,6 s : masquée');
   assert.ok(!pushedBy(SA, 'bea', w.clock.now()), 'et plus collisionnable');
+  w.rtc.heal('bea');                                            // le chemin revient (avant toute détection de panne) : ses paquets aussi
+  await frames(w, [SA], 1000);
+  assert.ok(shown(SA, 'bea') && pushedBy(SA, 'bea', w.clock.now()), 'paquets revenus : de nouveau visible et collisionnable');
   w.clock.clearInterval(send); teardown(SA);
-}), 'lien mort : la voiture distante est masquée et non collisionnable après ≈ 0,5 s');
-await bugConnu('TECH-043', () => scenario(async (w) => {
+}));
+await test('joueur revenu au salon (TECH-043) : sa voiture disparaît de la piste', () => scenario(async (w) => {
   const [ana, bea] = await freeRace(w, 'ana', 'bea');
   const SA = raceSide(ana);
   const send = racing(w, bea);
@@ -1260,17 +1273,34 @@ await bugConnu('TECH-043', () => scenario(async (w) => {
   assert.ok(!shown(SA, 'bea') && !pushedBy(SA, 'bea', w.clock.now()), 'plus sur la piste, plus collisionnable');
   assert.equal(SA.remote.has('bea'), false, 'sa voiture est retirée');
   teardown(SA);
-}), 'joueur revenu au salon : sa voiture disparaît de la piste');
+}));
+await test('lien non ouvert ou joueur hors course (TECH-043) : masquée et hors des collisions même avec des paquets récents ; paquets en route après le retour au salon ignorés', () => {
+  const room = fakeRoom([{ id: 'zoe' }]);
+  const S = raceSide(room);
+  let t = 0;
+  const feedZoe = (ms) => { for (let k = 0; k < ms / 50; k++) { t += 6; room.emit('snapshot', 'zoe', pk(snap(t, 0)), t * DT * 1000); frame(S, t * DT * 1000 + 1); } };
+  feedZoe(1000);
+  precondition(shown(S, 'zoe') && pushedBy(S, 'zoe', t * DT * 1000 + 1), 'visible et collisionnable');
+  room.members.get('zoe').link = 'connecting';
+  feedZoe(200);
+  assert.ok(!shown(S, 'zoe') && !pushedBy(S, 'zoe', t * DT * 1000 + 1), 'lien non ouvert : masquée, hors des collisions');
+  room.members.get('zoe').link = 'open';
+  feedZoe(200);
+  precondition(shown(S, 'zoe'), 'lien rouvert : visible');
+  room.members.get('zoe').racing = false;                        // au salon (présence), ses derniers paquets encore récents
+  frame(S, t * DT * 1000 + 1);
+  assert.ok(!shown(S, 'zoe') && !pushedBy(S, 'zoe', t * DT * 1000 + 1), 'hors course : masquée, hors des collisions');
+  frame(S, t * DT * 1000 + 600);
+  assert.equal(S.remote.has('zoe'), false, 'plus aucun paquet : retirée');
+  room.emit('snapshot', 'zoe', pk(snap(t - 6, 0)), t * DT * 1000 + 700);       // un paquet d'avant, arrivé en retard
+  assert.equal(S.remote.has('zoe'), false, 'un paquet d\'avant le retour au salon ne la recrée pas');
+  room.members.get('zoe').racing = true;
+  room.emit('snapshot', 'zoe', pk(snap(6, 0)), t * DT * 1000 + 3000);         // nouvelle course (son horloge repart de zéro)
+  frame(S, t * DT * 1000 + 3101);
+  assert.ok(S.remote.has('zoe'), 'nouvelle course : la voiture renaît');
+  teardown(S);
+});
 
-// Salle factice (sans réseau) pour les paquets fabriqués à la main et les règles : membres, liste, règles ; 'snapshot' émis par le test.
-function fakeRoom(members, { rules = null } = {}) {
-  const r = new Emitter();
-  r.selfId = 'moi'; r.rules = rules; r.closed = false; r.members = new Map(members.map((m) => [m.id, { link: 'open', racing: true, rtt: 0, name: m.id, ...m }]));
-  Object.defineProperty(r, 'list', { get: () => [{ id: 'moi', self: true, link: 'self', rtt: 0 }, ...r.members.values()] });
-  r.sendSnapshot = () => {};
-  return r;
-}
-const pk = (s) => unpackSnapshot(packSnapshot(s));
 
 console.log('Phase 18 : collisions douces (TECH-041)');
 // Deux voitures sur une ligne ; chaque joueur voit l'autre avec D de retard (interpolation + latence), ramenée à l'instant présent (presentState), comme RaceSession._collide.

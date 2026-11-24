@@ -18,6 +18,7 @@ const KEEP = 1.5;                       // s d'historique conservé
 const OFFSET_WINDOW = 40;
 const FAR_S = 5;                        // s : écart d'horloge au-delà duquel un paquet est « hors horloge » (voir push)
 const FAR_CONFIRM = 3;                  // paquets consécutifs hors horloge qu'il faut pour croire à un vrai changement d'horloge
+export const STALE_MS = 500;            // ms sans paquet accepté : la voiture n'est plus « vivante » (masquée, hors des collisions : TECH-043)
 
 export class SnapshotBuffer {
   constructor({ delay = DEFAULT_DELAY } = {}) {
@@ -26,6 +27,7 @@ export class SnapshotBuffer {
     this.offsets = [];
     this._tele = null;                   // compteur de téléportation du segment affiché à l'appel précédent
     this._far = 0;                       // paquets consécutifs hors horloge
+    this.lastRecvMs = null;              // horloge locale du dernier paquet accepté (TECH-043)
     this.out = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), quat: new THREE.Quaternion(), speed: 0, vehicle: 'car', flags: 0, cp: 0, lap: 0, prog: 0, teleported: false, ready: false };
     this._q0 = new THREE.Quaternion(); this._q1 = new THREE.Quaternion();
   }
@@ -59,8 +61,13 @@ export class SnapshotBuffer {
     });
     this.offsets.push(nowMs / 1000 - s.t);
     if (this.offsets.length > OFFSET_WINDOW) this.offsets.shift();
+    this.lastRecvMs = nowMs;
     return true;
   }
+
+  // Un paquet accepté depuis moins de STALE_MS (TECH-043) : sans cela, sample() continuerait de montrer la voiture à sa dernière place (arrêt sur place après
+  // MAX_EXTRAP), et elle resterait dans les collisions : un mur invisible devant une voiture qu'on traverse (lien mort, joueur revenu au salon).
+  fresh(nowMs) { return this.lastRecvMs != null && nowMs - this.lastRecvMs <= STALE_MS; }
 
   get offset() { return this.offsets.length ? Math.min(...this.offsets) : 0; }
 

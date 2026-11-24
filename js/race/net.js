@@ -5,13 +5,24 @@ import { F_BOOST, F_GROUNDED } from '../net/snapshot.js';
 import { checkpointProgress } from '../net/progress.js';
 import { PRIO } from '../hudMessages.js';
 import { softCollide, presentState, PROTECT_S } from '../net/collide.js';
+
+const GONE_MS = 1000;        // après le retrait de sa voiture (retour au salon), les paquets d'avant d'un joueur sont ignorés pendant 1 s (ceux qui étaient en route)
 export const netMethods = {
   // ---- Multijoueur : voitures des autres joueurs (RemoteCar), alimentées par les paquets WebRTC ----------------------------
   // TECH-009 (TRANS-06) : une voiture distante naît à l'arrivée d'un membre en course (évènement « members ») ou à son premier paquet, et renaît après un départ suivi
   // d'un retour (même identifiant). Avant, elles étaient créées une seule fois d'après room.list au départ : un arrivant (ou un revenu) restait invisible.
   _setupRemotes() {
     const room = this.multi.room;
-    this._onSnap = (id, snap, now) => { const rc = this.remote.get(id) || this._addRemote(id); if (rc) rc.push(snap, now); };
+    this._gone = new Map();          // id → { t, at } : joueur revenu au salon (voiture retirée) ; ses paquets encore en route sont ignorés
+    this._onSnap = (id, snap, now) => {
+      let rc = this.remote.get(id);
+      if (!rc) {
+        const g = this._gone.get(id);
+        if (g && now - g.at < GONE_MS && snap.t <= g.t) return;      // paquet d'avant son retour au salon, arrivé après : pas de voiture fantôme d'une demi-seconde
+        rc = this._addRemote(id);
+      }
+      if (rc) rc.push(snap, now);
+    };
     this._onLeft = (id) => this._dropRemote(id);
     this._onMembers = () => this._syncRemotes();
     room.on('snapshot', this._onSnap);
@@ -35,18 +46,41 @@ export const netMethods = {
     return rc;
   },
 
-  _dropRemote(id) { const rc = this.remote.get(id); if (rc) { rc.dispose(); this.remote.delete(id); } },
-
-  // La salle a changé : un membre arrivé (ou revenu) EN COURSE et relié a sa voiture (cachée jusqu'à son premier paquet) ; un membre parti perd la sienne.
-  _syncRemotes() {
-    const room = this.multi.room;
-    for (const m of room.members.values()) if (m.racing && m.link === 'open' && !this.remote.has(m.id)) this._addRemote(m.id);
-    for (const id of [...this.remote.keys()]) if (!room.members.has(id)) this._dropRemote(id);
+  _dropRemote(id, now = null) {
+    const rc = this.remote.get(id);
+    if (!rc) return;
+    if (now != null && rc.buffer.latest) this._gone.set(id, { t: rc.buffer.latest.t, at: now });
+    rc.dispose(); this.remote.delete(id);
   },
 
-  // Une image : chaque voiture distante suit son tampon d'interpolation.
+  _roomNow() { const r = this.multi.room; return typeof r.now === 'function' ? r.now() : performance.now(); },
+
+  // La salle a changé : un membre arrivé (ou revenu) EN COURSE et relié a sa voiture (cachée jusqu'à son premier paquet) ; un membre parti perd la sienne, comme
+  // un membre revenu au salon (présence racing: false) dont plus aucun paquet n'arrive (TECH-043).
+  _syncRemotes(now = this._roomNow()) {
+    const room = this.multi.room;
+    for (const m of room.members.values()) if (m.racing && m.link === 'open' && !this.remote.has(m.id)) this._addRemote(m.id);
+    for (const [id, rc] of [...this.remote]) {
+      const m = room.members.get(id);
+      if (!m) this._dropRemote(id);
+      else if (m.racing === false && !rc.buffer.fresh(now)) this._dropRemote(id, now);
+    }
+  },
+
+  // Voiture « vivante » (TECH-043) : un paquet depuis moins de STALE_MS, un lien ouvert, un joueur en course. Sinon elle est masquée et hors des collisions.
+  _remoteLive(id, rc, now) {
+    const m = this.multi.room.members.get(id);
+    return !!m && m.link === 'open' && m.racing !== false && rc.ready && rc.buffer.fresh(now);
+  },
+
+  // Une image : chaque voiture distante suit son tampon d'interpolation ; seules les vivantes sont montrées.
   _updateRemotes(now, camPos) {
-    for (const rc of this.remote.values()) rc.update(now, camPos);
+    for (const [id, rc] of this.remote) {
+      rc.update(now, camPos);
+      rc.live = this._remoteLive(id, rc, now);
+      if (!rc.live) rc.group.visible = false;
+    }
+    this._syncRemotes(now);
   },
 
   // Fin de session (dispose, construction interrompue) : écouteurs retirés, voitures libérées.
@@ -83,12 +117,13 @@ export const netMethods = {
 
   // Collisions douces (manche avec l'option « collisions ») : la voiture est repoussée par celles qu'elle chevauche. Ni en boucle (ruban), ni juste après un retour au
   // checkpoint, ni contre une voiture arrivée ou qui vient de réapparaître.
-  _collide() {
+  // TECH-043 : seulement contre une voiture vivante (voir _remoteLive) : jamais contre une voiture figée faute de paquets.
+  _collide(now = performance.now()) {
     const p = this.phys;
     if (p.mode === 'ribbon' || this.tick < this.protectUntil || !this.remote.size) return;
-    const now = performance.now(), others = [], room = this.multi.room;
+    const others = [], room = this.multi.room;
     for (const [id, rc] of this.remote) {
-      if (!rc.ready || rc.finished || now - rc.teleportedAtMs <= PROTECT_S * 1000) continue;
+      if (!this._remoteLive(id, rc, now) || rc.finished || now - rc.teleportedAtMs <= PROTECT_S * 1000) continue;
       // Collisions unifiées (E16) : l'autre voiture au même instant que la nôtre (interpolation + demi-latence rattrapées).
       const m = room.members.get(id);
       others.push(presentState(rc, rc.buffer.delay + (m && m.rtt ? m.rtt / 2000 : 0)));
