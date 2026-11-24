@@ -214,6 +214,9 @@ export class TrackView {
     }
     this._applyGroupVis();
     this._initLightPool();
+    // (TECH-019) Les dalles de verre sont recréées visibles : celles qui sont brisées à cet instant (la course a déjà un ensemble, qu'elle ne redonne qu'en cas de changement)
+    // redisparaissent, sinon une baisse de qualité en course (quality.js) ferait réapparaître une dalle que la voiture traverse.
+    if (this._broken) this.setBroken(this._broken);
 
     // Signature d'un tronçon : ses pièces, ses décorations, et les pièces voisines (la case d'à côté, comprise) dont dépend l'emplacement de
     // ses piliers (un pilier est omis sous une autre pièce) ; plus les réglages de qualité qui changent le contenu.
@@ -242,7 +245,12 @@ export class TrackView {
   setGroupVisible(g, visible) {
     if (!this.groupVis) this.groupVis = new Map();
     this.groupVis.set(g | 0, !!visible);
-    for (const c of this.group.children) if (c.userData.g === (g | 0)) c.visible = !!visible;
+    for (const c of this.group.children) if (c.userData.g === (g | 0)) c.visible = !!visible && !this._isBrokenGlass(c);      // (TECH-019 : une dalle brisée ne redevient pas visible par la logique)
+  }
+  _isBrokenGlass(grp) {
+    if (!this._broken || !this._broken.size) return false;
+    for (const g of this.glassGroups) if (g.grp === grp) return this._broken.has(g.tile);
+    return false;
   }
   _applyGroupVis() {
     if (!this.groupVis || !this.groupVis.size) return;
@@ -413,6 +421,7 @@ export class TrackView {
 
   // Dalles de verre brisées (voir CarPhysics.broken) : elles disparaissent ; vide = tout est restauré.
   setBroken(set) {
+    this._broken = set || null;      // (gardé : rebuild() et setGroupVisible() le réappliquent, TECH-019)
     for (const g of this.glassGroups) g.grp.visible = !(set && set.has(g.tile)) && !(g.tile.g && this.groupVis && this.groupVis.get(g.tile.g) === false);      // (une dalle d'un groupe caché reste cachée)
   }
 
