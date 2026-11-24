@@ -78,7 +78,7 @@ Ce qui est fait côté client (`js/net/signaling.js`, `transport.js`, `room.js`,
   L'hôte conduit la manche tant qu'il a des liaisons ouvertes, même sans signalisation.
 - **Capacité** (TECH-086) : 8 joueurs **places gardées comprises**. L'arrivant ne voit que l'annuaire (les absents n'y sont pas) : ce sont les membres qui
   refusent un 9e (aucune liaison, pas de place sur la grille) et l'admettent dès qu'une place est rendue. **Limite** : le 9e n'est pas prévenu par un message
-  (il faudrait un nouveau message, donc `NET_VER` 5) ; il voit les joueurs en « connexion… ».
+  (il faudrait un nouveau message de protocole, non prévu en 0.16.15) ; il voit les joueurs en « connexion… ».
 
 ### À vérifier sur le vrai Realtime (rien de cela n'a été observé : le banc `tools/fake-realtime.mjs` est une modélisation)
 
@@ -119,7 +119,9 @@ Les circuits sont tirés au sort **sans doublon et du plus facile au plus dur** 
 
 - **Départ commun** : l'hôte annonce la manche (`round`) avec la liste des joueurs prêts, dans l'ordre de la grille (classement général ; première manche : ordre d'arrivée dans la salle) ;
   chacun démarre au même « GO » (compensé de la moitié de son aller-retour) sur sa place : quatre de front, rangées de 6 m.
-- **Points** : 10, 8, 6, 5, 4, 3, 2, 1 par place, rien sans arrivée. Égalité au général : plus de victoires de manche, puis meilleure somme des places, puis identifiant.
+- **Points** : 10, 8, 6, 5, 4, 3, 2, 1 par place, rien sans arrivée. **Classement général** (0.16.15, TECH-085) : seulement les joueurs qui ont été sur la grille d'au moins une manche classée
+  (un membre qui n'a jamais couru n'y figure pas). Égalité : plus de victoires de manche, puis meilleure **moyenne** des places (une manche sans arrivée vaut la place après le dernier de
+  cette manche), puis identifiant. La moyenne, et non la somme : la somme avantageait celui qui avait joué moins de manches.
 - **Clôture d'une manche** (décidée par l'hôte, message `rend` avec le temps de chacun) : tous ont fini ou quitté, ou 30 s après la première arrivée, ou 10 minutes après le « GO ».
   Ceux qui roulent encore s'arrêtent, sans temps. Résultats + classement général pendant 12 s, puis manche suivante ; après la dernière, podium et retour au salon.
 - **Pas de nouvel essai** en manche (`R` = retour au checkpoint, le chrono continue). Quitter la manche = quitter la salle (les autres continuent sans toi).
@@ -127,10 +129,62 @@ Les circuits sont tirés au sort **sans doublon et du plus facile au plus dur** 
 - **Collisions douces** (option) : `js/net/collide.js`. Chaque voiture est un disque de 1,15 m de rayon ; chaque joueur applique SA moitié du choc à SA voiture d'après la position affichée de l'autre
   (poussée plafonnée à ~4 g, rien en looping, rien 2 s après un retour au checkpoint, rien contre une voiture arrivée). Pas de physique rejouable : aucun record n'en dépend.
 - **Hôte parti** : l'identifiant le plus petit devient hôte et reprend la clôture et les départs (l'état du championnat est copié chez tous). Un joueur qui arrive en cours de route
-  reçoit le championnat (`cup`), suit la manche sans la courir et part à la suivante. Un `rend` manqué est rattrapé par le résultat joint au `round` suivant.
+  reçoit le championnat (`cup`), voit le circuit et « Manche en cours : tu joueras la suivante » (GAME-008), suit la manche sans la courir et part à la suivante. Un `rend` manqué est
+  rattrapé par le résultat joint au `round` suivant, ou par l'état que l'hôte renvoie quand la liaison se rouvre : le joueur revenu après la clôture voit les résultats de SA manche,
+  sa course s'arrête (TECH-047).
+- **Migration d'hôte après une clôture manquée** (TECH-048) : chaque manche rangée ne fait que **s'enrichir** (union des arrivées : un temps connu n'est jamais remplacé, un résultat
+  plus pauvre n'écrase jamais un plus riche) ; un joueur qui en sait plus que l'hôte (nouvel hôte, ou second `rend` plus pauvre) lui envoie son état (`cupsync`), l'hôte reprend
+  l'état le plus complet et le renvoie à tous : tous les classements convergent, arrivants compris.
 
-Messages fiables : `cup` (le championnat), `round` (départ de la manche n : joueurs, noms, délai, résultat précédent), `finish` avec `rn` (mon temps pour la manche n), `rend` (manche close : temps de tous,
-délai avant la suivante), `cupstop` (l'hôte arrête). **Seuls les messages de l'hôte** (`cup`, `round`, `rend`, `cupstop`) sont pris en compte ; tout est borné et vérifié à la réception.
+Messages fiables : `cup` (le championnat et l'état de la manche), `round` (départ de la manche n : joueurs, noms, délai, résultat précédent), `finish` avec `rn` (mon temps pour la manche n),
+`rend` (manche close : temps de tous, délai avant la suivante), `cupstop` (l'hôte arrête), `cupsync` (un joueur → l'hôte : son état, voir plus haut). Tous portent l'**époque** du
+championnat (voir « Époque de lancement »). **Seuls les messages de l'hôte** (`cup`, `round`, `rend`, `cupstop`) sont pris en compte, `cupsync` seulement par l'hôte et seulement pour
+enrichir ; tout est borné et vérifié à la réception.
+
+## Époque de lancement et état de la salle (0.16.15, protocole `NET_VER` 5, audit LOT-8a, `TRANS-05`)
+
+**Avant** : les messages de course ne portaient ni numéro de lancement ni circuit ; « une course a été lancée » était un état mémorisé (`started`) jamais remis à zéro, envoyé avec
+chaque choix de circuit : un invité resté au salon était relancé chaque fois que l'hôte parcourait la liste des circuits (TECH-008), une arrivée en vol était créditée au circuit
+suivant (TECH-042), une arrivée en attente était rejouée dans un nouveau championnat (TECH-084).
+
+**Époque** `e` : un entier, propre à la salle, incrémenté par l'hôte à **chaque lancement** (course libre, championnat, « Course », revanche). Chacun suit l'époque des messages de
+l'hôte ; un nouvel hôte numérote au-delà du plus grand numéro vu (`hello` le porte aussi). Une manche est identifiée par (`e`, `n`).
+
+| Message | Envoyé par | Contenu (NET_VER 5) | Reçu |
+| --- | --- | --- | --- |
+| `track` | hôte | `e`, circuit choisi (`id`, `name`, `sig`) | met à jour le circuit affiché au salon ; **ne lance jamais** ; ignoré si `e` est périmé |
+| `start` | hôte | `e`, circuit, délai | lance la course libre si `e` est NOUVEAU ; un même lancement ne relance pas |
+| `live` | hôte | `e`, `on`, circuit | la course libre que l'hôte **court réellement** (on : vrai), ou sa fin (hôte au salon) |
+| `finish` (libre) | chacun | `e`, circuit `t`, temps, `sync` | compte pour SON lancement et SON circuit ; plus ancien : ignoré ; à venir : gardé de côté |
+| `cup` | hôte | `e`, championnat, état de la manche (phase, `n`, grille, arrivées, délais) | nouveau championnat si `e` est nouveau ; sinon fusion (phase qui n'avance que vers l'avant) |
+| `round`, `rend`, `cupstop`, `finish` (`rn`) | hôte / chacun | `e` + manche `n` | seulement pour l'époque courante |
+| `cupsync` | joueur → hôte | `e`, son championnat et son état | l'hôte fusionne (union) et renvoie `cup` à tous si quelque chose a changé |
+
+**État de la salle dérivé de l'hôte** (plus aucun état mémorisé qui relance) :
+
+```
+salon ──start(e nouveau)──► course libre e ──retour au salon──► salon        (track : ne fait que changer le circuit affiché)
+  │                              ▲   └─ R : nouvel essai (même e)
+  │      live(e, on) et e jamais couru (arrivant) : départ dans 1,5 s ; déjà couru (revenu au salon) : bouton « Rejoindre la course »
+  │      live(on : faux) (hôte au salon) : personne n'est lancé
+  └──cup(e nouveau)──► manche n (grille) ──rend(e, n)──► résultats ──(12 s)──► manche n+1 … ──► podium ──► salon
+                         └─ pas sur la grille (arrivant) : « Manche en cours : tu joueras la suivante » ; cupstop(e) : retour au salon
+```
+
+- **Course en cours** : un arrivant la déduit du message `live` (l'hôte la court en ce moment) : s'il ne l'a jamais courue, il y entre (décompte de 1,5 s) ; quand l'hôte est au salon,
+  personne n'est lancé. Un joueur revenu au salon n'y est plus jamais renvoyé par un choix de circuit ou une liaison qui se rouvre ; il peut la rejoindre (« Rejoindre la course »).
+- **Arrivées** : la course garde l'époque de son lancement ; une course d'un lancement précédent (encore à l'écran pendant le chargement du suivant) ne compte plus. Un arrivant garde les
+  meilleurs temps reçus avant d'apprendre le lancement en cours. L'arrivée en attente d'un championnat (renvoyée à l'hôte après une coupure) est liée à son époque et à sa manche,
+  effacée à l'arrêt, à « Relancer » et à tout nouveau lancement (TECH-084).
+- **Deux départs rapprochés** (circuit de la communauté lent à télécharger, puis un intégré) : seul le dernier demandé est lancé (TECH-049).
+- **Versions** : un joueur d'un autre `NET_VER` (ou `PHYS_VER`) est refusé à l'entrée (« Version du jeu différente de celle de l'hôte : recharge la page. ») et marqué « autre version »
+  dans la liste ; il ne peut ni courir ni envoyer de message de course.
+
+**À vérifier sur de vraies machines** (le banc et les trois onglets d'un même navigateur ne remplacent pas un vrai réseau) : trois appareils sur des réseaux différents ; (1) course libre,
+retour au salon, l'hôte parcourt la liste des circuits : personne n'est lancé ; (2) un 4e joueur rejoint pendant que l'hôte court : il part ; pendant que l'hôte est au salon : il reste
+au salon ; (3) relancer sur un autre circuit pendant qu'un invité franchit l'arrivée : son temps reste sur l'ancien tableau ; (4) championnat : couper le Wi-Fi d'un invité 25 s pendant la
+clôture, le rétablir : il voit les résultats de sa manche ; (5) migration : l'hôte part juste après une clôture qu'un invité a manquée (Wi-Fi coupé quelques secondes) : les trois
+classements finaux sont identiques ; (6) un circuit de la communauté puis, aussitôt, un circuit intégré : l'invité court l'intégré.
 
 Limite assumée : il n'y a pas de serveur de jeu, **chacun est seul juge de son temps**. Un tricheur peut annoncer un faux temps ; rien d'autre n'en dépend (ni record, ni pièces, ni classement en ligne).
 
@@ -144,14 +198,14 @@ Aucune table, aucun script SQL.
 ## Boucle de jeu asynchrone
 
 - **Personne n'attend personne.** Chacun a son propre chrono et fait ses essais à son rythme sur le même circuit. Un joueur qui arrive
-  quand la course est déjà lancée démarre tout de suite (décompte de 1,5 s).
+  pendant que l'hôte court démarre tout de suite (décompte de 1,5 s) ; quand l'hôte est au salon, il attend le prochain « Lancer » (0.16.15).
 - **Après l'arrivée : `R` (ou `T`) = nouvel essai immédiat**, sans décompte, sans menu ni salon. `T` fonctionne aussi en cours de course
   pour abandonner un essai. Les autres voient la voiture « apparaître » au départ (même mécanisme que la téléportation).
 - **Retour au checkpoint (`R` en course) : le chrono continue de tourner** ; le temps perdu est la pénalité.
 - Chaque arrivée est annoncée à la salle : un tableau (meilleur temps de chacun, nombre d'essais) reste affiché sans jamais bloquer le jeu.
   Un nouvel arrivant reçoit les meilleurs temps déjà réalisés.
 - Échap : proposer de quitter la course (retour au salon, les autres continuent). L'hôte peut choisir un autre circuit et « Relancer
-  pour tous » : chacun repart sur le nouveau circuit.
+  pour tous » : chacun repart sur le nouveau circuit. Choisir un circuit ne lance personne : seul « Lancer » / « Relancer » le fait.
 - Pas de records, pièces, médailles ni classement en ligne en multijoueur. Classement de la salle **provisoire** : chaque temps est annoncé par son joueur.
 
 ## Circuits
@@ -176,7 +230,11 @@ Choisis par l'hôte dans le salon :
 - `npm test` : paquets, interpolation, téléportation, assombrissement, protocole Phoenix (faux WebSocket), négociation WebRTC
   (faux RTCPeerConnection), salon, et le **banc simulé** (horloge virtuelle, faux Realtime à présence par connexion et pannes, faux WebRTC : `tools/fake-realtime.mjs`)
   pour la présence, les pertes, le jeton, les tentatives abandonnées, les liaisons découplées, les serveurs ICE et la capacité (`tools/test-net.mjs`) ; championnat, avancement, grille, collisions, annuaire (`tools/test-manche.mjs`) ; serveurs ICE et fonction `ice` (`tools/test-ice.mjs`).
-- Essai à deux onglets sans serveur : `?net=local` dans l'URL (signalisation par BroadcastChannel ; le WebRTC est réel).
+  Époque de lancement (0.16.15) : `test-manche` (aucun départ sur un choix de circuit après un retour au salon, un arrêt de championnat ou une course unique ; arrivant pendant une vraie
+  course ou au salon ; arrivée en vol ; temps synchronisés gardés ; joueur revenu après une clôture ; migration d'hôte après une clôture manquée, avec ou sans réponse perdue ; arrivée
+  en attente jamais rejouée ; classement sans les joueurs qui n'ont pas couru, départage par moyenne ; arrivant pendant une « Course ») ; `test-net` (course d'un lancement précédent,
+  deux départs rapprochés) ; `test-browser` (trois onglets).
+- Essai à deux ou trois onglets sans serveur : `?net=local` dans l'URL (signalisation par BroadcastChannel ; le WebRTC est réel).
 
 ## Limites de l'architecture actuelle (à lire avant d'attendre plus)
 
