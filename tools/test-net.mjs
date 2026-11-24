@@ -6,7 +6,7 @@ import { DT } from '../js/constants.js';
 import { packSnapshot, unpackSnapshot, SNAPSHOT_BYTES, F_FINISHED } from '../js/net/snapshot.js';
 import { SnapshotBuffer } from '../js/net/interp.js';
 import { RemoteCar, darkness, FADE_NEAR, FADE_FAR, MAX_DARKEN } from '../js/remoteCar.js';
-import { SupabaseSignaling, Emitter } from '../js/net/signaling.js';
+import { SupabaseSignaling, Emitter, tokenExpiry } from '../js/net/signaling.js';
 import { PeerMesh } from '../js/net/transport.js';
 import { Room, cleanCarMeta, newRoomCode, normalizeCode, ROOM_RE } from '../js/net/room.js';
 import { RaceLogic } from '../js/raceLogic.js';
@@ -159,7 +159,11 @@ console.log('Signalisation Supabase Realtime (protocole Phoenix, faux WebSocket)
 class FakeWS {
   static last = null;
   constructor(url) { this.url = url; this.sent = []; this.readyState = 0; FakeWS.last = this; setTimeout(() => { this.readyState = 1; this.onopen && this.onopen(); }, 0); }
-  send(t) { this.sent.push(JSON.parse(t)); }
+  send(t) {
+    const m = JSON.parse(t); this.sent.push(m);
+    // Comme un vrai serveur Phoenix, il répond à chaque battement (sans réponse, la connexion est tenue pour morte : TECH-012).
+    if (m.topic === 'phoenix' && m.event === 'heartbeat') setTimeout(() => { if (this.readyState === 1) this.recv({ topic: 'phoenix', event: 'phx_reply', payload: { status: 'ok', response: {} }, ref: m.ref }); }, 0);
+  }
   close() { this.readyState = 3; this.onclose && this.onclose(); }
   recv(m) { this.onmessage({ data: JSON.stringify(m) }); }
 }
@@ -515,7 +519,7 @@ await bugConnu('TECH-011', () => scenario(async (w) => {
 }), 'reconnexion avant que le serveur ait fermé l\'ancienne connexion : aucun faux départ, liaison gardée');
 
 console.log('Banc simulé : fermeture, erreur, expiration, battements (TECH-012)');
-const lossCase = (label, hurt) => bugConnu('TECH-012', () => scenario(async (w) => {
+const lossCase = (label, hurt) => test(label + ' (TECH-012) : _lost se déclenche et la reconnexion démarre', () => scenario(async (w) => {
   const ana = await w.host('ana'), bea = await w.join('bea');
   await w.clock.advance(2000);
   precondition(w.linked(ana, bea), 'liaison ouverte');
@@ -527,18 +531,24 @@ const lossCase = (label, hurt) => bugConnu('TECH-012', () => scenario(async (w) 
   assert.ok(w.rt.count('bea', 'phx_join') > joins, 'une nouvelle connexion a été tentée');
   assert.equal(bea.reconnecting, false, 'reconnectée'); assert.equal(bea.closed, false);
   assert.ok(pres(w).has('bea') && ana.signaling.peers.has('bea'), 'de nouveau présente');
-}), label + ' : _lost se déclenche et la reconnexion démarre');
+}));
 await lossCase('phx_close', async (w) => { w.rt.pushClose('bea'); await w.clock.advance(500); });
 await lossCase('phx_error', async (w) => { w.rt.pushError('bea'); await w.clock.advance(500); });
 await lossCase('message « system » : jeton expiré', async (w) => { w.rt.expire('bea'); await w.clock.advance(500); });
 await lossCase('battements sans réponse (connexion morte sans fermeture)', async (w) => { w.rt.cut('bea', 15000, { mode: 'silent' }); await w.clock.advance(40000); });
-await bugConnu('TECH-012', () => scenario(async (w) => {
+await test('jeton d\'accès du canal renouvelé avant expiration (TECH-012 ; jetons de 2 min, 6 min de jeu)', () => scenario(async (w) => {
   const ana = await w.host('ana', 'ABC234', { ttl: 120000 }), bea = await w.join('bea', 'ABC234', { ttl: 120000 });     // jetons de 2 minutes
   let lost = 0; for (const r of [ana, bea]) r.on('reconnecting', () => lost++);
   for (let t = 0; t < 6; t++) { await w.clock.advance(60000); assert.ok(pres(w).has('ana') && pres(w).has('bea'), `toujours présents après ${t + 1} min`); }
   assert.ok(w.rt.count('ana', 'access_token') >= 2 && w.rt.count('bea', 'access_token') >= 2, 'jeton du canal renouvelé avant expiration');
   assert.equal(lost, 0, 'aucune coupure : le serveur n\'a jamais fermé le canal');
-}), 'jeton d\'accès du canal renouvelé avant expiration (jetons de 2 min, 6 min de jeu)');
+}));
+
+test('tokenExpiry : échéance d\'un JWT (base64url, sans remplissage) ; null si le jeton est illisible', () => {
+  const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  assert.equal(tokenExpiry(enc({ alg: 'HS256' }) + '.' + enc({ exp: 1800000123, sub: 'é?>' }) + '.x'), 1800000123000);
+  for (const bad of [null, '', 'TOK', 'a.b.c', 'a.' + enc({ sub: 'x' }) + '.c', 'a.' + enc({ exp: 'demain' }) + '.c']) assert.equal(tokenExpiry(bad), null, String(bad));
+});
 
 console.log('Banc simulé : tentatives abandonnées (TECH-044, TECH-082)');
 await bugConnu('TECH-044', () => scenario(async (w) => {

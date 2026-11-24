@@ -21,6 +21,21 @@ export class Emitter {
 }
 
 const JOIN_TIMEOUT = 6000;
+const HEARTBEAT_TIMEOUT = 10000;     // battement sans réponse au bout de 10 s : la connexion est morte sans l'avoir dit (TECH-012)
+const TOKEN_MARGIN_MS = 90000;       // jeton du canal renouvelé dans sa dernière minute et demie (online.ensureSession en donne un neuf dans sa dernière minute)
+const TOKEN_RETRY_MS = 15000;        // pas encore de jeton neuf : on redemande un peu plus tard (tant qu'il n'a pas expiré)
+const LOST = 'Connexion au serveur de salons perdue.';
+
+// Date d'expiration (ms) d'un jeton JWT, lue sans le vérifier (c'est le serveur qui juge) ; null s'il n'est pas lisible.
+export function tokenExpiry(token) {
+  try {
+    const part = String(token).split('.')[1];
+    if (!part) return null;
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    const p = JSON.parse(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)));
+    return p && Number.isFinite(p.exp) ? p.exp * 1000 : null;
+  } catch { return null; }
+}
 
 // Entrées de présence d'une clé (format Phoenix : { metas: [{ phx_ref, phx_ref_prev?, ...meta }] }) → [{ ref, prev, meta }] (métadonnées sans les champs Phoenix).
 function metasOf(entry) {
@@ -34,26 +49,30 @@ function metasOf(entry) {
 // ---- Supabase Realtime (protocole Phoenix, version 1.0.0 : messages JSON {topic, event, payload, ref}) ----------------
 export class SupabaseSignaling extends Emitter {
   // observe : écouter l'annuaire d'un canal sans s'y inscrire (liste des salons publics : on regarde, on n'apparaît pas).
-  constructor({ code, selfId, getToken = null, observe = false, WebSocketImpl = globalThis.WebSocket, url = ONLINE.url, key = ONLINE.key, heartbeatMs = 25000 }) {
+  constructor({ code, selfId, getToken = null, observe = false, WebSocketImpl = globalThis.WebSocket, url = ONLINE.url, key = ONLINE.key, heartbeatMs = 25000, heartbeatTimeoutMs = HEARTBEAT_TIMEOUT }) {
     super();
     this.code = code; this.selfId = selfId; this.getToken = getToken; this.observe = observe;
-    this.WS = WebSocketImpl; this.url = url; this.key = key; this.heartbeatMs = heartbeatMs;
+    this.WS = WebSocketImpl; this.url = url; this.key = key; this.heartbeatMs = heartbeatMs; this.heartbeatTimeoutMs = heartbeatTimeoutMs;
     this.topic = `realtime:copytrack-room-${code}`;
     this.peers = new Map();
     this._pres = new Map();          // clé → [{ ref, prev, meta }] : une entrée par connexion (TECH-011)
     this.ref = 0;
     this.ws = null; this.hb = null; this.joined = false;
+    this.token = null; this._tokExp = null; this._hbRef = null;
   }
 
+  // Envoie un message ; renvoie sa référence (vrai) ou false si la connexion n'est pas ouverte.
   _send(topic, event, payload) {
     if (!this.ws || this.ws.readyState !== 1) return false;
-    this.ws.send(JSON.stringify({ topic, event, payload, ref: String(++this.ref) }));
-    return true;
+    const ref = String(++this.ref);
+    try { this.ws.send(JSON.stringify({ topic, event, payload, ref })); } catch { return false; }
+    return ref;
   }
 
   async join(meta) {
     this.meta = meta;
     const token = this.getToken ? await this.getToken().catch(() => null) : null;
+    this.token = token || null;
     const wsUrl = this.url.replace(/^http/, 'ws') + '/realtime/v1/websocket?apikey=' + encodeURIComponent(this.key) + '&vsn=1.0.0';
     await new Promise((resolve, reject) => {
       let done = false;
@@ -75,7 +94,8 @@ export class SupabaseSignaling extends Emitter {
           if (m.payload && m.payload.status === 'ok') {
             this.joined = true;
             if (!this.observe) this._send(this.topic, 'presence', { type: 'presence', event: 'track', payload: this.meta });
-            this.hb = setInterval(() => this._send('phoenix', 'heartbeat', {}), this.heartbeatMs);
+            this.hb = setInterval(() => this._beat(), this.heartbeatMs);
+            this._scheduleToken();
             // La liste des présents (presence_state) arrive juste après la réponse : on laisse un instant.
             setTimeout(() => { if (!done) { done = true; resolve(); } }, 250);
           } else fail('Salle refusée par le serveur' + (m.payload && m.payload.response && m.payload.response.reason ? ' (' + m.payload.response.reason + ')' : '.'));
@@ -84,13 +104,20 @@ export class SupabaseSignaling extends Emitter {
         this._onMessage(m);
       };
       ws.onerror = () => { clearTimeout(timer); fail('Connexion au serveur de salons impossible.'); };
-      ws.onclose = () => { clearTimeout(timer); fail('Connexion fermée.'); this._closed('Connexion au serveur de salons perdue.'); };
+      ws.onclose = () => { clearTimeout(timer); fail('Connexion fermée.'); this._closed(LOST); };
     });
   }
 
   _onMessage(m) {
+    if (this._ended) return;
+    if (m.topic === 'phoenix') {                        // réponse à un battement
+      if (m.event === 'phx_reply' && m.ref != null && String(m.ref) === this._hbRef) { this._hbRef = null; clearTimeout(this._hbWait); }
+      return;
+    }
     if (m.topic !== this.topic) return;
     const p = m.payload || {};
+    // TECH-012 : canal fermé ou en erreur côté serveur, ou message « system » d'erreur (jeton expiré ou refusé) : la présence est perdue, c'est une perte.
+    if (m.event === 'phx_close' || m.event === 'phx_error' || (m.event === 'system' && p.status === 'error')) { this._closed(LOST); return; }
     if (m.event === 'presence_state') this._syncState(p);
     else if (m.event === 'presence_diff') this._syncDiff(p);
     else if (m.event === 'broadcast' && p.event === 'signal' && p.payload) {
@@ -151,10 +178,56 @@ export class SupabaseSignaling extends Emitter {
     return this._send(this.topic, 'broadcast', { type: 'broadcast', event: 'signal', payload: { from: this.selfId, to, data } });
   }
 
+  // ---- Battements (TECH-012) : chaque battement attend sa réponse ; sans elle, la connexion est morte (le navigateur peut ne jamais le dire) --------------
+  _beat() {
+    if (this._ended) return;
+    if (this._hbRef) { this._closed(LOST); return; }            // (le précédent est resté sans réponse)
+    const ref = this._send('phoenix', 'heartbeat', {});
+    if (!ref) { this._closed(LOST); return; }
+    this._hbRef = ref;
+    clearTimeout(this._hbWait);
+    this._hbWait = setTimeout(() => { if (this._hbRef === ref) this._closed(LOST); }, Math.min(this.heartbeatTimeoutMs, this.heartbeatMs));
+    if (this._tokExp && Date.now() >= this._tokExp - TOKEN_MARGIN_MS) this._renewToken();
+  }
+
+  // ---- Jeton d'accès du canal (TECH-012) : renouvelé AVANT son expiration (message access_token), sans quoi le serveur ferme le canal à l'échéance -------
+  // Le jeton n'est jamais écrit dans un journal.
+  _scheduleToken() {
+    clearTimeout(this._tokTimer);
+    this._tokExp = this.token ? tokenExpiry(this.token) : null;
+    if (!this._tokExp || !this.getToken || this._ended) return;
+    const wait = Math.max(1000, Math.min(this._tokExp - TOKEN_MARGIN_MS - Date.now(), 2 ** 31 - 1));
+    this._tokTimer = setTimeout(() => this._renewToken(), wait);
+  }
+
+  async _renewToken() {
+    if (this._ended || this._renewing || !this.getToken) return;
+    this._renewing = true;
+    let t = null;
+    try { t = await this.getToken(); } catch { t = null; } finally { this._renewing = false; }
+    if (this._ended) return;
+    if (t && t !== this.token) {
+      this.token = t;
+      this._send(this.topic, 'access_token', { access_token: t });
+      this._scheduleToken();
+    } else if (this._tokExp && Date.now() < this._tokExp) {
+      // Pas encore de jeton neuf : on redemande bientôt. Après l'échéance, le serveur ferme le canal : c'est une perte, et la reconnexion prend un jeton neuf.
+      clearTimeout(this._tokTimer);
+      this._tokTimer = setTimeout(() => this._renewToken(), TOKEN_RETRY_MS);
+    }
+  }
+
+  _stop() {
+    clearInterval(this.hb); clearTimeout(this._hbWait); clearTimeout(this._tokTimer);
+    this.hb = this._hbWait = this._tokTimer = null; this._hbRef = null;
+  }
+
+  // La connexion est perdue (fermée, en erreur, canal fermé par le serveur, battement sans réponse) : on la ferme pour de bon et on le dit.
   _closed(reason) {
     if (this._ended) return;
     this._ended = true;
-    clearInterval(this.hb);
+    this._stop();
+    try { if (this.ws) this.ws.close(); } catch { /* déjà fermé */ }
     this.emit('closed', reason);
   }
 
@@ -162,7 +235,7 @@ export class SupabaseSignaling extends Emitter {
     if (this._ended) return;
     this._send(this.topic, 'phx_leave', {});
     this._ended = true;
-    clearInterval(this.hb);
+    this._stop();
     try { this.ws && this.ws.close(); } catch { /* déjà fermé */ }
   }
 }
