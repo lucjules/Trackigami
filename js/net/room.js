@@ -689,8 +689,7 @@ export class Room extends Emitter {
     this.epoch = e; this.launch = { e, kind: 'cup', track: null };
     this._pendingFinish = null;
     this.cup = new Championship({ id: Math.random().toString(36).slice(2, 8), rounds, collisions });
-    this.cupState = null;
-    for (const m of this.list) this.cup.setName(m.id, m.name);
+    this.cupState = null;                                        // (TECH-085 : seuls les joueurs de la grille sont nommés, à chaque départ de manche)
     this.mesh.sendCtl({ k: 'cup', e, cup: this.cup.toJSON() });
     this.emit('cup');
     this._hostBeginRound(0);

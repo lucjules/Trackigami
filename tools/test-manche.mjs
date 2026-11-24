@@ -522,7 +522,12 @@ await test('un arrivant en cours de championnat reçoit le championnat, suit la 
   assert.equal(env.events.d.round.length, 1, 'il voit les résultats');
   env.clock.t += RESULTS_MS; a._cupTick();
   assert.equal(env.events.d.start.length, 1); assert.equal(env.events.d.start[0].cup.slot, 2); assert.equal(env.events.d.start[0].cup.count, 3);
-  assert.deepEqual(d.cup.standings().map((r) => [r.id, r.points]).sort(), [['a', 10], ['b', 8], ['d', 0]], 'même classement que les autres, sans point pour lui');
+  // (TECH-085) tant qu'aucune manche qu'il a courue n'est classée, il n'est pas au classement général ; ensuite il y figure, sans point d'avant.
+  assert.deepEqual(d.cup.standings().map((r) => [r.id, r.points]), [['a', 10], ['b', 8]], 'même classement que les autres ; lui n\'a pas encore couru');
+  assert.deepEqual(d.cup.standings(), a.cup.standings());
+  d.reportFinish(3900); a.reportFinish(4000); b.reportFinish(4100);
+  assert.deepEqual(d.cup.standings().map((r) => [r.id, r.points]), [['a', 18], ['b', 14], ['d', 10]], 'après sa manche, il y figure : ses seuls points sont les siens');
+  assert.deepEqual(d.cup.standings(), a.cup.standings());
   env.end();
 });
 await test('un départ libre de l\'hôte met fin au championnat ; en championnat, l\'arrivée en mode libre n\'est pas prise pour un temps de manche', async () => {
@@ -770,7 +775,7 @@ await test('arrêt puis nouveau championnat (TECH-084) : aucune arrivée rejoué
   } finally { env.end(); }
 });
 
-await bugConnu('TECH-085', async () => {
+await test('classement général (TECH-085) : un joueur qui n\'a jamais couru en est absent', async () => {
   const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
   env.open();
   a.members.get('c').link = 'failed';                              // Cléo n'est pas reliée à l'hôte : elle ne part pas sur la grille
@@ -779,9 +784,10 @@ await bugConnu('TECH-085', async () => {
   b.reportFinish(4000);                                            // Ana ne finit pas (0 point)
   env.clock.t += FINISH_GRACE_MS + 1; a._cupTick();
   assert.deepEqual(a.cup.standings().map((r) => r.id), ['b', 'a'], 'Cléo, qui n\'a pas couru, n\'est pas au classement');
+  assert.equal(a.cup.names.has('c'), false, 'ni même nommée dans le championnat');
   } finally { env.end(); }
-}, 'classement général : un joueur qui n\'a jamais couru en est absent');
-bugConnu('TECH-085', () => {
+});
+test('départage (TECH-085) : moyenne des places, qui n\'avantage pas celui qui a joué moins de manches', () => {
   // x : deux manches sans arrivée dans des manches à 2 (places 3 et 3 : somme 6, moyenne 3) ; y : une seule manche sans arrivée dans une manche à 3 (place 4).
   const cup = new Championship({ rounds: [{ id: 'b-1' }, { id: 'b-2' }, { id: 'b-3' }] });
   cup.scoreRound(0, { x: null, p: 4000 }, ['x', 'p']);
@@ -789,7 +795,10 @@ bugConnu('TECH-085', () => {
   cup.scoreRound(2, { y: null, r: 4000, s: 4100 }, ['y', 'r', 's']);
   const ids = cup.standings().map((r) => r.id);
   assert.ok(ids.indexOf('x') < ids.indexOf('y'), 'départage par moyenne des places (3 contre 4), pas par somme (6 contre 4) : ' + ids.join(','));
-}, 'départage : moyenne des places, qui n\'avantage pas celui qui a joué moins de manches');
+  const sx = cup.standings().find((r) => r.id === 'x'), sy = cup.standings().find((r) => r.id === 'y');
+  assert.deepEqual([sx.places, sx.rounds, sx.avg, sy.places, sy.rounds, sy.avg], [6, 2, 3, 4, 1, 4]);
+  assert.deepEqual(new Championship({ rounds: [{ id: 'b-1' }] }).standings(), [], 'aucune manche jouée : classement vide');
+});
 
 await bugConnu('GAME-008', async () => {
   const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];

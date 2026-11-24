@@ -2,7 +2,9 @@
 // le salon (room.js) y range les résultats ; chaque joueur reçoit les mêmes temps, donc calcule le même classement.
 //
 // Barème (comme en Formule 1, 8 places) : 10, 8, 6, 5, 4, 3, 2, 1 ; pas de point pour qui n'a pas fini la manche (abandon, déconnexion, temps écoulé).
-// Égalités au général : plus de victoires, puis meilleure somme des places, puis ordre alphabétique de l'identifiant (stable chez tous).
+// Classement général (TECH-085) : seulement les joueurs qui ont été sur la grille d'au moins une manche (un membre qui n'a jamais couru n'y figure pas).
+// Égalités : plus de victoires, puis meilleure MOYENNE des places (une manche sans arrivée compte comme la place après le dernier de cette manche), puis
+// ordre alphabétique de l'identifiant (stable chez tous). La moyenne, et non la somme : la somme avantageait celui qui avait joué moins de manches.
 
 export const POINTS = [10, 8, 6, 5, 4, 3, 2, 1];
 export const MAX_ROUNDS = 10;
@@ -98,11 +100,10 @@ export class Championship {
     return mine.order.some((id) => !other.order.includes(id) || (mine.times[id] != null && other.times[id] == null));
   }
 
-  // Classement général : [{ id, name, points, wins, places, rounds }] du premier au dernier.
+  // Classement général : [{ id, name, points, wins, places, rounds, avg }] du premier au dernier (places : somme ; avg : moyenne des places).
   standings() {
     const rows = new Map();
-    const row = (id) => rows.get(id) || rows.set(id, { id, name: this.names.get(id) || '?', points: 0, wins: 0, places: 0, rounds: 0 }).get(id);
-    for (const id of this.names.keys()) row(id);
+    const row = (id) => rows.get(id) || rows.set(id, { id, name: this.names.get(id) || '?', points: 0, wins: 0, places: 0, rounds: 0, avg: 0 }).get(id);
     for (const r of this.results) {
       r.order.forEach((id, i) => {
         const x = row(id);
@@ -111,7 +112,8 @@ export class Championship {
         if (i === 0 && r.times[id] != null) x.wins++;
       });
     }
-    return [...rows.values()].sort((a, b) => b.points - a.points || b.wins - a.wins || a.places - b.places || (a.id < b.id ? -1 : 1));
+    for (const x of rows.values()) x.avg = x.rounds ? x.places / x.rounds : 0;
+    return [...rows.values()].sort((a, b) => b.points - a.points || b.wins - a.wins || a.avg - b.avg || (a.id < b.id ? -1 : 1));
   }
 
   // Version compacte pour un arrivant en cours de championnat.
