@@ -120,15 +120,16 @@ export const netMethods = {
   // TECH-043 : seulement contre une voiture vivante (voir _remoteLive) : jamais contre une voiture figée faute de paquets.
   _collide(now = performance.now()) {
     const p = this.phys;
-    if (p.mode === 'ribbon' || this.tick < this.protectUntil || !this.remote.size) return;
+    const contacts = this._contacts || (this._contacts = new Map());      // contacts en cours (TECH-041 : une impulsion par contact, pas par pas)
+    if (p.mode === 'ribbon' || this.tick < this.protectUntil || !this.remote.size) { contacts.clear(); return; }
     const others = [], room = this.multi.room;
     for (const [id, rc] of this.remote) {
-      if (!this._remoteLive(id, rc, now) || rc.finished || now - rc.teleportedAtMs <= PROTECT_S * 1000) continue;
+      if (!this._remoteLive(id, rc, now) || !rc.trusted || rc.finished || now - rc.teleportedAtMs <= PROTECT_S * 1000) continue;
       // Collisions unifiées (E16) : l'autre voiture au même instant que la nôtre (interpolation + demi-latence rattrapées).
       const m = room.members.get(id);
-      others.push(presentState(rc, rc.buffer.delay + (m && m.rtt ? m.rtt / 2000 : 0)));
+      others.push({ id, ...presentState(rc, rc.buffer.delay + (m && m.rtt ? m.rtt / 2000 : 0)) });
     }
-    if (others.length) softCollide(p, others);
+    softCollide(p, others, { memo: contacts });                         // (même sans voiture proche : les contacts finis sont oubliés)
   },
 
   // Fin de manche décidée par l'hôte (temps écoulé pour ceux qui n'ont pas fini) : la voiture est arrêtée, sans temps.

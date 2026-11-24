@@ -10,6 +10,7 @@
 // Téléportation (retour au checkpoint) : le compteur `tele` change. On ne glisse JAMAIS entre l'ancien et le nouvel
 // emplacement : la voiture reste à l'ancien jusqu'à l'instant du premier paquet « après », puis apparaît à l'autre.
 import * as THREE from '../vendor/three.module.min.js';
+import { MAX_NET_SPEED } from './collide.js';
 
 const DEFAULT_DELAY = 0.1;       // s
 const MAX_EXTRAP = 0.25;                // s : au-delà, la voiture s'arrête sur place plutôt que de dériver
@@ -18,6 +19,8 @@ const KEEP = 1.5;                       // s d'historique conservé
 const OFFSET_WINDOW = 40;
 const FAR_S = 5;                        // s : écart d'horloge au-delà duquel un paquet est « hors horloge » (voir push)
 const FAR_CONFIRM = 3;                  // paquets consécutifs hors horloge qu'il faut pour croire à un vrai changement d'horloge
+const VEL_TOL = 40;                     // m/s : vitesse annoncée qui s'écarte plus que cela du déplacement réel entre deux paquets : aberrante (TECH-041)
+const IMPLIED_MAX_GAP = 0.3;            // s : au-delà, deux paquets sont trop espacés pour juger la vitesse annoncée
 export const STALE_MS = 500;            // ms sans paquet accepté : la voiture n'est plus « vivante » (masquée, hors des collisions : TECH-043)
 
 export class SnapshotBuffer {
@@ -28,7 +31,7 @@ export class SnapshotBuffer {
     this._tele = null;                   // compteur de téléportation du segment affiché à l'appel précédent
     this._far = 0;                       // paquets consécutifs hors horloge
     this.lastRecvMs = null;              // horloge locale du dernier paquet accepté (TECH-043)
-    this.out = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), quat: new THREE.Quaternion(), speed: 0, vehicle: 'car', flags: 0, cp: 0, lap: 0, prog: 0, teleported: false, ready: false };
+    this.out = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), quat: new THREE.Quaternion(), speed: 0, vehicle: 'car', flags: 0, cp: 0, lap: 0, prog: 0, teleported: false, ready: false, bad: false };
     this._q0 = new THREE.Quaternion(); this._q1 = new THREE.Quaternion();
   }
 
@@ -54,15 +57,27 @@ export class SnapshotBuffer {
     let i = arr.length;
     while (i > 0 && arr[i - 1].t > s.t) i--;
     if (i > 0 && Math.abs(arr[i - 1].t - s.t) < 1e-9) return false;
-    arr.splice(i, 0, {
+    const e = {
       t: s.t, tele: s.tele, vehicle: s.vehicle, flags: s.flags, cp: s.cp, lap: s.lap, prog: s.prog || 0,
       pos: new THREE.Vector3(s.pos.x, s.pos.y, s.pos.z), vel: new THREE.Vector3(s.vel.x, s.vel.y, s.vel.z),
       quat: new THREE.Quaternion(s.quat.x, s.quat.y, s.quat.z, s.quat.w),
-    });
+    };
+    arr.splice(i, 0, e);
+    this._judge(i);
+    if (i + 1 < arr.length) this._judge(i + 1);                     // (un paquet arrivé en retard est le précédent du suivant)
     this.offsets.push(nowMs / 1000 - s.t);
     if (this.offsets.length > OFFSET_WINDOW) this.offsets.shift();
     this.lastRecvMs = nowMs;
     return true;
+  }
+
+  // Vitesse annoncée crédible (TECH-041) : sous MAX_NET_SPEED et conforme (à VEL_TOL près) au déplacement depuis le paquet précédent du même segment (sans
+  // téléportation, moins de 0,3 s avant). Un paquet qu'on ne peut pas comparer (le premier, le premier après une téléportation ou un trou) n'est pas cru non plus.
+  // L'affichage n'en dépend pas ; la voiture est seulement tenue hors des collisions tant que ce paquet est celui affiché.
+  _judge(k) {
+    const e = this.samples[k], pv = k > 0 ? this.samples[k - 1] : null, gap = pv ? e.t - pv.t : 0;
+    e.bad = !(Math.hypot(e.vel.x, e.vel.z) <= MAX_NET_SPEED) || !pv || pv.tele !== e.tele || !(gap > 0 && gap <= IMPLIED_MAX_GAP)
+      || Math.hypot(e.vel.x - (e.pos.x - pv.pos.x) / gap, e.vel.z - (e.pos.z - pv.pos.z) / gap) > VEL_TOL;
   }
 
   // Un paquet accepté depuis moins de STALE_MS (TECH-043) : sans cela, sample() continuerait de montrer la voiture à sa dernière place (arrêt sur place après
@@ -100,6 +115,7 @@ export class SnapshotBuffer {
     this._tele = a.tele;
 
     out.ready = true;
+    out.bad = !!(a.bad || (mode === 'lerp' && b.bad));
     out.vehicle = a.vehicle; out.flags = a.flags; out.cp = a.cp; out.lap = a.lap; out.prog = a.prog; out.vel.copy(a.vel);
     if (mode === 'lerp') {
       const h = b.t - a.t, u = Math.max(0, Math.min(1, (rt - a.t) / h));

@@ -20,7 +20,7 @@ import { createIceLoader } from '../js/net/ice.js';
 import { createIdentity, prove, proofText, descText, iceText, identityBusy } from '../js/net/identity.js';
 import { readFileSync } from 'node:fs';
 import { netMethods } from '../js/race/net.js';
-import { softCollide, presentState } from '../js/net/collide.js';
+import { softCollide, presentState, MAX_DV_TOTAL, MAX_IMPULSE } from '../js/net/collide.js';
 import { ProgressTracker } from '../js/net/progress.js';
 import { DEFAULT_LOADOUT } from '../js/cosmetics.js';
 
@@ -1321,30 +1321,42 @@ function duel(va, vb, gap, D, steps = 480) {
   }
   return { vA: A.vel.x, vB: B.vel.x, maxDv };
 }
-const STEP_CAP = 2.5;              // m/s : variation de vitesse maximale par pas de 1/120 s, toutes voitures confondues (300 m/s², ≈ 31 g)
-await bugConnu('TECH-041', () => {
-  for (const D of [0.1, 0.25]) {
+const STEP_CAP = MAX_DV_TOTAL;     // m/s : variation de vitesse maximale par pas de 1/120 s, toutes voitures confondues (2,5 m/s : 300 m/s², ≈ 31 g)
+await test('face-à-face 2 × 50 m/s (TECH-041) : Δv plafonnée par pas, échange symétrique, jamais amplifié', () => {
+  assert.equal(STEP_CAP, 2.5);
+  for (const D of [0, 0.1, 0.25]) {
     const r = duel(50, -50, 6, D);
     assert.ok(r.maxDv <= STEP_CAP + 1e-9, `face-à-face 2 × 50 m/s (retard ${D} s) : Δv par pas ${r.maxDv.toFixed(2)} m/s`);
     assert.ok(Math.abs(r.vA + r.vB) < 0.5, `échange symétrique : ${r.vA.toFixed(2)} / ${r.vB.toFixed(2)}`);
     assert.ok(r.vA >= -50 * 0.35 - 0.5 && r.vB <= 50 * 0.35 + 0.5, `jamais renvoyées plus vite que la restitution ne le permet (± 17,5 m/s) : ${r.vA.toFixed(2)} / ${r.vB.toFixed(2)}`);
+    assert.ok(Math.abs(r.vA) <= 50 + 1e-9 && Math.abs(r.vB) <= 50 + 1e-9, 'aucune voiture ne sort du choc plus vite qu\'elle n\'y est entrée');
   }
-}, 'face-à-face 2 × 50 m/s : Δv plafonnée par pas, échange symétrique, jamais amplifié');
-await bugConnu('TECH-041', () => {
+});
+await test('rebond cohérent (TECH-041) : la vitesse de l\'autre (avant sa propre réaction) est prise en compte, l\'échange n\'est pas doublé', () => {
   const f = duel(20, -20, 6, 0.1);
   assert.ok(f.maxDv <= STEP_CAP + 1e-9, 'face-à-face 2 × 20 : Δv par pas ' + f.maxDv.toFixed(2));
   assert.ok(Math.abs(f.vA + 7) < 1 && Math.abs(f.vB - 7) < 1, `face-à-face 2 × 20 m/s : rebond de ± 7 m/s (restitution 0,35) : ${f.vA.toFixed(2)} / ${f.vB.toFixed(2)}`);
   const r = duel(40, 30, 3, 0.1);
   assert.ok(Math.abs(r.vA - 33.25) < 1 && Math.abs(r.vB - 36.75) < 1, `rattrapage 40 → 30 m/s : 33,25 / 36,75 attendus, ${r.vA.toFixed(2)} / ${r.vB.toFixed(2)} (l'échange n'est pas doublé)`);
-}, 'rebond cohérent : la vitesse de l\'autre (avant sa propre réaction) est prise en compte, l\'échange n\'est pas doublé');
-await bugConnu('TECH-041', () => {
+  for (const D of [0, 0.25]) {
+    const q = duel(60, 30, 3, D);
+    assert.ok(Math.abs(q.vA - 40) < 1 && Math.abs(q.vB - 50) < 1 && q.maxDv <= STEP_CAP + 1e-9, `rattrapage 60 → 30 m/s (retard ${D} s) : 40 / 50 attendus, ${q.vA.toFixed(2)} / ${q.vB.toFixed(2)}`);
+  }
+});
+await test('sept voitures empilées (TECH-041) : plafond global par pas, impulsion par contact bornée', () => {
   const self = { pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 } };
   const side = []; for (let k = 0; k < 7; k++) side.push({ id: 's' + k, pos: { x: 1.0, y: 0, z: (k - 3) * 0.2 }, vel: { x: -40, y: 0, z: 0 } });
   softCollide(self, side, { memo: new Map() });
   const dv = Math.hypot(self.vel.x, self.vel.z);
   assert.ok(dv <= STEP_CAP + 1e-9, `sept voitures empilées du même côté : Δv en un pas ${dv.toFixed(2)} m/s`);
-}, 'sept voitures empilées : plafond global par pas');
-await bugConnu('TECH-041', () => {
+  // tout autour (sept voitures qui convergent) et pendant tout le contact : chaque pas reste sous le plafond, chaque contact sous MAX_IMPULSE
+  const me = { pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 } }, memo = new Map();
+  const ring = []; for (let k = 0; k < 7; k++) { const a = k * 2 * Math.PI / 7 + 0.3; ring.push({ id: 'r' + k, pos: { x: Math.cos(a) * 1.2, y: 0, z: Math.sin(a) * 1.2 }, vel: { x: -Math.cos(a) * 90, y: 0, z: -Math.sin(a) * 90 } }); }
+  let worst = 0;
+  for (let i = 0; i < 120; i++) { const vx = me.vel.x, vz = me.vel.z; softCollide(me, ring, { memo }); worst = Math.max(worst, Math.hypot(me.vel.x - vx, me.vel.z - vz)); for (const c of memo.values()) assert.ok(c.imp <= MAX_IMPULSE + 1e-9, 'impulsion d\'un contact : ' + c.imp); }
+  assert.ok(worst <= STEP_CAP + 1e-9, 'pire pas : ' + worst.toFixed(2));
+});
+await test('paquets forgés (TECH-041) : 600 m/s annoncés, ou une vitesse sans rapport avec le déplacement : rejetés, la voiture n\'est pas propulsée', () => {
   // Un client modifié envoie des paquets qui « suivent » notre voiture en annonçant 600 m/s vers elle (le paquet en permet ± 655).
   const room = fakeRoom([{ id: 'evil' }]);
   const S = raceSide(room);
@@ -1359,11 +1371,27 @@ await bugConnu('TECH-041', () => {
   }
   teardown(S);
   assert.ok(maxSpeed <= 30, 'des paquets fabriqués ne propulsent pas la voiture : ' + maxSpeed.toFixed(1) + ' m/s');
-}, 'paquets forgés (600 m/s annoncés) : vitesses distantes aberrantes rejetées');
-await bugConnu('TECH-041', () => {
+  // Vitesse plausible (140 m/s) mais voiture immobile, posée sur la nôtre : rejetée aussi (elle ne se déplace pas comme elle le dit).
+  const room2 = fakeRoom([{ id: 'evil' }]), S2 = raceSide(room2);
+  let t2 = 0, max2 = 0;
+  for (let i = 0; i < 240; i++) {
+    if (i % 6 === 0) { t2 += 6; room2.emit('snapshot', 'evil', pk(snap(t2, 0, { vel: { x: 140, y: 0, z: 0 }, pos: { x: -14.5, y: 1, z: 0 } })), t2 * DT * 1000); }
+    frame(S2, t2 * DT * 1000 + 100);
+    S2.phys.pos = { x: 0, y: 1, z: 0 }; S2._collide(t2 * DT * 1000 + 100);
+    max2 = Math.max(max2, Math.hypot(S2.phys.vel.x, S2.phys.vel.z));
+  }
+  teardown(S2);
+  assert.ok(max2 <= 1, 'une voiture immobile qui annonce 140 m/s ne pousse pas : ' + max2.toFixed(1) + ' m/s');
+  // et un client honnête à 80 m/s reste crédible
+  const buf = new SnapshotBuffer();
+  feed(buf, [0, 6, 12, 18].map((k) => snap(k, k * DT * 80, { vel: { x: 80, y: 0, z: 0 } })));
+  assert.equal(buf.sample(18 * DT * 1000 + 130).bad, false, 'vitesse cohérente avec le déplacement : crédible');
+});
+await test('supabase/MULTI.md dit le vrai plafond des collisions (TECH-041)', () => {
   const doc = readFileSync(new URL('../supabase/MULTI.md', import.meta.url), 'utf8');
   assert.ok(!/plafonn[ée]+ à ~4 g/.test(doc), 'supabase/MULTI.md dit encore « poussée plafonnée à ~4 g »');
-}, 'supabase/MULTI.md dit le vrai plafond');
+  assert.ok(doc.includes('2,5 m/s par pas') && doc.includes('31 g'), 'le plafond réel (2,5 m/s par pas, ≈ 31 g) est écrit');
+});
 
 console.log('Phase 18 : ressources et défauts mineurs (TECH-087, TECH-088, TECH-089)');
 await bugConnu('TECH-087', () => {

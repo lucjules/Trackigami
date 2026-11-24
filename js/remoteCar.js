@@ -61,6 +61,7 @@ export class RemoteCar {
     this.dark = 0;
     this.teleports = 0;
     this.ready = false;
+    this.trusted = false;
     this.teleportedAtMs = -1e9;      // dernier retour au checkpoint vu (protection : on ne bouscule pas une voiture qui vient d'apparaître)
     // Les matériaux fantômes sont propres à cette voiture : on peut les modifier sans toucher aux autres.
     // Chaque matériau garde SA couleur d'origine (corps, effets...) : l'assombrissement part de celle-là.
@@ -82,6 +83,7 @@ export class RemoteCar {
     const s = this.buffer.sample(nowMs);
     if (!s.ready) { this.group.visible = false; this.ready = false; return false; }
     this.ready = true;
+    this.trusted = !s.bad;               // TECH-041 : vitesse annoncée crédible (sinon : hors des collisions)
     this.group.visible = true;
     this.group.position.copy(s.pos);
     this.group.quaternion.copy(s.quat);

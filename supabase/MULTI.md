@@ -1,8 +1,9 @@
 # Multijoueur en direct : installation et fonctionnement
 
-Jusqu'à 8 joueurs, deux modes au choix de l'hôte :
+Jusqu'à 8 joueurs, trois modes au choix de l'hôte :
 - **Course libre** : le même circuit, chacun à son rythme, vus en **voitures fantômes** (aucune collision), chacun avec son chrono (voir « Boucle de jeu asynchrone » plus bas) ;
-- **Championnat** : plusieurs circuits à la suite, départ commun sur une grille, points par place, classement général, collisions douces en option (voir « Championnat »).
+- **Championnat** : plusieurs circuits à la suite, départ commun sur une grille, points par place, classement général, collisions douces en option (voir « Championnat ») ;
+- **Course** : un championnat d'une seule manche (départ commun, classement à l'arrivée, revanche).
 
 Menu principal > *Multijoueur* : *Créer une salle* (code de 6 caractères), *Rejoindre* par code, ou *Salons publics* (liste, sans code).
 
@@ -127,7 +128,16 @@ Les circuits sont tirés au sort **sans doublon et du plus facile au plus dur** 
 - **Pas de nouvel essai** en manche (`R` = retour au checkpoint, le chrono continue). Quitter la manche = quitter la salle (les autres continuent sans toi).
 - **Classement en direct** : chaque paquet d'état porte l'avancement (0 à 1) de la voiture sur la ligne centrale du circuit (`js/net/progress.js` ; sans ligne centrale : checkpoints franchis).
 - **Collisions douces** (option) : `js/net/collide.js`. Chaque voiture est un disque de 1,15 m de rayon ; chaque joueur applique SA moitié du choc à SA voiture d'après la position affichée de l'autre
-  (poussée plafonnée à ~4 g, rien en looping, rien 2 s après un retour au checkpoint, rien contre une voiture arrivée). Pas de physique rejouable : aucun record n'en dépend.
+  (rien en looping, rien 2 s après un retour au checkpoint, rien contre une voiture arrivée, ni contre une voiture dont les paquets n'arrivent plus depuis 0,5 s, dont le lien n'est pas
+  ouvert ou dont le joueur est revenu au salon). Pas de physique rejouable : aucun record n'en dépend. **Plafonds réels** (0.16.17, TECH-041) : la variation de vitesse due aux
+  collisions est d'au plus **2,5 m/s par pas** de 1/120 s, **toutes voitures confondues** (300 m/s², ≈ 31 g) ; la poussée de séparation (chevauchement) d'au plus 0,32 m/s par pas
+  (≈ 4 g) ; l'impulsion d'un contact d'au plus 30 m/s. L'impulsion est calculée **une fois par contact** (vitesse d'approche du début du contact, restitution 0,35) en supposant
+  que l'autre reçoit la même en sens contraire tant que sa réaction n'est pas visible (l'affichage a ~100 ms de retard) : l'échange n'est plus doublé (rattrapage 40 → 30 m/s :
+  33,2 / 36,8 ; face-à-face 2 × 20 m/s : rebond de ± 7 m/s). Au-delà de ≈ 2 × 30 m/s d'approche (face-à-face à pleine vitesse), le plafond par pas ne suffit pas à arrêter les
+  voitures dans le chevauchement : elles se traversent en perdant chacune la même vitesse. Une vitesse annoncée au-delà de 150 m/s, ou sans rapport (plus de 40 m/s d'écart)
+  avec le déplacement depuis le paquet précédent (ou invérifiable : premier paquet, premier après une téléportation ou un trou de plus de 0,3 s), n'est pas crue : la voiture est
+  hors des collisions tant que ce paquet est affiché.
+  *Avant 0.16.17*, ce document annonçait une poussée limitée à environ 4 g : seule la poussée de séparation l'était ; le terme de choc ajoutait jusqu'à 8 m/s par pas et par voiture.
 - **Hôte parti ou absent** : le suivant dans l'ordre d'arrivée (voir « Identité, rôle d'hôte et vie privée ») devient hôte et reprend la clôture et les départs (l'état du championnat est copié chez tous). Un joueur qui arrive en cours de route
   reçoit le championnat (`cup`), voit le circuit et « Manche en cours : tu joueras la suivante » (GAME-008), suit la manche sans la courir et part à la suivante. Un `rend` manqué est
   rattrapé par le résultat joint au `round` suivant, ou par l'état que l'hôte renvoie quand la liaison se rouvre : le joueur revenu après la clôture voit les résultats de SA manche,
