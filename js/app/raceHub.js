@@ -7,7 +7,7 @@
 // Tout ce qui est local s'affiche tout de suite ; le classement en ligne arrive ensuite, dans son panneau. Rien n'attend le réseau pour jouer.
 import { $, esc } from '../dom.js';
 import { RaceSession } from '../race.js';
-import { Track } from '../track.js';
+import { Track, hashString } from '../track.js';
 import { DECORS } from '../themes.js';
 import { PHYS_VER } from '../version.js';
 import { decodeInputs } from '../replay.js';
@@ -420,7 +420,7 @@ export const raceHubMethods = {
       const kind = f.ref.slice(0, 1), id = f.ref.slice(2);
       let img = '', sub = '';
       if (kind === 'b') { const b = this.builtins.find((x) => x.def.id === id); if (!b) continue; img = thumbnail(b.track, 'b-' + b.key); sub = 'Carrière'; }
-      else if (kind === 'm') { const e = mine.find((t) => t.id === id); if (!e) continue; try { img = thumbnail(Track.decode(e.code), 'm-' + e.id + '-' + e.code.length); } catch { img = ''; } sub = 'Mes circuits'; }
+      else if (kind === 'm') { const e = mine.find((t) => t.id === id); if (!e) continue; try { img = thumbnail(Track.decode(e.code), 'm-' + e.id + '-' + e.code.length + '-' + hashString(e.code)); } catch { img = ''; } sub = 'Mes circuits'; }
       else sub = 'Communauté · en ligne';
       const card = document.createElement('div');
       card.className = 'card fav-card';
