@@ -4,6 +4,7 @@ import { RemoteCar } from '../remoteCar.js';
 import { F_BOOST, F_GROUNDED } from '../net/snapshot.js';
 import { checkpointProgress } from '../net/progress.js';
 import { PRIO } from '../hudMessages.js';
+import { DEFAULT_LOADOUT } from '../cosmetics.js';
 import { softCollide, presentState, PROTECT_S } from '../net/collide.js';
 
 const GONE_MS = 1000;        // après le retrait de sa voiture (retour au salon), les paquets d'avant d'un joueur sont ignorés pendant 1 s (ceux qui étaient en route)
@@ -39,8 +40,9 @@ export const netMethods = {
     if (!m || id === room.selfId || m.link === 'incompatible') return null;
     // (0.13.1) à son apparence ; une vraie voiture dans une course à départ commun (championnat), un fantôme de sa couleur en course libre. Couleur de repli : son
     // rang dans la liste triée des identifiants (la même chez tous tant que la salle ne change pas).
-    const ids = room.list.map((x) => x.id).sort();
-    const rc = new RemoteCar(this.app.scene, { id, name: m.name, colorIndex: Math.max(0, ids.indexOf(id)), car: m.car, opaque: !!this.cup },
+    // TECH-088 : la règle « voitures identiques » vaut pour TOUTES les voitures (race.js l'applique à la mienne) : l'apparence d'origine, pas celle annoncée.
+    const ids = room.list.map((x) => x.id).sort(), same = !!(room.rules && room.rules.sameCars);
+    const rc = new RemoteCar(this.app.scene, { id, name: m.name, colorIndex: Math.max(0, ids.indexOf(id)), car: same ? DEFAULT_LOADOUT : m.car, opaque: !!this.cup },
       { onTeleport: (pos) => this.app.particles.burst(pos.x, pos.y + 1.5, pos.z, 16, 6, 0.5, 0.6, '#9fe3ff', 0) });
     this.remote.set(id, rc);
     return rc;

@@ -1406,7 +1406,13 @@ await test('onglet masqué 10 minutes (TECH-087, TRANS-09) : tampon d\'interpola
   assert.ok(flood.samples.length <= 64, 'paquets serrés : ' + flood.samples.length);
   rc.dispose();
 });
-await bugConnu('TECH-088', () => {
+await test('règle « voitures identiques » (TECH-088) : les voitures distantes aussi ont l\'apparence d\'origine ; sans la règle, chacune garde la sienne', () => {
+  const plain = fakeRoom([{ id: 'zoe', car: { color: '#ff0000', color2: '#00ff00', body: 'muscle' } }]);
+  const P = raceSide(plain, { cup: { n: 0, total: 1, collisions: true } });
+  plain.emit('snapshot', 'zoe', pk(snap(6, 0)), 0);
+  assert.equal('#' + P.remote.get('zoe').baseColor.getHexString(), '#ff0000', 'sans la règle : sa couleur');
+  assert.equal(P.remote.get('zoe').opaque, true, 'vraie voiture en championnat');
+  teardown(P);
   const room = fakeRoom([{ id: 'zoe', car: { color: '#ff0000', color2: '#00ff00', body: 'muscle' } }], { rules: { sameCars: 1 } });
   const S = raceSide(room, { cup: { n: 0, total: 1, collisions: true } });
   room.emit('snapshot', 'zoe', pk(snap(6, 0)), 0);
@@ -1415,7 +1421,7 @@ await bugConnu('TECH-088', () => {
   const col = '#' + rc.baseColor.getHexString();
   teardown(S);
   assert.equal(col, DEFAULT_LOADOUT.color, 'règle « voitures identiques » : la voiture de Zoé a l\'apparence d\'origine');
-}, 'règle « voitures identiques » appliquée aussi aux voitures distantes');
+});
 await bugConnu('TECH-089', () => {
   const buf = new SnapshotBuffer();
   feed(buf, [snap(0, 0, { seq: 1 }), snap(6, 10, { seq: 2 })]);
