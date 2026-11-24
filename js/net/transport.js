@@ -39,6 +39,7 @@ const MAX_LINKS = 7;
 const NEGOTIATION_MS = 12000;               // offre sans réponse (ou connexion qui n'avance pas) : on renégocie avec une connexion neuve
 const MAX_NEGOTIATIONS = 4;                 // au-delà : « failed » (la salle l'affiche ; la liaison est refaite si l'autre revient)
 const MAX_PENDING = 64;                     // candidats ICE gardés en attente de la description distante
+const ICE_WAIT_MS = 2500;                   // serveurs ICE : on n'attend jamais plus longtemps leur réponse (on garde alors les derniers connus)
 
 const descJSON = (d) => (d && d.toJSON ? d.toJSON() : d);
 // Empreinte DTLS d'une description : elle identifie la connexion qui l'a produite (une relance ICE la garde, une connexion neuve en a une autre).
@@ -65,8 +66,10 @@ export class PeerMesh {
   // appel quand la salle retire elle-même une liaison : removePeer est silencieux).
   // isMember(id) : ce joueur est-il un membre présent de la salle ? Seuls ses messages de signalisation peuvent ouvrir une liaison (TECH-045) ; par défaut,
   // présent dans l'annuaire de la signalisation.
-  constructor({ selfId, signaling, handlers, iceServers = ICE_SERVERS, isMember = null, RTC = globalThis.RTCPeerConnection }) {
-    this.selfId = selfId; this.signaling = signaling; this.h = handlers; this.ice = iceServers; this.RTC = RTC;
+  // getIce() : serveurs ICE à jour (ice.js : identifiants TURN à durée limitée, gardés jusqu'aux 3/4 de leur durée) ; redemandés à CHAQUE connexion neuve et
+  // avant une relance ICE (TECH-050), pour qu'un arrivant tardif ou une reconnexion n'utilise pas des identifiants expirés.
+  constructor({ selfId, signaling, handlers, iceServers = ICE_SERVERS, getIce = null, isMember = null, RTC = globalThis.RTCPeerConnection }) {
+    this.selfId = selfId; this.signaling = signaling; this.h = handlers; this.ice = iceServers; this.getIce = getIce; this.RTC = RTC;
     this.isMember = isMember || ((id) => !!(this.signaling && this.signaling.peers && this.signaling.peers.has(id)));
     this.links = new Map();
     this.stats = { sent: 0, recv: 0, skipped: 0 };
@@ -124,7 +127,23 @@ export class PeerMesh {
     try { if (pc) pc.close(); } catch { /* déjà fermée */ }
   }
 
-  async _ice() { return this.ice; }
+  async _ice() {
+    if (!this.getIce) return this.ice;
+    let timer = null;
+    try {
+      const s = await Promise.race([Promise.resolve(this.getIce()), new Promise((r) => { timer = setTimeout(() => r(null), ICE_WAIT_MS); })]);
+      if (Array.isArray(s) && s.length) this.ice = s;
+    } catch { /* on garde les derniers connus */ } finally { clearTimeout(timer); }
+    return this.ice;
+  }
+
+  // Relance ICE : la connexion existante prend les serveurs (identifiants TURN) à jour, si le navigateur le permet.
+  async _refreshConfig(link, gen) {
+    const ice = await this._ice();
+    const pc = link.pc;
+    if (!this._current(link, gen) || !pc || typeof pc.setConfiguration !== 'function') return;
+    try { pc.setConfiguration({ ...(typeof pc.getConfiguration === 'function' ? pc.getConfiguration() : {}), iceServers: ice }); } catch { /* refusé : on garde les anciens */ }
+  }
 
   // Connexion neuve pour la liaison (la précédente, s'il y en a une, est fermée).
   async _setup(link) {
@@ -191,6 +210,8 @@ export class PeerMesh {
   async _offer(link, gen, iceRestart = false) {
     try {
       if (!this._current(link, gen) || !link.pc) return;
+      if (iceRestart) await this._refreshConfig(link, gen);
+      if (!this._current(link, gen)) return;
       const offer = await link.pc.createOffer(iceRestart ? { iceRestart: true } : undefined);
       if (!this._current(link, gen)) return;
       await link.pc.setLocalDescription(offer);

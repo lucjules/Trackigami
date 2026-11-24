@@ -459,9 +459,9 @@ await test('nouvel essai : l\'horloge d\'envoi ne recule pas et la téléportati
 // gardée 20 s, l'expiration d'un jeton se jouent en quelques millisecondes. Le comportement réel du serveur n'est PAS observé ici (voir supabase/MULTI.md).
 const URL_RT = 'https://fake.supabase.co', KEY_RT = 'cle-publique';
 const topicOf = (code) => 'realtime:copytrack-room-' + code;
-async function scenario(fn) {
+async function scenario(fn, { rtc: rtcOpts = {} } = {}) {
   const clock = new VirtualClock(); const restore = clock.install();
-  const rt = new FakeRealtime(clock), rtc = new FakeRTCNet(clock);
+  const rt = new FakeRealtime(clock), rtc = new FakeRTCNet(clock, rtcOpts);
   const rooms = [];
   const sigOf = (client, o = {}) => ({ code, selfId, observe }) => new SupabaseSignaling({ code, selfId, observe, WebSocketImpl: rt.socket(client), url: URL_RT, key: KEY_RT, getToken: o.getToken || rt.tokenSource(client, o.ttl || 3600000) });
   const opts = (client, o = {}) => ({ name: client[0].toUpperCase() + client.slice(1), selfId: client, now: clock.now, makeSignaling: sigOf(client, o), makeMesh: (m) => new PeerMesh({ ...m, RTC: rtc.pc(client) }), ...(o.getIce ? { getIce: o.getIce } : {}) });
@@ -705,7 +705,7 @@ await test('sans aucune liaison ouverte, la reconnexion abandonne après les 20 
 }));
 
 console.log('Banc simulé : serveurs ICE (TECH-050)');
-await bugConnu('TECH-050', () => scenario(async (w) => {
+await test('serveurs ICE (TECH-050) redemandés quand leur durée est presque écoulée : arrivant tardif, liaison refaite', () => scenario(async (w) => {
   const loader = () => { let n = 0; return createIceLoader({ url: 'https://x.test/ice', key: 'k', fallback: [{ urls: ['stun:s.example:3478'] }], now: w.clock.now,
     fetchImpl: async () => { n++; return new Response(JSON.stringify({ iceServers: [{ urls: ['turn:t.example:3478'], username: 'u' + n, credential: 'c' + n }], ttl: 600 }), { status: 200 }); } }); };
   const ana = await w.host('ana', 'ABC234', { getIce: loader() });
@@ -715,7 +715,33 @@ await bugConnu('TECH-050', () => scenario(async (w) => {
   precondition(w.linked(ana, bea), 'liaison ouverte');
   const cfg = ana.mesh.links.get('bea').pc.getConfiguration();
   assert.equal(cfg.iceServers[0].credential, 'c2', 'la liaison créée après 500 s utilise des identifiants TURN redemandés');
-}), 'serveurs ICE redemandés quand leur durée est presque écoulée');
+  // Liaison tombée puis refaite après l'échéance des identifiants c2 (obtenus à 500 s, valables jusqu'à 950 s) : la connexion neuve en a d'autres.
+  await w.clock.advance(460000);
+  w.rtc.cut('bea'); await w.clock.advance(15000); w.rtc.heal('bea'); await w.clock.advance(20000);
+  precondition(w.linked(ana, bea), 'liaison refaite');
+  assert.equal(ana.mesh.links.get('bea').pc.getConfiguration().iceServers[0].credential, 'c3', 'liaison refaite avec des identifiants redemandés');
+}));
+await test('serveurs ICE (TECH-050) : une relance ICE garde sa connexion et prend des identifiants à jour', () => scenario(async (w) => {
+  let n = 0;
+  const getIce = createIceLoader({ url: 'https://x.test/ice', key: 'k', fallback: [{ urls: ['stun:s.example:3478'] }], now: w.clock.now,
+    fetchImpl: async () => { n++; return new Response(JSON.stringify({ iceServers: [{ urls: ['turn:t.example:3478'], username: 'u' + n, credential: 'c' + n }], ttl: 600 }), { status: 200 }); } });
+  const ana = await w.host('ana', 'ABC234', { getIce }), bea = await w.join('bea', 'ABC234', { getIce });
+  await w.clock.advance(3000);
+  precondition(w.linked(ana, bea), 'liaison ouverte');
+  await w.clock.advance(460000);                         // les identifiants ont dépassé les 3/4 de leur durée
+  const pc = ana.mesh.links.get('bea').pc;
+  w.rtc.cut('bea'); await w.clock.advance(2500); w.rtc.heal('bea');         // échec ICE au bout de 2 s (réseau qui change) : Ana, initiatrice, relance
+  await w.clock.advance(3000);
+  assert.equal(ana.mesh.links.get('bea').pc, pc, 'même connexion (relance ICE, pas une connexion neuve)');
+  assert.equal(pc.getConfiguration().iceServers[0].credential, 'c2', 'la relance a pris des identifiants redemandés');
+  assert.ok(w.linked(ana, bea), 'liaison de nouveau ouverte');
+}, { rtc: { disconnectMs: 1000, failMs: 2000 } }));
+await test('serveurs ICE : sans réponse du chargeur, une liaison n\'attend pas plus de 2,5 s (derniers serveurs connus)', () => scenario(async (w) => {
+  const never = () => new Promise(() => {});
+  const ana = await w.host('ana', 'ABC234', { getIce: never }), bea = await w.join('bea', 'ABC234', { getIce: never });
+  await w.clock.advance(4000);
+  assert.ok(w.linked(ana, bea), 'reliés avec les serveurs par défaut');
+}));
 
 console.log('Banc simulé : capacité (TECH-086)');
 await bugConnu('TECH-086', () => scenario(async (w) => {
@@ -738,7 +764,7 @@ await bugConnu('TECH-086', () => scenario(async (w) => {
   void ivy;
 }), 'salle à 8 avec un absent : le 9e est refusé, l\'absent retrouve sa place');
 
-test('banc : aucun jeton dans les journaux (connexion, renouvellement, expiration)', () => scenario(async (w) => {
+await test('banc : aucun jeton dans les journaux (connexion, renouvellement, expiration)', () => scenario(async (w) => {
   const out = [];
   const saved = {}; for (const k of ['log', 'warn', 'error', 'info', 'debug']) { saved[k] = console[k]; console[k] = (...a) => { out.push(a.map(String).join(' ')); }; }
   try {

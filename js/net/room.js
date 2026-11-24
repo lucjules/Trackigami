@@ -109,13 +109,11 @@ export class Room extends Emitter {
 
   async _open() {
     const sig = this.signaling = this.makeSignaling({ code: this.code, selfId: this.selfId });
-    // Serveurs ICE (STUN + relais TURN à identifiants à durée limitée) : demandés au serveur, sans jamais bloquer l'ouverture de la salle plus de 2,5 s.
-    let iceServers;
-    if (this.getIce) {
-      try { iceServers = await Promise.race([this.getIce(), new Promise((r) => setTimeout(() => r(undefined), 2500))]) || undefined; } catch { iceServers = undefined; }
-    }
+    // Serveurs ICE (STUN + relais TURN à identifiants à durée limitée) : demandés tout de suite (sans bloquer l'ouverture), puis redemandés par le maillage à
+    // chaque connexion neuve et à chaque relance (TECH-050) ; le chargeur (ice.js) ne refait la requête que lorsque leur durée est presque écoulée.
+    if (this.getIce) { try { Promise.resolve(this.getIce()).catch(() => {}); } catch { /* repli : STUN de config.js */ } }
     this.mesh = (this.makeMesh || ((o) => new PeerMesh(o)))({
-      selfId: this.selfId, signaling: sig, ...(iceServers ? { iceServers } : {}),
+      selfId: this.selfId, signaling: sig, ...(this.getIce ? { getIce: this.getIce } : {}),
       isMember: (id) => this._accepts(id),
       handlers: { onMessage: (id, kind, data) => this._onMessage(id, kind, data), onLink: (id, st) => this._onLink(id, st) },
     });
