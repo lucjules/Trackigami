@@ -7,8 +7,9 @@
 //   preuve              à l'ouverture d'une liaison, chacun signe le défi aléatoire tiré par l'autre, lié au code de la salle, aux deux identifiants et aux deux
 //                       empreintes DTLS de CETTE liaison : elle ne se rejoue ni sur une autre liaison, ni dans une autre salle, ni plus tard, et un intermédiaire
 //                       qui relaierait les messages (autres empreintes DTLS de chaque côté) ne peut pas la produire.
-//   description signée  chaque offre et chaque réponse WebRTC porte aussi une signature sur son empreinte DTLS (et, pour une réponse, sur celle de l'offre) :
-//                       la négociation qu'un client modifié lance au nom d'un autre est écartée avant d'ouvrir une liaison (transport.js, point 9).
+//   description signée  chaque offre et chaque réponse WebRTC porte aussi une signature sur son empreinte DTLS (et, pour une réponse, sur celle de l'offre) ;
+//                       chaque candidat ICE, une signature sur son texte et l'empreinte DTLS de la connexion de son auteur : la négociation qu'un client modifié
+//                       lance ou perturbe au nom d'un autre est écartée avant d'ouvrir une liaison (transport.js, point 9).
 // Pourquoi une signature et pas le secret lui-même : un membre qui recevrait le secret pourrait le rejouer aussitôt auprès d'un autre membre.
 
 const KEY = { name: 'ECDSA', namedCurve: 'P-256' };
@@ -19,6 +20,7 @@ const SIG_RE = /^[A-Za-z0-9_-]{86}$/;                    // signature ECDSA P-25
 export const NONCE_RE = /^[A-Za-z0-9_-]{22}$/;           // défi : 16 octets aléatoires
 const PROOF_TAG = 'trackigami-salle-v1';
 const DESC_TAG = 'trackigami-desc-v1';
+const ICE_TAG = 'trackigami-ice-v1';
 
 const subtleOf = () => globalThis.crypto && globalThis.crypto.subtle;
 export const identityAvailable = () => !!subtleOf();
@@ -89,6 +91,12 @@ export function proofText({ room, signer, verifier, signerFp, verifierFp, nonce 
 // la clé DTLS de cette empreinte, une description rejouée n'ouvre rien ; une réponse ne sert qu'à l'offre à laquelle elle répond.
 export function descText({ room, signer, verifier, type, fp, peerFp }) {
   return [DESC_TAG, room, signer, verifier, type, fp || '', peerFp || ''].map((x) => String(x).replace(/\n/g, ' ')).join('\n');
+}
+
+// Le texte signé d'un candidat ICE (adresse réseau) : il ne vaut que pour la connexion de son auteur (empreinte DTLS de SA description) et pour ce destinataire.
+// Sans cela, quiconque envoie sous l'identifiant d'un joueur peut glisser ses propres adresses dans la négociation et la faire échouer (constaté en essai).
+export function iceText({ room, signer, verifier, fp, candidate }) {
+  return [ICE_TAG, room, signer, verifier, fp || '', candidate].map((x) => String(x).replace(/\n/g, ' ')).join('\n');
 }
 
 export function prove(id, text) { return track((async () => b64u(await subtleOf().sign(SIGN, id.priv, new TextEncoder().encode(text))))()); }

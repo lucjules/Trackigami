@@ -207,8 +207,9 @@ reprendre l'identifiant d'un joueur coupé, ou recevoir une salle « introuvable
   une autre liaison, ni dans une autre salle, ni plus tard, et celui qui relaierait les messages (autres empreintes DTLS de chaque côté) ne peut pas la produire. Elle est vérifiée contre l'engagement
   attendu (déjà prouvé, sinon celui de la présence), comparé **à temps constant**. Avant la preuve : paquets d'état ignorés, messages de contrôle gardés (64 au plus) et traités après, jetés si elle est refusée.
 - **Engagement épinglé** à la première preuve, pour toute la vie de la salle : une connexion de l'annuaire qui annonce un identifiant connu avec un autre engagement est ignorée.
-- **Offres et réponses WebRTC signées** (`seal` / `vet`, `transport.js`) : la négociation qu'un client modifié lance au nom d'un autre est écartée avant de rien ouvrir (le vrai joueur
-  qui revient retrouve sa liaison même si un imposteur occupe son identifiant).
+- **Offres, réponses et candidats ICE WebRTC signés** (`seal` / `vet`, `sealIce` / `vetIce`, `transport.js`) : une offre ou une réponse porte la signature de son empreinte DTLS (et,
+  pour une réponse, de celle de l'offre), un candidat celle de son texte et de l'empreinte de la connexion de son auteur ; ce qui ne vient pas de l'identité attendue est écarté avant
+  de rien ouvrir. Les candidats comptent : non signés, ceux d'un imposteur suffisaient (constaté en essai, Chromium) à bloquer la liaison du vrai joueur.
 - **Place d'un absent** : elle n'est rendue qu'à celui qui prouve le secret. Un client modifié qui prend l'identifiant d'un joueur coupé n'obtient ni liaison, ni arrivées comptées.
 - Une page non sécurisée (sans Web Crypto, hors https) ne peut pas jouer en ligne : message clair, traduit.
 
@@ -239,6 +240,14 @@ reprendre l'identifiant d'un joueur coupé, ou recevoir une salle « introuvable
 **`NET_VER` reste 5** : le changement de protocole de cette phase (poignée de main, ordre, descriptions signées) s'ajoute à celui de la 0.16.15 (époque de lancement), qui n'a pas été publié
 (branche de travail, aucune version diffusée) ; selon la règle commune, on ne le réincrémente pas. **À réincrémenter avant toute publication qui laisserait en jeu des joueurs de la 0.16.15** : ils
 ne répondent pas à `hi` et seraient refusés (« en connexion… »), sans message d'erreur plus précis.
+
+**Limite constatée en essai : le déni de service d'un abonné du canal.** La signalisation est diffusée à tous les abonnés (le filtrage par destinataire se fait chez le client) : un abonné lit
+les offres destinées à un joueur, et son navigateur peut y **répondre** (en usurpant l'expéditeur : rien ne le vérifie côté serveur). La réponse est écartée (signature), mais son navigateur
+connaît alors les identifiants ICE de l'offre et peut sonder directement l'autre joueur : l'établissement de la liaison du vrai joueur peut échouer tant que l'abonné continue (essayé : avec un
+imposteur qui garde l'identifiant d'un absent, la liaison du vrai joueur restait bloquée dans environ deux essais sur trois avant la signature des candidats, un sur cinq après ;
+quand l'imposteur est parti, elle s'ouvre à chaque fois). Il ne peut **ni prendre la place, ni le rôle, ni faire compter un temps** ; il peut empêcher une liaison de s'ouvrir. Seul un chiffrement de
+la signalisation vers la clé de chaque joueur (clés publiées dans la présence, ECDH et AES-GCM de Web Crypto) le préviendrait, et cacherait aussi les adresses aux abonnés qui ne jouent pas :
+**non fait** (hors périmètre de cette phase, qui borne le travail à D-3) ; à décider avant un jeu ouvert à des salons publics nombreux.
 
 ### Ce qui reste exposé (TECH-051) : les adresses IP
 
@@ -319,7 +328,7 @@ Choisis par l'hôte dans le salon :
   Identité, hôte, vie privée (0.16.16) : `test-identite-salle` (la preuve : refusée si la salle, un identifiant, une empreinte DTLS ou le défi changent, ou si elle est renvoyée à son auteur ; engagement ; sauvegarde
   de l'onglet ; le secret n'est dans rien de ce qui part) ; `test-net` (hôte coupé < 20 s, avec ou sans présence fantôme : manche close, drapeau republié, salle rejoignable ; hôte qui recharge avec son
   secret ; retour non relié sans remise à zéro du délai ; successeur sans drapeau ; client modifié annonçant `host: true` ; preuve de remplacement sans secret ; preuve rejouée sur une autre liaison, une
-  seconde fois, dans une autre salle ; descriptions signées ; ordre usurpé ; majorité de l'arrivant ; deux salons simultanés) ; `test-manche` (hôte qui recharge en pleine manche) ; `test-legal` (page
+  seconde fois, dans une autre salle ; descriptions et candidats signés ; ordre usurpé ; majorité de l'arrivant ; deux salons simultanés) ; `test-manche` (hôte qui recharge en pleine manche) ; `test-legal` (page
   Confidentialité) ; `test-browser` (trois onglets, vrai WebRTC et vrai Web Crypto : intérim, imposteur refusé, hôte revenu avec son secret). Chaque défaut a d'abord été reproduit (`bugConnu`).
 - Essai à deux ou trois onglets sans serveur : `?net=local` dans l'URL (signalisation par BroadcastChannel ; le WebRTC est réel).
 

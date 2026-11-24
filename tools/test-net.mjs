@@ -17,7 +17,7 @@ import { test, finish, precondition } from './harness.mjs';
 import { VirtualClock, FakeRealtime, FakeRTCNet } from './fake-realtime.mjs';
 import { PublicDirectory, LOBBY_CODE } from '../js/net/directory.js';
 import { createIceLoader } from '../js/net/ice.js';
-import { createIdentity, prove, proofText, descText, identityBusy } from '../js/net/identity.js';
+import { createIdentity, prove, proofText, descText, iceText, identityBusy } from '../js/net/identity.js';
 
 const snap = (steps, x, o = {}) => ({ steps, flags: 0, tele: 0, vehicle: 'car', seq: steps, pos: { x, y: 1, z: 0 }, quat: new THREE.Quaternion(), vel: { x: 0, y: 0, z: 0 }, cp: 0, lap: 1, ...o });
 // Reçoit une suite de paquets (émetteur à 20 Hz) avec une latence fixe de 30 ms.
@@ -236,6 +236,29 @@ class FakePC {
   async addIceCandidate(c) { if (!this.remote) throw new Error('candidat avant la description distante'); this.cands.push(c); }
   close() { this.closed = true; }
 }
+await test('candidats ICE signés (TECH-040) : seuls ceux que vetIce accepte sont appliqués, qu\'ils arrivent avant ou après la description distante ; ils partent avec leur preuve', async () => {
+  const hub = new Hub();
+  const sA = new FakeSignaling(hub, 'aaa'), sB = new FakeSignaling(hub, 'bbb');
+  const vetted = [];
+  const mk = (id, sig, o = {}) => new PeerMesh({ selfId: id, signaling: sig, RTC: FakePC, handlers: { onMessage() {}, onLink() {} }, ...o });
+  const mA = mk('aaa', sA, { sealIce: async (to, c, fp) => ({ pub: 'P', sig: 'S:' + to + ':' + fp }) });
+  const mB = mk('bbb', sB, { vetIce: async (from, c, p, fp) => { vetted.push([from, p && p.sig, fp]); return !!p && p.pub === 'P'; } });
+  mA.addPeer('bbb'); mB.addPeer('aaa');
+  await new Promise((r) => setTimeout(r, 60));
+  const sentIce = sA.sent.filter((m) => m.data.k === 'ice');
+  assert.ok(sentIce.length >= 1 && sentIce.every((m) => m.data.p && m.data.p.pub === 'P' && /^S:bbb:/.test(m.data.p.sig)), 'chaque candidat envoyé porte sa preuve (destinataire et empreinte de ma connexion)');
+  const pcB = [...pcs.values()].at(-1), n0 = pcB.cands.length;
+  assert.ok(n0 >= 1 && vetted.length >= 1, 'les candidats signés sont appliqués après vérification');
+  // un candidat d'un autre (non signé, ou signé par une autre clé), avant ou après la description distante : jamais appliqué
+  sB.emit('signal', 'aaa', { k: 'ice', c: { candidate: 'candidate:9 9 udp 1 6.6.6.6 9 typ host' } });
+  sB.emit('signal', 'aaa', { k: 'ice', c: { candidate: 'candidate:9 9 udp 1 6.6.6.6 9 typ host' }, p: { pub: 'AUTRE', sig: 'x' } });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(pcB.cands.length, n0, 'candidats non signés ou signés par une autre clé : écartés');
+  sB.emit('signal', 'aaa', { k: 'ice', c: { candidate: 'candidate:8 8 udp 1 10.0.0.9 9 typ host' }, p: { pub: 'P', sig: 'ok' } });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(pcB.cands.length, n0 + 1, 'un candidat vérifié est appliqué');
+  mA.closeAll(); mB.closeAll();
+});
 await test('une seule offre par paire (le plus petit identifiant initie), candidats mis en file, canaux ouverts', async () => {
   const hub = new Hub();
   const sA = new FakeSignaling(hub, 'aaa'), sB = new FakeSignaling(hub, 'bbb');
@@ -347,6 +370,15 @@ await test('description WebRTC signée (TECH-040) : seule celle de l\'identité 
     assert.equal(await cid._vetDesc('bea', offer, await seal(bea, offer, ana.selfId), null), false, 'offre faite pour Ana, rejouée vers Cid');
     assert.equal(await ana._vetDesc('bea', answer, await seal(bea, answer, ana.selfId, 'CC:03'), mine), true, 'réponse à MON offre');
     assert.equal(await ana._vetDesc('bea', answer, await seal(bea, answer, ana.selfId, 'DD:04'), mine), false, 'réponse à une autre offre');
+    const cand = { candidate: 'candidate:1 1 udp 2113937151 10.0.0.2 5000 typ host', sdpMid: '0' };
+    const sealI = async (who, c, fp, to) => ({ pub: who.pub, sig: await prove(who, iceText({ room: 'DES234', signer: 'bea', verifier: to, fp, candidate: c.candidate })) });
+    const good = await sealI(bea, cand, 'AA:01', ana.selfId);
+    assert.equal(await ana._vetIce('bea', cand, good, 'AA:01'), true, 'candidat de Bea, pour Ana, de sa connexion');
+    assert.equal(await ana._vetIce('bea', cand, await sealI(evil, cand, 'AA:01', ana.selfId), 'AA:01'), false, 'candidat signé par une autre clé');
+    assert.equal(await ana._vetIce('bea', cand, null, 'AA:01'), false, 'candidat non signé');
+    assert.equal(await ana._vetIce('bea', { ...cand, candidate: 'candidate:1 1 udp 2113937151 6.6.6.6 5000 typ host' }, good, 'AA:01'), false, 'adresse modifiée en route');
+    assert.equal(await ana._vetIce('bea', cand, good, 'BB:02'), false, 'candidat d\'une autre connexion (empreinte DTLS)');
+    assert.equal(await cid._vetIce('bea', cand, good, 'AA:01'), false, 'candidat fait pour Ana, rejoué vers Cid');
     const sealed = await ana._sealDesc('bea', mine, null);
     assert.deepEqual(Object.keys(sealed).sort(), ['pub', 'sig'], 'ma description porte ma clé publique et ma signature, rien d\'autre');
   } finally { ana.leave(); cid.leave(); }

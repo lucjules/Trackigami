@@ -34,7 +34,7 @@ import { PHYS_VER, NET_VER } from '../version.js';
 import { sanitizeRules, isDefaultRules } from '../rules.js';
 import { MAX_RUN_STEPS, MAX_TRACK_CODE_CHARS } from '../constants.js';
 import { RESUME_MS, RETRY_MS } from './resume.js';
-import { createIdentity, importIdentity, exportIdentity, proofText, descText, prove, checkProof, newNonce, COMMIT_RE, NONCE_RE, identityAvailable } from './identity.js';
+import { createIdentity, importIdentity, exportIdentity, proofText, descText, iceText, prove, checkProof, newNonce, COMMIT_RE, NONCE_RE, identityAvailable } from './identity.js';
 
 const ROOM_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';     // sans 0 / O / 1 / I : pas de confusion à la dictée
 export const MAX_PLAYERS = 8;
@@ -157,6 +157,7 @@ export class Room extends Emitter {
       selfId: this.selfId, signaling: sig, ...(this.getIce ? { getIce: this.getIce } : {}),
       isMember: (id) => this._accepts(id),
       seal: (id, desc, peer) => this._sealDesc(id, desc, peer), vet: (id, desc, p, mine) => this._vetDesc(id, desc, p, mine),
+      sealIce: (id, cand, fp) => this._sealIce(id, cand, fp), vetIce: (id, cand, p, fp) => this._vetIce(id, cand, p, fp),
       handlers: { onMessage: (id, kind, data) => this._onMessage(id, kind, data), onLink: (id, st) => this._onLink(id, st) },
     });
     this._wire(sig);
@@ -818,6 +819,19 @@ export class Room extends Emitter {
       const text = descText({ room: this.code, signer: this.selfId, verifier: id, type: desc.type, fp: fingerprintOf(desc.sdp), peerFp: peer ? fingerprintOf(peer.sdp) : '' });
       return { pub: this.ident.pub, sig: await prove(this.ident, text) };
     } finally { this._crypto--; }
+  }
+  async _sealIce(id, cand, fp) {
+    if (!this.ident || !cand) return null;
+    this._crypto++;
+    try { return { pub: this.ident.pub, sig: await prove(this.ident, iceText({ room: this.code, signer: this.selfId, verifier: id, fp, candidate: cand.candidate })) }; }
+    finally { this._crypto--; }
+  }
+  async _vetIce(id, cand, p, fp) {
+    const commit = this._expectedCommit(id);
+    if (!commit || !p || typeof p !== 'object' || !cand || typeof cand.candidate !== 'string') return false;
+    this._crypto++;
+    try { return await checkProof({ pub: p.pub, sig: p.sig, text: iceText({ room: this.code, signer: id, verifier: this.selfId, fp, candidate: cand.candidate }), commit }); }
+    finally { this._crypto--; }
   }
   async _vetDesc(id, desc, p, mine) {
     const commit = this._expectedCommit(id);

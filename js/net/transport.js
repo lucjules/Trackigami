@@ -32,8 +32,10 @@
 //      - l'initiateur dont l'offre reste sans réponse NEGOTIATION_MS renégocie avec une connexion neuve (MAX_NEGOTIATIONS fois au plus, puis « failed »).
 // 9. Descriptions signées (TECH-040). La signalisation est un canal public : n'importe qui peut y envoyer une offre ou une réponse au nom d'un joueur.
 //    Avec seal/vet (fournis par la salle), chaque offre et chaque réponse porte la signature de son auteur sur son empreinte DTLS (et, pour une réponse,
-//    sur celle de l'offre) ; une description dont la signature ne correspond pas à l'identité attendue est écartée AVANT d'ouvrir quoi que ce soit : un
-//    client modifié qui prend l'identifiant d'un autre ne lui vole pas sa négociation. La liaison ouverte est ensuite prouvée (room.js : hi / hello).
+//    sur celle de l'offre) ; chaque candidat ICE, la signature de son texte et de l'empreinte DTLS de la connexion de son auteur (sealIce / vetIce). Ce qui ne
+//    correspond pas à l'identité attendue est écarté AVANT d'ouvrir quoi que ce soit : un client modifié qui prend l'identifiant d'un autre ne lui vole pas sa
+//    négociation et n'y glisse pas ses adresses (constaté en essai : ses candidats suffisaient à bloquer la liaison du vrai joueur). La liaison ouverte est
+//    ensuite prouvée (room.js : hi / hello).
 import { CONFIG } from '../config.js';
 
 const ICE_SERVERS = CONFIG.iceServers;      // STUN par défaut ; un relais TURN s'ajoute dans js/config.js
@@ -74,8 +76,10 @@ export class PeerMesh {
   // avant une relance ICE (TECH-050), pour qu'un arrivant tardif ou une reconnexion n'utilise pas des identifiants expirés.
   // seal(id, desc, peerDesc) → preuve (objet) à joindre à ma description ; vet(id, desc, preuve, myDesc) → vrai si la description vient bien de ce joueur
   // (point 9 ci-dessus). Sans eux (tests du transport seul), les descriptions ne sont ni signées ni vérifiées.
-  constructor({ selfId, signaling, handlers, iceServers = ICE_SERVERS, getIce = null, isMember = null, seal = null, vet = null, RTC = globalThis.RTCPeerConnection }) {
+  // sealIce(id, candidat, empreinte DTLS locale) → preuve ; vetIce(id, candidat, preuve, empreinte DTLS distante) → vrai si le candidat vient bien de ce joueur.
+  constructor({ selfId, signaling, handlers, iceServers = ICE_SERVERS, getIce = null, isMember = null, seal = null, vet = null, sealIce = null, vetIce = null, RTC = globalThis.RTCPeerConnection }) {
     this.selfId = selfId; this.signaling = signaling; this.h = handlers; this.ice = iceServers; this.getIce = getIce; this.RTC = RTC; this.seal = seal; this.vet = vet;
+    this.sealIce = sealIce; this.vetIce = vetIce;
     this.isMember = isMember || ((id) => !!(this.signaling && this.signaling.peers && this.signaling.peers.has(id)));
     this.links = new Map();
     this.stats = { sent: 0, recv: 0, skipped: 0 };
@@ -169,7 +173,12 @@ export class PeerMesh {
     if (!this._current(link, gen)) return;
     const pc = new this.RTC({ iceServers });
     link.pc = pc;
-    pc.onicecandidate = (e) => { if (link.gen === gen && e.candidate) this.signaling.send(link.id, { k: 'ice', c: descJSON(e.candidate) }); };
+    pc.onicecandidate = async (e) => {
+      if (link.gen !== gen || !e.candidate) return;
+      const cand = descJSON(e.candidate);
+      const p = this.sealIce ? await this.sealIce(link.id, cand, fingerprintOf(pc.localDescription && pc.localDescription.sdp)).catch(() => null) : null;
+      if (link.gen === gen && (p || !this.sealIce)) this.signaling.send(link.id, { k: 'ice', c: cand, ...(p ? { p } : {}) });
+    };
     pc.onconnectionstatechange = () => {
       if (link.gen !== gen) return;
       const s = pc.connectionState;
@@ -287,14 +296,22 @@ export class PeerMesh {
         await this._flush(link);
       }
     } else if (data.k === 'ice' && data.c && typeof data.c === 'object') {
-      if (link.remoteSet) await link.pc.addIceCandidate(data.c);
-      else if (link.pending.length < MAX_PENDING) link.pending.push(data.c);
+      if (link.remoteSet) await this._addCandidate(link, data);
+      else if (link.pending.length < MAX_PENDING) link.pending.push(data);       // (vérifié à l'application : la description distante donne l'empreinte à laquelle il se rattache)
     }
   }
 
   async _flush(link) {
     const q = link.pending.splice(0);
-    for (const c of q) { try { await link.pc.addIceCandidate(c); } catch { /* candidat périmé */ } }
+    for (const d of q) { try { await this._addCandidate(link, d); } catch { /* candidat périmé */ } }
+  }
+
+  // Un candidat reçu n'est appliqué que s'il vient de l'identité attendue, pour la connexion dont j'ai la description (point 9).
+  async _addCandidate(link, data) {
+    const gen = link.gen;
+    if (this.vetIce && !(await this.vetIce(link.id, data.c, data.p, link.remoteFp))) return;
+    if (link.gen !== gen || !link.pc) return;
+    await link.pc.addIceCandidate(data.c);
   }
 
   // Un paquet d'état à tous (canal non fiable). Un lien dont la file d'envoi est pleine est sauté : mieux vaut perdre un
