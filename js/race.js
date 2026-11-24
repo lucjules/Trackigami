@@ -529,6 +529,7 @@ export class RaceSession {
         }
       }
       if (this.state === 'countdown') {
+        if (this.multi) this._netIdle(dt);          // TECH-089 (b) : la voiture sur la grille est envoyée aux autres pendant le décompte
         app.audio.engine({ speed: 0, throttle: input.drive().throttle, slip: 0, boost: false });
         return this.render(dt, 1);
       }

@@ -1,7 +1,8 @@
 // Multijoueur dans la course : voitures des autres joueurs et envoi de l'état local.
 // Ces méthodes s'ajoutent au prototype de RaceSession (voir race.js) : `this` est l'instance.
 import { RemoteCar } from '../remoteCar.js';
-import { F_BOOST, F_GROUNDED } from '../net/snapshot.js';
+import { F_BOOST, F_GROUNDED, SEND_EVERY_STEPS } from '../net/snapshot.js';
+import { DT } from '../constants.js';
 import { checkpointProgress, legFraction } from '../net/progress.js';
 import { PIECES, tileCenter } from '../pieces.js';
 import { PRIO } from '../hudMessages.js';
@@ -104,6 +105,16 @@ export const netMethods = {
       flags: extraFlags | (p.boost > 0 ? F_BOOST : 0) | (p.grounded ? F_GROUNDED : 0),
       tele: this.teleSeq, cp: this.logic.collected.size, lap: this.logic.lap, prog: this.prog,
     });
+  },
+
+  // TECH-089 (b) : pendant le décompte les pas de course ne tournent pas, donc rien n'était envoyé : les voitures de la grille restaient invisibles jusqu'au GO. L'état
+  // (la voiture à sa place sur la grille) part au même rythme qu'en course, à l'horloge d'envoi (netTick avance avec le temps réel, comme pendant la course).
+  _netIdle(dt) {
+    this._netAcc = Math.min(0.25, (this._netAcc || 0) + (Number.isFinite(dt) ? Math.max(0, dt) : 0));
+    while (this._netAcc >= DT) {
+      this._netAcc -= DT;
+      if (++this.netTick % SEND_EVERY_STEPS === 0) this._sendNet();
+    }
   },
 
   // Avancement sur le circuit (0 à 1) : sur la ligne centrale du circuit quand il en a une, sinon d'après les checkpoints franchis.

@@ -2265,6 +2265,41 @@ try {
     }
   });
 
+  // Phase 18 (TECH-089 b, d ; TECH-009, TECH-043) : deux onglets, vrai WebRTC. Pendant le décompte, chacun voit l'autre sur la grille ; un circuit plus long à charger que le
+  // délai de départ donne quand même un décompte ; revenu au salon, un joueur disparaît de la piste de l'autre.
+  await test('multijoueur (TECH-089 b) : grille visible pendant le décompte', async () => {
+    const B = await hook(await ctx.newPage());
+    try {
+      await app(() => history.replaceState(null, '', '?net=local'));
+      await app(() => window.copytrack.multiMenu());
+      await page.evaluate(() => [...document.querySelectorAll('#modal-actions button')].find((b) => /Créer une salle/.test(b.textContent)).click());
+      await waitApp(() => document.querySelector('.mp-code b'));
+      const code = (await page.evaluate(() => document.querySelector('.mp-code b').textContent)).trim();
+      await B.goto(`http://127.0.0.1:${PORT}/?net=local#salle=${code}`, { waitUntil: 'load' });
+      if (await B.locator('#wl-name').isVisible()) { await B.locator('#wl-name').fill('Bea'); await B.locator('#wl-submit').evaluate((el) => el.click()); }
+      await B.waitForFunction(() => window.copytrack && window.copytrack.room && window.copytrack.room.list.some((m) => !m.self && m.link === 'open'), null, { timeout: 30000 });
+      await waitApp(() => window.copytrack.room.list.some((m) => !m.self && m.link === 'open'), null, 20000);
+      // « Course » (départ commun, 4 s de délai) sur un circuit intégré
+      await page.evaluate(() => { document.querySelector('input[name="mp-mode"][value="race"]').click(); const s = document.querySelector('.mp-track select'); s.value = s.options[1].value; s.dispatchEvent(new Event('change')); });
+      await B.evaluate(() => window.copytrack.room.setReady(true)); await app(() => window.copytrack.room.setReady(true));
+      await waitApp(() => { const r = window.copytrack.room.readyCount(); return r.ready === r.total; }, null, 10000);
+      await page.evaluate(() => document.querySelector('#modal-actions [data-mp="start"]').click());
+      // (b) pendant le décompte (avant le GO), la voiture de l'autre est déjà sur la grille, des deux côtés
+      const seenInCountdown = (p) => p.waitForFunction(() => { const s = window.copytrack.session; return s && s.cup && s.state === 'countdown' && [...s.remote.values()].some((rc) => rc.group.visible); }, null, { timeout: 20000 }).then(() => true, () => false);
+      const [a, b] = await Promise.all([seenInCountdown(page), seenInCountdown(B)]);
+      assert.ok(a && b, `pendant le décompte, chacun voit l'autre sur la grille (Ana : ${a}, Bea : ${b})`);
+      await waitApp(() => window.copytrack.session.state === 'racing', null, 20000);
+      await B.waitForFunction(() => window.copytrack.session.state === 'racing', null, { timeout: 20000 });
+      await B.evaluate(() => window.copytrack.session._finish(30.0));
+      await app(() => window.copytrack.session._finish(31.5));
+      await waitApp(() => /Course terminée/.test((document.getElementById('mp-cup') || {}).textContent || ''), null, 20000);
+      await B.waitForFunction(() => /Course terminée/.test((document.getElementById('mp-cup') || {}).textContent || ''), null, { timeout: 20000 });
+    } finally {
+      await app(() => { if (window.copytrack.room) window.copytrack.room.leave(); window.copytrack.ui.closeModal(); if (window.copytrack.mode === 'race') window.copytrack.quitRace(); window.copytrack.showMenu('menu'); }).catch(() => {});
+      await B.close();
+    }
+  });
+
   // Phase 16 (NET_VER 5) : TROIS onglets, vrai WebRTC, signalisation locale. TECH-008 : le choix d'un circuit ne lance jamais personne (après un retour au salon,
   // après « Arrêter le championnat », après une course unique) ; GAME-008 : un arrivant pendant une « Course » voit le circuit et « manche en cours ».
   await test('multijoueur (TECH-008, GAME-008) : trois onglets : choisir un circuit ne lance personne ; un arrivant pendant une « Course » voit le circuit et la manche en cours', async () => {
