@@ -5,7 +5,7 @@
 //   registerBoard({ id, label, order, available(desc, ctx), render(el, desc, ctx) })
 //   mountLeaderboard(root, desc, ctx, { tab })  -> { tab, select(id), refresh(), boards }
 // ctx : { app, onRival(row) (bouton 👻 d'une ligne), rivalOn(rank) (le rival est-il choisi ?), onChange() (après un envoi de record) }
-import { esc } from '../dom.js';
+import { esc, OFF } from '../dom.js';
 import { online, ONLINE } from '../online.js';
 import { PHYS_VER } from '../version.js';
 import { getRecord, listRuns, formatTime } from '../storage.js';
@@ -85,7 +85,7 @@ export function renderWorldBoard(el, desc, ctx) {
     const rows = lb.top.map((r, i) => {
       const name = (r.players && r.players.name) || '—', ttl = r.players && titleLabel(r.players.title);
       const on = ctx.rivalOn ? ctx.rivalOn(i + 1) : false;
-      return `<li class="${r.player === online.uid ? 'me' : ''}"><b>${i + 1}</b><span class="lb-name">${esc(name)}${ttl ? ` <small class="ttl">${esc(ttl)}</small>` : ''}</span>
+      return `<li class="${r.player === online.uid ? 'me' : ''}"><b>${i + 1}</b><span class="lb-name"${OFF}>${esc(name)}${ttl ? ` <small class="ttl">${esc(ttl)}</small>` : ''}</span>
         ${vehCell(finishVehicle(r.ghost_veh, !!r.has_ghost))}<em>${formatTime(r.time)}</em><small class="lb-date">${day(r.updated_at)}</small>
         ${r.has_ghost && ctx.onRival ? `<button class="btn rival-btn${on ? ' on' : ''}" data-rank="${i + 1}" aria-pressed="${on}" title="Affronter le fantôme de ${esc(name)}">👻</button>` : '<span class="lb-noghost"></span>'}</li>`;
     }).join('');
@@ -139,7 +139,7 @@ export function renderFriendsBoard(el, desc) {
     let rows;
     try { rows = await online.friendsBoard(desc.key, PHYS_VER, 20); } catch (e) { if (req === el._lbReq) el.innerHTML = offline(e); return; }
     if (req !== el._lbReq) return;
-    el.innerHTML = `${rows.length ? `<ol class="board">${rows.map((r) => `<li class="${r.player === online.uid ? 'me' : ''}"><b>${r.rank}</b><span class="lb-name">${esc(r.name || '—')}</span><em>${formatTime(r.time)}</em><small class="lb-date">${day(r.updated_at)}</small></li>`).join('')}</ol>` : '<p>Ni toi ni tes amis n’avez de temps sur ce circuit.</p>'}
+    el.innerHTML = `${rows.length ? `<ol class="board">${rows.map((r) => `<li class="${r.player === online.uid ? 'me' : ''}"><b>${r.rank}</b><span class="lb-name"${OFF}>${esc(r.name || '—')}</span><em>${formatTime(r.time)}</em><small class="lb-date">${day(r.updated_at)}</small></li>`).join('')}</ol>` : '<p>Ni toi ni tes amis n’avez de temps sur ce circuit.</p>'}
       <p class="meta">${rows.length <= 1 ? 'Ajoute des amis dans <b>Multijoueur › Amis</b> pour comparer vos temps. ' : ''}Mêmes temps vérifiés que le classement mondial.</p>`;
   })();
 }
@@ -166,7 +166,7 @@ export function renderSectorBoard(el, desc) {
       let rows;
       try { rows = await online.sectorBoard(desc.key, PHYS_VER, i, 10); } catch (e) { if (req === el._lbReq) body.innerHTML = offline(e); return; }
       if (req !== el._lbReq) return;
-      body.innerHTML = `${rows.length ? `<ol class="board">${rows.map((r) => `<li class="${r.player === online.uid ? 'me' : ''}"><b>${r.rank}</b><span class="lb-name">${esc(r.name || '—')}</span><em>${formatTime(r.sector_steps * DT)}</em><small class="lb-date">🏁 ${formatTime(r.time)}</small></li>`).join('')}</ol>` : '<p>Pas encore de secteur enregistré pour ce circuit.</p>'}
+      body.innerHTML = `${rows.length ? `<ol class="board">${rows.map((r) => `<li class="${r.player === online.uid ? 'me' : ''}"><b>${r.rank}</b><span class="lb-name"${OFF}>${esc(r.name || '—')}</span><em>${formatTime(r.sector_steps * DT)}</em><small class="lb-date">🏁 ${formatTime(r.time)}</small></li>`).join('')}</ol>` : '<p>Pas encore de secteur enregistré pour ce circuit.</p>'}
         <p class="meta">${i === 1 ? 'Du départ au premier passage' : i === n ? 'Du dernier passage à l’arrivée' : `Du passage ${i - 1} au passage ${i}`}${mine != null ? ` · mon record : <b>${formatTime(mine * DT)}</b>` : ''}. Ce sont les secteurs des records vérifiés.</p>`;
     })();
   };
@@ -185,7 +185,7 @@ export function renderSeasonBoard(el, desc) {
     if (req !== el._lbReq) return;
     const ends = new Date(seasonBounds(n).ends - 1);
     el.innerHTML = `${me ? `<p class="lb-season-me"><span>Division <b>${me.division} · ${esc(DIVISIONS[me.division])}</b></span> <span>· ${me.points} points</span>${me.rank ? ` <span>· ${me.rank}${me.rank === 1 ? 'er' : 'e'} sur ${me.in_division}</span>` : ''}${me.closed ? ` <span>${me.moved < 0 ? '· ⬆ montée' : me.moved > 0 ? '· ⬇ descente' : '· maintien'}</span>` : ''}</p>` : ''}
-      ${rows.length ? `<ol class="board">${rows.map((r) => `<li class="${r.player === online.uid ? 'me' : ''}"><b>${r.rank}</b><span class="lb-name">${esc(r.name || '—')} <small class="ttl">D${r.division}</small></span><em>${r.points} pts</em><small class="lb-date">${r.tracks} / 3</small></li>`).join('')}</ol>` : '<p>Personne n’a encore couru cette saison.</p>'}
+      ${rows.length ? `<ol class="board">${rows.map((r) => `<li class="${r.player === online.uid ? 'me' : ''}"><b>${r.rank}</b><span class="lb-name"${OFF}>${esc(r.name || '—')} <small class="ttl">D${r.division}</small></span><em>${r.points} pts</em><small class="lb-date">${r.tracks} / 3</small></li>`).join('')}</ol>` : '<p>Personne n’a encore couru cette saison.</p>'}
       <p class="meta">Saison ${n}, jusqu’au ${ends.getUTCDate()}/${ends.getUTCMonth() + 1} (UTC). Sur chacun des trois circuits : 1000 × meilleur temps ÷ ton temps. À la fin de la semaine, les 20 % premiers de chaque division montent, les 20 % derniers descendent.</p>`;
   })();
 }

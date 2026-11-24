@@ -4,6 +4,7 @@ import { SURF_PHYS } from '../constants.js';
 import { PIECES, PIECE_ORDER, LEGACY_TILE, SURFACES, SURFACE_ORDER, surfaceRule, flagAllowed, paramText, armOption, ORI_TO_O, O_TO_ORI } from '../pieces.js';
 import { FAMILIES, FAMILY_ORDER, familyOf, resolve, validValues, withTrait, REPLACED_BY_OPTION, missingReason } from '../families.js';
 import { Track } from '../track.js';
+import { markPlayerText, isPlayerTrackName } from '../playerText.js';
 import { DECORS } from '../themes.js';
 import { tint, THEME_SWATCH } from '../trackGeometry.js';
 import { isObstacle } from '../obstacles.js';
@@ -1004,6 +1005,7 @@ export const paletteMethods = {
     if (this.eraseBar) this.eraseBar.querySelectorAll('[data-ef]').forEach((b) => b.classList.toggle('on', b.dataset.ef === this.eraseFilter));
     // Barre du haut : nom du circuit ; colonne Vue : boutons à bascule.
     const nm = document.getElementById('ed-name');
+    if (nm) markPlayerText(nm, isPlayerTrackName(this.track.name));      // (RISK-002 : le nom d'un circuit de joueur n'est pas traduit)
     if (nm && nm.textContent !== this.track.name) nm.textContent = this.track.name;
     for (const [id, on] of [['levelview', this.focusLevel], ['topview', this.pitch >= 1.4], ['freecam', !!this.freeCam], ['grid', this.showGrid]]) {
       const b = document.querySelector(`#editor [data-ed="${id}"]`);

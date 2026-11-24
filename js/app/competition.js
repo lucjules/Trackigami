@@ -1,7 +1,7 @@
 // Compétition asynchrone (Trackigami Evolution, E17) : duels classés entre amis (Elo) et tournois privés. Tout se joue sur des circuits de la carrière,
 // sous des catégories de record « …~v1.duel-N » et « …~v1.tour-N » (variants.js) : la course est rejouée par le serveur comme toute autre, et les
 // résultats, le classement Elo et la clôture sont calculés en base (supabase/etape12-competition.sql). Ces méthodes s'ajoutent au prototype de App.
-import { esc } from '../dom.js';
+import { esc, OFF } from '../dom.js';
 import { online } from '../online.js';
 import { formatTime } from '../storage.js';
 import { locale } from '../i18n.js';
@@ -37,12 +37,12 @@ export const competitionMethods = {
       if (d.status === 'settled') return `<li class="${d.result === 'win' ? 'duel-win' : ''}">${head} <small><span>${d.result === 'win' ? '🏆 Victoire' : d.result === 'loss' ? 'Défaite' : 'Nul'}</span> · ${d.my_time ? formatTime(d.my_time) : '—'} — ${d.their_time ? formatTime(d.their_time) : '—'} · Elo ${d.delta > 0 ? '+' : ''}${d.delta}</small></li>`;
       return `<li class="duel-void">${head} <small class="meta">${d.status === 'declined' ? 'refusé' : 'annulé (pas de temps)'}</small></li>`;
     };
-    const tourRow = (t) => `<li><b>${esc(t.name)}</b> · <span>${esc(tname(t.track_key, t.track_name))}</span> <small class="meta"><span>${t.closed ? `terminé${t.my_rank ? ` · ma place : ${t.my_rank}` : ''}` : `jusqu’au ${when(t.ends_at)} · code ${esc(t.code)}`}</span> · <span>${t.players} pilote${t.players > 1 ? 's' : ''}</span></small>
+    const tourRow = (t) => `<li><b${OFF}>${esc(t.name)}</b> · <span>${esc(tname(t.track_key, t.track_name))}</span> <small class="meta"><span>${t.closed ? `terminé${t.my_rank ? ` · ma place : ${t.my_rank}` : ''}` : `jusqu’au ${when(t.ends_at)} · code ${esc(t.code)}`}</span> · <span>${t.players} pilote${t.players > 1 ? 's' : ''}</span></small>
       ${t.closed ? '' : `<button class="btn small primary" data-tour-play="${t.id}">Jouer</button>`}<button class="btn small" data-tour-board="${t.id}">Classement</button></li>`;
     body.innerHTML = `
       <section><h3>Classement Elo</h3>
         <p>${me ? `Mon classement : <b>${me.rating}</b> · duels : ${me.games} · victoires : ${me.wins}` : 'Pas encore de duel.'}</p>
-        ${ratings.length > 1 ? `<ol class="board">${ratings.map((r) => `<li class="${r.player === online.uid ? 'me' : ''}"><b>${r.rank}</b><span class="lb-name">${esc(r.name)}</span><em>${r.rating}</em></li>`).join('')}</ol>` : ''}
+        ${ratings.length > 1 ? `<ol class="board">${ratings.map((r) => `<li class="${r.player === online.uid ? 'me' : ''}"><b>${r.rank}</b><span class="lb-name"${OFF}>${esc(r.name)}</span><em>${r.rating}</em></li>`).join('')}</ol>` : ''}
         <p class="meta">Calculé par le serveur à la fin de chaque duel (départ 1200). Personne ne déclare de résultat : seuls comptent les temps rejoués par le serveur.</p></section>
       <section><h3>Duels</h3>
         ${duels.length ? `<ul class="duel-list">${duels.map(duelRow).join('')}</ul>` : '<p class="meta">Aucun duel pour l’instant.</p>'}
@@ -62,7 +62,7 @@ export const competitionMethods = {
     for (const b of body.querySelectorAll('[data-tour-play]')) b.onclick = () => { const t = tours.find((x) => x.id === +b.dataset.tourPlay); this._playCompetition(t.track_key, { tour: String(t.id) }); };
     for (const b of body.querySelectorAll('[data-tour-board]')) b.onclick = () => act(async () => {
       const rows = await online.tournamentBoard(+b.dataset.tourBoard);
-      body.querySelector('.tour-board').innerHTML = rows.length ? `<ol class="board">${rows.map((r) => `<li class="${r.player === online.uid ? 'me' : ''}"><b>${r.rank}</b><span class="lb-name">${esc(r.name)}</span><em>${r.time ? formatTime(r.time) : '—'}</em></li>`).join('')}</ol>` : '<p class="meta">Personne inscrit.</p>';
+      body.querySelector('.tour-board').innerHTML = rows.length ? `<ol class="board">${rows.map((r) => `<li class="${r.player === online.uid ? 'me' : ''}"><b>${r.rank}</b><span class="lb-name"${OFF}>${esc(r.name)}</span><em>${r.time ? formatTime(r.time) : '—'}</em></li>`).join('')}</ol>` : '<p class="meta">Personne inscrit.</p>';
     });
     const dn = body.querySelector('.duel-new');
     if (dn) dn.onsubmit = (e) => { e.preventDefault(); act(async () => { const key = dn.querySelector('.duel-track').value, b = this.builtins.find((x) => x.key === key); await online.duelChallenge(dn.querySelector('.duel-friend').value, key, b ? b.def.name : '', this.settings.playerName); this.ui.flash('Défi envoyé : 24 h pour courir.', 2.4); redo(); }); };

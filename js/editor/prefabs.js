@@ -1,6 +1,6 @@
 // Onglet « Prefabs » de la palette : coller un morceau tout fait (chicane, saut, looping…), enregistrer SA sélection sous un nom, la partager par code, importer le code d'un ami.
 // Les règles (format, validation) sont dans js/prefabs.js ; ici seulement l'interface. Ces méthodes s'ajoutent au prototype de EditorSession (voir editor.js).
-import { esc } from '../dom.js';
+import { esc, OFF } from '../dom.js';
 import { listPrefabs, savePrefab, deletePrefab, newId } from '../storage.js';
 import { STARTERS, starterClip, clipToCode, codeToClip, clipSummary } from '../prefabs.js';
 
@@ -16,7 +16,7 @@ export const prefabMethods = {
     panel.innerHTML = `<div class="pf-head">Morceaux fournis <small>clique, puis pose-les sur la grille (R pour pivoter)</small></div>
       <div class="pf-row">${STARTERS.map((d) => `<button class="pf-btn" type="button" data-pf-starter="${d.id}" title="${esc(d.hint)}"><b>${esc(d.name)}</b><small>${esc(clipSummary(starter(d)))}</small></button>`).join('')}</div>
       <div class="pf-head">Mes prefabs</div>
-      <div class="pf-row">${mine.length ? mine.map((p) => `<span class="pf-mine"><button class="pf-btn" type="button" data-pf-mine="${esc(p.id)}"><b>${esc(p.name)}</b></button><button class="pf-x" type="button" data-pf-copy="${esc(p.id)}" title="Copier le code (à partager)" aria-label="Copier le code de ${esc(p.name)}">⧉</button><button class="pf-x" type="button" data-pf-del="${esc(p.id)}" title="Supprimer" aria-label="Supprimer ${esc(p.name)}">✕</button></span>`).join('') : '<span class="meta">Aucun : sélectionne une zone (outil Sélection) puis « Enregistrer la sélection ».</span>'}</div>
+      <div class="pf-row">${mine.length ? mine.map((p) => `<span class="pf-mine"><button class="pf-btn" type="button" data-pf-mine="${esc(p.id)}"><b${OFF}>${esc(p.name)}</b></button><button class="pf-x" type="button" data-pf-copy="${esc(p.id)}" title="Copier le code (à partager)" aria-label="Copier le code de ${esc(p.name)}">⧉</button><button class="pf-x" type="button" data-pf-del="${esc(p.id)}" title="Supprimer" aria-label="Supprimer ${esc(p.name)}">✕</button></span>`).join('') : '<span class="meta">Aucun : sélectionne une zone (outil Sélection) puis « Enregistrer la sélection ».</span>'}</div>
       <div class="pf-actions"><button class="btn small" type="button" data-pf="save">💾 Enregistrer la sélection</button><button class="btn small" type="button" data-pf="import">Importer un code</button></div>`;
     for (const b of panel.querySelectorAll('[data-pf-starter]')) b.onclick = () => this._usePrefab(starter(STARTERS.find((d) => d.id === b.dataset.pfStarter)));
     for (const b of panel.querySelectorAll('[data-pf-mine]')) b.onclick = () => { const p = mine.find((x) => x.id === b.dataset.pfMine); try { this._usePrefab(codeToClip(p.code).clip); } catch (e) { this.app.ui.flash(e.message); } };

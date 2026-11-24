@@ -5,6 +5,7 @@ import { keyLabel } from './input.js';
 import { profile } from './profile.js';
 import { MessageGate, PRIO } from './hudMessages.js';
 import { $, esc } from './dom.js';
+import { markPlayerText, isPlayerTrackName } from './playerText.js';
 
 export function medalIcon(m) {
   return `<i class="medal ${m ? m.id : 'none'}" title="${m ? m.label : 'Aucune médaille'}"></i>`;
@@ -26,6 +27,7 @@ class Hud {
 
   reset(session) {
     const e = this.el;
+    markPlayerText(e.track, isPlayerTrackName(session.track.name));      // (RISK-002 : le nom d'un circuit de joueur n'est pas traduit)
     e.track.textContent = session.track.name;
     this.checkpoints(0, session.logic.cps.length);
     const rec = session.record;
