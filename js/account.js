@@ -15,7 +15,7 @@ import {
 import { toCloud, fromCloud, mergeSaves, sameData, pickSynced, fitCloud, isSyncKey } from './cloudsave.js';
 import { reloadProfile } from './profile.js';
 import { CONFIG } from './config.js';
-import { checkPseudo, checkPassword } from './accountRules.js';
+import { checkPseudo, checkPassword, normalizeRecoveryCode, formatRecoveryCode } from './accountRules.js';
 
 // Domaine technique des adresses (doit être le même que dans supabase/etape4-comptes.sql).
 const ACCOUNT_EMAIL_DOMAIN = 'accounts.copytrack.invalid';
@@ -35,6 +35,12 @@ export const MIGRATION_FAILED = 'Compte créé, mais ta progression d’invité 
 const fitNote = (fit) => (fit.level === 'partial'
   ? `Espace insuffisant sur cet appareil : ${fit.dropped} records du compte n’y sont pas écrits (le cloud les garde en entier).`
   : `Espace insuffisant sur cet appareil : copie du compte allégée (${fit.lightened} records sans fantôme ni commandes ; le cloud les garde en entier).`);
+
+// Récupération de compte et code de secours (COMPLETE-003 ; modèle de menaces : supabase/COMPTES.md).
+const RECOVERY_NOT_INSTALLED = 'Le code de secours n’est pas encore installé sur le serveur (étape SQL 21 de supabase/COMPTES.md) : rien n’a été créé.';
+const RECOVERY_FN_MISSING = 'La récupération de compte n’est pas encore installée sur le serveur (fonction « account-recovery » à déployer, voir supabase/COMPTES.md).';
+const RECOVERY_DENIED = 'Le serveur a refusé la demande de récupération (réglage de la fonction « account-recovery » à vérifier : voir supabase/COMPTES.md).';
+const BAD_RECOVERY_CODE = 'Le code de secours fait 16 signes (chiffres et lettres), notés par groupes de 4 : XXXX-XXXX-XXXX-XXXX.';
 
 export const accountEmail = (name) => String(name).trim().toLowerCase() + '@' + ACCOUNT_EMAIL_DOMAIN;
 
@@ -160,7 +166,7 @@ class Account {
     // L'invité de cet appareil a une identité en ligne (session anonyme) : elle DEVIENT le compte si le serveur sait le faire (TECH-025). Sinon (projet sans la conversion,
     // ou réglage du déploiement), un nouvel utilisateur est créé, l'identité d'invité reste intacte sur l'appareil, et le joueur le sait.
     const guest = online.kind === 'guest' && online.session && online.session.user && online.session.user.id ? online.session.user.id : '';
-    if (guest && this.convertAnonymous !== false && (await this._conversionReady())) return this._convert(c.name, password, guestData, tutorialDone);
+    if (guest && this.convertAnonymous !== false && (await this._conversionReady())) return this._withRecoveryCode(await this._convert(c.name, password, guestData, tutorialDone), password);
     const d = await online.rest('/auth/v1/signup', { method: 'POST', auth: false, body: { email: accountEmail(c.name), password, data: { username: c.name } } });
     if (!d || !d.access_token) throw new OnlineError('Compte créé, mais le serveur exige une confirmation par e-mail (voir COMPTES.md).', 'server-config');
     this._begin(d, c.name);
@@ -178,7 +184,7 @@ class Account {
     if (guest) this._say(GUEST_KEPT);
     this._finishSignUp(c.name, tutorialDone);
     try { await online.ensurePlayer(c.name); await this.sync(); } catch { /* le compte existe ; la synchronisation reprendra */ }
-    return { kind: 'account', username: c.name, migration, guestIdentity: guest ? 'kept' : 'none' };
+    return this._withRecoveryCode({ kind: 'account', username: c.name, migration, guestIdentity: guest ? 'kept' : 'none' }, password);
   }
 
   _finishSignUp(name, tutorialDone) {
@@ -246,6 +252,87 @@ class Account {
     const back = getScope();
     setScope(scopeId);
     try { removeKeys(keys); } finally { setScope(back); }
+  }
+
+  // ---- Mot de passe et code de secours (COMPLETE-003) -----------------------------------------------------------------------------------------------------
+  // Preuve de mot de passe : une connexion NEUVE par mot de passe (le serveur d'authentification juge ; rien n'est comparé ici). Son jeton porte la date de cette
+  // connexion, que la base exige récente (recovery_code_new : une session volée ne suffit pas à prendre le compte). Cette session de preuve n'est jamais adoptée.
+  async _prove(password, wrongMessage) {
+    if (!this.state) throw new OnlineError('Connecte-toi à un compte d’abord.', 'invalid');
+    if (!password) throw new OnlineError('Entre ton mot de passe.', 'invalid');
+    try { return await online.rest('/auth/v1/token?grant_type=password', { method: 'POST', auth: false, body: { email: accountEmail(this.state.username), password } }); }
+    catch (e) { if (e && e.code === 'bad-credentials') throw new OnlineError(wrongMessage, 'bad-credentials'); throw e; }
+  }
+  async _closeProof(proof) {
+    try { await online.rest('/auth/v1/logout?scope=local', { method: 'POST', auth: false, headers: { Authorization: 'Bearer ' + proof.access_token }, body: {} }); } catch { /* la session de preuve expire seule */ }
+  }
+
+  // Changer son mot de passe : le mot de passe ACTUEL est redemandé (re-authentification) ; le nouveau suit les règles de l'inscription. Les autres appareils sont déconnectés
+  // (leurs jetons de renouvellement tombent : ils redemandent le nouveau mot de passe) ; l'appareil courant reste connecté.
+  async changePassword(current, next) {
+    if (!this.state) throw new OnlineError('Connecte-toi à un compte d’abord.', 'invalid');
+    const p = checkPassword(next, this.state.username);
+    if (!p.ok) throw new OnlineError(p.error, 'invalid');
+    if (next === current) throw new OnlineError('Le nouveau mot de passe doit être différent de l’actuel.', 'invalid');
+    const proof = await this._prove(current, 'Mot de passe actuel incorrect.');
+    try {
+      await online.rest('/auth/v1/user', { method: 'PUT', body: { password: next } });
+      try { await online.rest('/auth/v1/logout?scope=others', { method: 'POST', body: {} }); } catch { /* le mot de passe est changé ; les autres sessions expireront */ }
+    } finally { await this._closeProof(proof); }
+    return { ok: true };
+  }
+
+  // Le compte a-t-il un code de secours valable ? { state: 'active' | 'none' | 'unavailable', createdAt, usedAt } ('unavailable' : étape SQL 21 absente, hors ligne, invité : rien à proposer).
+  async recoveryStatus() {
+    if (!this.state) return { state: 'unavailable' };
+    try {
+      const r = await online.rest('/rest/v1/rpc/recovery_status', { method: 'POST', body: {} });
+      if (!r || r.account !== true) return { state: 'unavailable' };
+      return r.has_code ? { state: 'active', createdAt: r.created_at || null, usedAt: r.used_at || null } : { state: 'none', usedAt: r.used_at || null };
+    } catch { return { state: 'unavailable' }; }
+  }
+
+  // Crée (ou REMPLACE : l'ancien code ne vaut plus rien) le code de secours, après confirmation du mot de passe. Renvoie « XXXX-XXXX-XXXX-XXXX », à montrer UNE fois : il n'est écrit nulle
+  // part (ni stockage de l'appareil, ni journal), la base n'en garde qu'un haché.
+  async createRecoveryCode(password) {
+    const proof = await this._prove(password, 'Mot de passe incorrect.');
+    try {
+      const code = await online.rest('/rest/v1/rpc/recovery_code_new', { method: 'POST', auth: false, headers: { Authorization: 'Bearer ' + proof.access_token }, body: {} });
+      const n = typeof code === 'string' ? normalizeRecoveryCode(code) : { ok: false };
+      if (!n.ok) throw new OnlineError('Réponse inattendue du serveur : aucun code créé.', 'http');
+      return formatRecoveryCode(n.code);
+    } catch (e) {
+      if (e && e.code === 'no-sql-step') throw new OnlineError(RECOVERY_NOT_INSTALLED, 'no-sql-step');
+      throw e;
+    } finally { await this._closeProof(proof); }
+  }
+
+  // À l'inscription : le code accompagne le compte. Jamais bloquant : sans l'étape SQL 21 ou sur une panne, le compte existe quand même (recoveryCode: null) et l'écran du compte le propose.
+  async _withRecoveryCode(result, password) {
+    try { result.recoveryCode = await this.createRecoveryCode(password); } catch { result.recoveryCode = null; }
+    return result;
+  }
+
+  // « J'ai perdu mon mot de passe » : pseudo + code de secours + nouveau mot de passe, SANS session (la fonction serveur « account-recovery » : modèle de menaces dans supabase/COMPTES.md).
+  // Réussi : on se connecte tout de suite avec le nouveau mot de passe, et un nouveau code est créé (l'ancien vient d'être consommé : usage unique).
+  async recoverAccount(rawName, rawCode, newPassword) {
+    const c = checkPseudo(rawName, { account: true });
+    if (!c.ok) throw new OnlineError(c.error, 'invalid');
+    const code = normalizeRecoveryCode(rawCode);
+    if (!code.ok) throw new OnlineError(BAD_RECOVERY_CODE, 'invalid');
+    const p = checkPassword(newPassword, c.name);
+    if (!p.ok) throw new OnlineError(p.error, 'invalid');
+    try {
+      await online.rest('/functions/v1/account-recovery', { method: 'POST', auth: false, headers: { Authorization: 'Bearer ' + CONFIG.supabase.key }, body: { username: c.name, code: code.code, password: newPassword } });
+    } catch (e) {
+      if (e && e.code === 'no-function') throw new OnlineError(RECOVERY_FN_MISSING, 'no-function');
+      if (e && e.code === 'denied') throw new OnlineError(RECOVERY_DENIED, 'denied');
+      throw e;
+    }
+    let r;
+    try { r = await this.signIn(c.name, newPassword); }
+    catch (e) { throw new OnlineError('Mot de passe changé, mais la connexion a échoué : connecte-toi avec ton nouveau mot de passe.', e && e.code ? e.code : 'http'); }
+    return this._withRecoveryCode({ ...r, recovered: true }, newPassword);
   }
 
   async signIn(rawName, password) {

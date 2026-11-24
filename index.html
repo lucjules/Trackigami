@@ -125,6 +125,7 @@
   <link rel="modulepreload" href="js/sim/logic.js">
   <link rel="modulepreload" href="js/physics/profiles.js">
   <link rel="modulepreload" href="js/config.js">
+  <link rel="modulepreload" href="js/accountRules.js">
   <link rel="modulepreload" href="js/i18n/dom.js">
   <link rel="modulepreload" href="js/career.js">
   <link rel="modulepreload" href="js/difficulty.js">
@@ -152,6 +153,7 @@
   <link rel="modulepreload" href="js/online/community.js">
   <link rel="modulepreload" href="js/app/shared.js">
   <link rel="modulepreload" href="js/a11y.js">
+  <link rel="modulepreload" href="js/accountUi.js">
   <link rel="modulepreload" href="js/uitheme.js">
   <link rel="modulepreload" href="js/hudProfile.js">
   <link rel="modulepreload" href="js/mods.js">
@@ -226,6 +228,9 @@
         <label class="wl-field"><span>Pseudo</span>
           <input id="wl-name" name="username" type="text" maxlength="20" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required>
         </label>
+        <label class="wl-field" id="wl-code-wrap" hidden><span>Code de secours</span>
+          <input id="wl-code" name="recovery-code" type="text" maxlength="40" inputmode="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX">
+        </label>
         <label class="wl-field" id="wl-pw-wrap"><span>Mot de passe</span>
           <input id="wl-pw" name="password" type="password" maxlength="72" autocomplete="current-password">
         </label>
@@ -236,7 +241,18 @@
         <label class="wl-check" id="wl-age-wrap"><input type="checkbox" id="wl-age"><span>J’ai 15 ans ou plus (ou l’accord d’un parent) et j’accepte les <a href="legal.html?p=regles" target="_blank" rel="noopener">règles de la communauté</a>.</span></label>
         <p class="wl-error" id="wl-error" role="alert" aria-live="polite"></p>
         <button class="btn big primary" id="wl-submit" type="submit">Jouer</button>
+        <p class="wl-forgot" id="wl-forgot-wrap" hidden><button type="button" class="link-btn" id="wl-forgot">J’ai perdu mon mot de passe</button></p>
       </form>
+      <!-- Code de secours, montré UNE fois (inscription, récupération) : js/welcome.js, showRecoveryCode. Il n'est écrit nulle part. -->
+      <div class="wl-recovery" id="wl-recovery" role="group" aria-labelledby="wl-rc-title" hidden>
+        <h3 id="wl-rc-title">Ton code de secours</h3>
+        <p class="wl-hint" id="wl-rc-intro"></p>
+        <output class="rc-code" aria-label="Code de secours"><span id="wl-rc-code" data-i18n="off"></span></output>
+        <div class="wl-rc-row"><button type="button" class="btn" id="wl-rc-copy">Copier le code</button></div>
+        <label class="wl-check"><input type="checkbox" id="wl-rc-ok"><span>J’ai noté mon code de secours en lieu sûr.</span></label>
+        <p class="wl-error" id="wl-rc-error" role="alert" aria-live="polite"></p>
+        <button class="btn big primary" id="wl-rc-go" type="button">Continuer</button>
+      </div>
       <p class="wl-legal"><a href="legal.html?p=confidentialite" target="_blank" rel="noopener">Confidentialité</a> · <a href="legal.html?p=mentions" target="_blank" rel="noopener">Mentions légales</a> · <a href="legal.html?p=credits" target="_blank" rel="noopener">Crédits</a></p>
     </div>
   </section>
