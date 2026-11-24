@@ -13,7 +13,7 @@ import { RESUME_MS, RETRY_MS } from '../js/net/resume.js';
 import { RaceLogic } from '../js/raceLogic.js';
 import { Track } from '../js/track.js';
 import { PHYS_VER, NET_VER } from '../js/version.js';
-import { test, finish, precondition, bugConnu } from './harness.mjs';
+import { test, finish, precondition } from './harness.mjs';
 import { VirtualClock, FakeRealtime, FakeRTCNet } from './fake-realtime.mjs';
 import { PublicDirectory, LOBBY_CODE } from '../js/net/directory.js';
 import { createIceLoader } from '../js/net/ice.js';
@@ -1474,7 +1474,7 @@ await test('un flot de messages fiables est borné (TECH-089 e) ; le débit d\'u
   assert.equal(ana.results.get('bea').n, before + 1, 'une arrivée normale, après le flot, est comptée');
   assert.ok(w.linked(ana, bea), 'les pings passent : la liaison reste ouverte');
 }));
-await bugConnu('TECH-089', () => scenario(async (w) => {
+await test('offre d\'un joueur qui revient arrivée avant sa présence (TECH-089 f) : gardée un instant, la liaison se refait sans attendre la renégociation', () => scenario(async (w) => {
   // (f) Abe (initiateur de la liaison : le plus petit identifiant) recharge sa page et revient avec son secret ; chez Zoé, sa présence arrive 400 ms APRÈS son offre WebRTC.
   const zoe = await w.host('zoe'), abe = await w.join('abe');
   await w.clock.advance(3000);
@@ -1488,6 +1488,13 @@ await bugConnu('TECH-089', () => scenario(async (w) => {
   const back = await w.join('abe', 'ABC234', { selfId: 'abe', identity: saved });
   await w.clock.advance(3000);
   assert.ok(w.linked(zoe, back), 'relié dans les 3 s (offre arrivée avant la présence : gardée, pas perdue) : ' + (zoe.members.get('abe') || {}).link);
-}), '(f) offre d\'un joueur qui revient arrivée avant sa présence : la liaison se refait sans attendre la renégociation');
+  // Un identifiant qui ne devient jamais membre : ses messages gardés n'ouvrent rien et sont oubliés (TECH-045 tient toujours).
+  for (let i = 0; i < 40; i++) zoe.mesh._onSignal('intrus' + (i % 20), { k: 'desc', d: { type: 'offer', sdp: 'x' } });
+  assert.equal(zoe.mesh.links.has('intrus1'), false, 'aucune liaison pour un inconnu');
+  assert.ok(zoe.mesh._held.size <= 16 && [...zoe.mesh._held.values()].every((q) => q.length <= 24), 'mémoire bornée : ' + zoe.mesh._held.size);
+  await w.clock.advance(6000);
+  zoe.mesh._onSignal('intrus19', { k: 'ice', c: { candidate: 'x' } });
+  assert.ok(!zoe.mesh._held.has('intrus1'), 'oubliés après 5 s');
+}));
 
 await finish('Tous les tests réseau passent.');
