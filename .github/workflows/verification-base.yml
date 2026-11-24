@@ -24,8 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      # Écarts attendus tant que le correctif SQL de la phase 13 (TECH-021 : lecture de scores.ghost_veh) n'est pas appliqué ; fragments de libellé séparés par « ¦ ».
-      # À VIDER dès que la phase 13 est appliquée : un nouvel écart sur ces lignes deviendrait alors un vrai signal.
+      # Écarts attendus tant que l'étape SQL 20 (supabase/etape20-droits-et-regles.sql : lecture de scores.ghost_veh, TECH-021) n'est pas appliquée en production ; fragments de libellé séparés par « ¦ ».
+      # À VIDER (mettre '') dès que le propriétaire a appliqué l'étape 20 ET lu verify-prod.sql : un écart sur ces lignes deviendrait alors un vrai signal.
       ECARTS_ATTENDUS: 'lisibilité (TECH-021) : scores (lues par le jeu)'
     steps:
       - uses: actions/checkout@v4

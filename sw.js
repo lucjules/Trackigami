@@ -1,7 +1,7 @@
 // Service worker généré par tools/gen-sw.mjs : ne pas modifier à la main.
 // Jeu hors ligne : les fichiers du jeu sont gardés en cache ; le réseau reste prioritaire
 // pour récupérer les mises à jour quand il est disponible.
-const CACHE = 'copytrack-66a43b5edb';
+const CACHE = 'copytrack-e1a60c5f07';
 const FILES = [
   "./",
   "assets/fonts/OFL.txt",
@@ -238,6 +238,7 @@ const FILES = [
   "js/wallet.js",
   "js/weather.js",
   "js/welcome.js",
+  "legal.html",
   "manifest.webmanifest"
 ];
 
@@ -246,21 +247,38 @@ self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
+// Les chemins que la copie hors ligne connaît (TECH-080 c) : SEULS ces fichiers entrent dans le cache, chacun sous son chemin sans paramètres. Avant, toute réponse 200 de même origine était
+// gardée sous son adresse complète : la vérification de mise à jour (js/version.js?u=<horodatage>, une adresse nouvelle toutes les 30 minutes) remplissait le cache jusqu'au changement de version.
+const KNOWN = new Set(FILES.map((f) => new URL(f, self.registration.scope).pathname));
+const keyOf = (url) => new Request(url.origin + url.pathname);
+
+// Hors ligne, un fichier absent de la copie n'est JAMAIS remplacé par index.html (TECH-080 d : un module, une feuille de style ou une image « trouvés » sous la forme d'une page HTML font
+// échouer le démarrage de façon incompréhensible). Une page demandée (navigation) reçoit un court message ; tout autre fichier, une vraie réponse « introuvable ».
+const missing = (req) => (req.mode === 'navigate'
+  ? new Response('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Trackigami</title><p>Cette page n’est pas disponible hors ligne. · This page is not available offline.</p>', { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  : new Response('', { status: 404, statusText: 'Not Found' }));
+
 self.addEventListener('activate', (e) => {
-  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => (k.startsWith('shardway-') || k.startsWith('copytrack-')) && k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => (k.startsWith('shardway-') || k.startsWith('copytrack-')) && k !== CACHE).map((k) => caches.delete(k))))
+    // Le cache courant ne garde que les fichiers connus (une copie plus ancienne de ce même cache, jamais élaguée, aurait pu en contenir d'autres).
+    .then(() => caches.open(CACHE)).then((c) => c.keys().then((reqs) => Promise.all(reqs.filter((r) => { const u = new URL(r.url); return u.search || !KNOWN.has(u.pathname); }).map((r) => c.delete(r)))))
+    .then(() => self.clients.claim()));
 });
 
 self.addEventListener('fetch', (e) => {
-  const req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
+  const req = e.request, url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== self.location.origin) return;
+  // Vérification d'une nouvelle version (js/updateCheck.js) : toujours au réseau, jamais servie ni gardée par le cache (TECH-080 c). Hors ligne, la requête échoue et le jeu s'en passe.
+  if (url.pathname.endsWith('/js/version.js') && url.search) return;
+  const known = KNOWN.has(url.pathname);
   // cache: 'no-cache' : chaque fichier est revalidé auprès du serveur (une réponse 304 ne coûte presque rien). Sans cela, juste après une mise en ligne,
   // le cache HTTP du navigateur (GitHub Pages : 10 min) pouvait servir un ancien module à côté des nouveaux, et le jeu ne démarrait pas (0.9.65).
   const fresh = req.mode === 'navigate' ? new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' }) : new Request(req, { cache: 'no-cache' });
   e.respondWith(
     fetch(fresh).then((res) => {
-      // Seules les réponses complètes (200) se gardent : une réponse partielle (206, lecture du MP3 par morceaux) ferait échouer cache.put.
-      if (res.status === 200) { const copy = res.clone(); e.waitUntil(caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {})); }
+      // Seules les réponses complètes (200) des fichiers CONNUS se gardent : une réponse partielle (206) ferait échouer cache.put, et le reste n'a rien à faire dans le cache.
+      if (res.status === 200 && known) { const copy = res.clone(); e.waitUntil(caches.open(CACHE).then((c) => c.put(keyOf(url), copy)).catch(() => {})); }
       return res;
-    }).catch(() => caches.match(req, { ignoreSearch: true }).then((r) => r || caches.match('./index.html'))),
+    }).catch(() => (known ? caches.match(keyOf(url)).then((r) => r || missing(req)) : missing(req))),
   );
 });

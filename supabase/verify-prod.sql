@@ -10,8 +10,8 @@
 -- Les lignes « après 15b » ne sont attendues QU'APRÈS l'étape 15b (voir MIGRATIONS.md) : avant, un « ÉCART » sur ces lignes est NORMAL.
 -- Les lignes « lisibilité (TECH-021) » vérifient que le jeu PEUT LIRE les colonnes qu'il demande (scores : ghost_veh, has_ghost, splits, track_name… ; players : name, title) et ne
 -- peut PAS lire scores.inputs ni scores.ghost. Elles contrôlent les DROITS (has_column_privilege), pas l'existence : une colonne présente mais illisible est ce qui dégrade le
--- classement mondial (boutons de fantôme et titres absents). UN « ÉCART » SUR scores.ghost_veh EST ATTENDU tant que le correctif SQL de la phase 13 n'est pas appliqué
--- (aucune étape du dépôt n'accorde cette lecture) : voir supabase/MIGRATIONS.md, « Contrôle des droits de lecture ». Le lire, ne pas le « corriger » ici.
+-- classement mondial (boutons de fantôme et titres absents). Un « ÉCART » ILLISIBLES : ghost_veh signifie que l'étape 20 (supabase/etape20-droits-et-regles.sql) n'est pas appliquée :
+-- le jeu fonctionne quand même (repli sans cette colonne) mais le classement est dégradé. Voir supabase/MIGRATIONS.md, « Contrôle des droits de lecture ».
 -- =====================================================================================
 with
 t(n, ord) as (values ('rate_hits', 1), ('track_binds', 2), ('submit_rate', 3), ('scores', 4), ('tracks', 5)),
@@ -239,6 +239,26 @@ checks as (
               when not want and exists (select 1 from col_state x where x.ord = g.ord and x.present and x.readable) then 'ÉCART'
               else 'ok' end
   from (select distinct ord, tbl, want, role from col_state) g
+  union all
+  -- ---- 4 sexies. étape 20 (droits suivis, règles du jeu et de la base alignées : TECH-076, TECH-081 ; TECH-021 : lignes « lisibilité » ci-dessus) ------------------------------
+  select 130, 'étape 20 : close_season clôt après la fin de la saison + la grâce (600 s = SEASON_GRACE_MS de js/seasons.js, TECH-076)', 'grâce de 600 s',
+         case when to_regprocedure('public.close_season(integer)') is null then 'fonction absente'
+              when (select prosrc from pg_proc where oid = to_regprocedure('public.close_season(integer)')) like '%make_interval(secs => 600)%' then 'grâce de 600 s'
+              else 'SANS grâce (ancienne version de l''étape 11 : clôt à l''heure)' end,
+         case when to_regprocedure('public.close_season(integer)') is null then 'MANQUE'
+              when (select prosrc from pg_proc where oid = to_regprocedure('public.close_season(integer)')) like '%make_interval(secs => 600)%' then 'ok' else 'ÉCART' end
+  union all
+  select 131, 'étape 20 : submit_best lie l''empreinte d''un circuit de joueur à la clé de BASE, variantes comprises (TECH-081)', 'clé de base',
+         case when to_regprocedure('public.submit_best(uuid,text,double precision,text,integer,text,jsonb,text,jsonb,text)') is null then 'fonction absente'
+              when (select prosrc from pg_proc where oid = to_regprocedure('public.submit_best(uuid,text,double precision,text,integer,text,jsonb,text,jsonb,text)')) like '%split_part(tk, ''~'', 1)%' then 'clé de base'
+              else 'chaque variante séparément (ancienne version de l''étape 17)' end,
+         case when to_regprocedure('public.submit_best(uuid,text,double precision,text,integer,text,jsonb,text,jsonb,text)') is null then 'MANQUE'
+              when (select prosrc from pg_proc where oid = to_regprocedure('public.submit_best(uuid,text,double precision,text,integer,text,jsonb,text,jsonb,text)')) like '%split_part(tk, ''~'', 1)%' then 'ok' else 'ÉCART' end
+  union all
+  select 132, 'étape 20 : lignes de track_binds d''une VARIANTE dont l''empreinte diffère de celle de sa base (squat d''avant l''étape 20 : à examiner, rien n''est supprimé)', '0',
+         case when to_regclass('public.track_binds') is null then 'table absente'
+              else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.track_binds v join public.track_binds b on b.track_key = split_part(v.track_key, ''~'', 1) where v.track_key like ''%~%'' and v.strong <> b.strong', false, true, '')))[1]::text end,
+         'info'
   union all
   -- ---- 5. renseignements ---------------------------------------------------------------------------------------------------------------------
   select 70, 'circuits publiés dont le temps auteur n''est PAS vérifié (publiés avant l''étape 15)', 'info',

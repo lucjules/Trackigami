@@ -18,14 +18,14 @@ export async function tracksByIds(ids) {
   q.set('select', F + (online.hasDesc === false ? '' : ',description'));
   q.set('id', 'in.(' + ok.join(',') + ')');
   let rows;
-  try { rows = await online.rest('/rest/v1/tracks?' + q.toString()); }
-  catch (e) { if (!/description/.test(e.message || '')) throw e; online.hasDesc = false; q.set('select', F); rows = await online.rest('/rest/v1/tracks?' + q.toString()); }
+  try { rows = await online.read('/rest/v1/tracks?' + q.toString()); }
+  catch (e) { if (!/description/.test(e.message || '')) throw e; online.hasDesc = false; q.set('select', F); rows = await online.read('/rest/v1/tracks?' + q.toString()); }
   const by = new Map(list(rows).map((r) => [r.id, r]));
   return ok.filter((id) => by.has(id)).map((id) => by.get(id));
 }
 
 // ---- Commentaires ----
-export const comments = (trackId, { limit = 30, offset = 0 } = {}) => online.rpc('track_comments_list', { t: trackId, lim: limit, off: offset }).then(list);
+export const comments = (trackId, { limit = 30, offset = 0 } = {}) => online.readRpc('track_comments_list', { t: trackId, lim: limit, off: offset }).then(list);
 export async function addComment(trackId, text, playerName) {
   const msg = String(text || '').trim();
   if (!msg || msg.length > 280) throw new Error('Un commentaire fait de 1 à 280 caractères.');
@@ -36,7 +36,7 @@ export const deleteComment = (id) => online.rpc('comment_delete', { c: id });
 export const reportComment = (id) => online.rpc('comment_report', { c: id });
 
 // ---- Playlists ----
-export const playlists = ({ mine = false, limit = 30, offset = 0 } = {}) => online.rpc('playlists_list', { mine, lim: limit, off: offset }).then(list);
+export const playlists = ({ mine = false, limit = 30, offset = 0 } = {}) => (mine ? online.rpc : online.readRpc).call(online, 'playlists_list', { mine, lim: limit, off: offset }).then(list);
 export async function savePlaylist({ id = null, name, isPublic = true, tracks = [] }, playerName) {
   await online.ensurePlayer(playerName);
   return +(await online.rpc('playlist_save', { pl: id, pname: String(name || '').trim().slice(0, 40), is_public: !!isPublic, items: tracks.filter((x) => UUID.test(String(x))).slice(0, 50) }));
@@ -50,14 +50,14 @@ export async function picks({ limit = 24, offset = 0 } = {}) {
   q.set('picked_at', 'not.is.null');
   q.set('order', 'picked_at.desc');
   q.set('limit', String(limit)); q.set('offset', String(offset));
-  return list(await online.rest('/rest/v1/tracks?' + q.toString()));
+  return list(await online.read('/rest/v1/tracks?' + q.toString()));
 }
 export async function randomTrack(avoid = []) {
-  const id = await online.rpc('random_track', { avoid: avoid.filter((x) => UUID.test(String(x))).slice(-50) });
+  const id = await online.readRpc('random_track', { avoid: avoid.filter((x) => UUID.test(String(x))).slice(-50) });
   return typeof id === 'string' && UUID.test(id) ? online.trackById(id) : null;
 }
 export async function recommended(limit = 12) {
-  const r = list(await online.rpc('recommended_tracks', { lim: limit }));
+  const r = list(await online.readRpc('recommended_tracks', { lim: limit }));
   return tracksByIds(r.map((x) => x.id));
 }
 
@@ -65,7 +65,7 @@ export async function recommended(limit = 12) {
 // key : identifiant de statistiques (telemetry.js, trackIdOf). null : pas encore assez de joueurs (moins de 5).
 export async function trackStats(key, physVer) {
   if (!key) return null;
-  const r = list(await online.rpc('track_stats', { k: key, pv: physVer }));
+  const r = list(await online.readRpc('track_stats', { k: key, pv: physVer }));
   const s = r[0];
   if (!s || !(+s.players >= 5)) return null;
   return { players: +s.players, runs: +s.runs, finishes: +s.finishes, finishRate: +s.finish_rate, median: s.median_time == null ? null : +s.median_time, top: s.top_time == null ? null : +s.top_time, respawns: s.avg_respawns == null ? null : +s.avg_respawns, quitAt: s.quit_progress == null ? null : +s.quit_progress };
@@ -102,7 +102,7 @@ export function modeRulesOf(variant) {
   if (v.vm) r.vm = 2;
   return sanitizeRules(r);
 }
-export const communityModes = ({ mine = false, limit = 30, offset = 0 } = {}) => online.rpc('modes_list', { mine, lim: limit, off: offset }).then(list);
+export const communityModes = ({ mine = false, limit = 30, offset = 0 } = {}) => (mine ? online.rpc : online.readRpc).call(online, 'modes_list', { mine, lim: limit, off: offset }).then(list);
 export async function publishMode(mode, playerName) {
   const variant = modeVariant(mode.rules);
   await online.ensurePlayer(playerName);

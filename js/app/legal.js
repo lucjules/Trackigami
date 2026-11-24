@@ -20,13 +20,16 @@ export const legalMethods = {
   },
 
   // Profil › Sauvegardes › Exporter mes données : un fichier JSON (appareil + serveur). Le serveur n'est lu que si une session en ligne existe déjà :
-  // l'export n'en crée jamais une (un invité qui n'a jamais joué en ligne n'a rien sur le serveur).
+  // l'export n'en crée jamais une (un invité qui n'a jamais joué en ligne n'a rien sur le serveur). Inclus : les temps du joueur (colonnes autorisées), ses « j'aime », et l'identité
+  // d'invité gardée à côté d'un compte (TECH-032).
   async exportMyData() {
     this.ui.flash('Préparation de l’export…', 2);
     const uid = online.session && online.session.access_token ? online.uid : null;
     const data = await buildExport({
       meta: { game: GAME_NAME, version: VERSION, physVer: PHYS_VER, identity: { kind: this.identity.kind, username: this.identity.username } },
       local: dumpAll({ portability: true }), uid, get: (path) => online.rest(path),
+      // L'invité gardé à côté du compte (et l'ancien anonyme, si l'appareil le connaît) : lu avec SA session si elle est encore valable, sinon seulement ses tables publiques.
+      identities: uid ? online.otherIdentities().map((o) => ({ label: o.label, uid: o.uid, complete: !!o.token, get: (path) => (o.token ? online.restWith(o.token, path) : online.rest(path)) })) : [],
     });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));

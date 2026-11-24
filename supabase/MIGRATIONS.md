@@ -61,6 +61,38 @@ Avant l'étape 6, laisser un temps de cohabitation n'est pas possible pour les t
 
 Ne jamais lancer 6 avant 3 et 5. Les étapes 2 et 6 sont **relançables sans danger** (idempotentes) et ne **suppriment aucune donnée**.
 
+### Étape 20 (droits suivis, règles du jeu et de la base alignées, 0.16.12) : `etape20-droits-et-regles.sql`
+
+**À appliquer À LA MAIN par le propriétaire du projet** (SQL Editor) : **rien n'a été exécuté sur la production** par l'auteur de ce dépôt ; elle n'est donc **pas** « appliquée » tant que le propriétaire n'a pas lancé `verify-prod.sql` ET lu ses lignes « étape 20 » et « lisibilité ».
+Pré-requis : étapes 1 à 19. **Relançable ; ne supprime ni ne modifie aucune donnée en s'appliquant** (un grant et deux fonctions remplacées : `tools/test-etape20-sql.sh` compare l'empreinte de chaque table avant et après). **Compatible avec le jeu et la fonction serveur actuels** : à lancer **avant** de redéployer `submit-score` et de publier le jeu 0.16.12. Elle ne suppose aucun redéploiement : le jeu 0.16.12 fonctionne AVEC ou SANS elle (classement sans fantômes ni véhicule tant qu'elle manque), et la fonction `submit-score` actuelle fonctionne avec la nouvelle base.
+
+Ce qu'elle fait (justification de chaque droit, dans l'en-tête du fichier) :
+
+| Identifiant | Changement | Moindre privilège |
+|---|---|---|
+| `TECH-021` | `grant select (ghost_veh) on scores to anon, authenticated` : le classement mondial demande cette colonne depuis l'étape 7, aucune étape ne l'accordait (l'étape 5 ne liste que les colonnes d'origine) | UNE colonne, en lecture ; `scores.inputs` (les commandes) et `scores.ghost` restent illisibles ; rien de nouveau n'est exposé (`get_ghost`, ouverte à `anon`, renvoie déjà `ghost_veh` d'un classement public) |
+| `TECH-076` | `close_season` clôt après la **fin de la saison + 600 s** (`SEASON_GRACE_MS` de `js/seasons.js`) au lieu de la fin | aucun droit changé (toujours réservée au serveur, via `close_due_seasons`) ; une saison déjà close le reste |
+| `TECH-081` | `submit_best` lie l'empreinte forte d'un circuit de joueur à la clé de **base** (avant « ~ ») : les variantes d'une clé liée le sont avec elle | aucun droit changé (toujours réservée au serveur) ; les anciennes lignes de variantes de `track_binds` restent, sans effet |
+
+**Ordre d'application** (jamais l'inverse) : 1. `verify-prod.sql` (état avant : lignes « étape 20 » et « lisibilité » en `ÉCART`, **`MANQUE`/`ÉCART` ailleurs = s'arrêter**) ; 2. sauvegarde (Database › Backups) ; 3. `etape20-droits-et-regles.sql` ; 4. `verify-prod.sql` : **toutes** les lignes « étape 20 » et « lisibilité (TECH-021) » à `ok`, la ligne d'info « squat de variante » lue ; 5. redéployer `submit-score` (`npm run build:function` puis `supabase/functions/submit-score/index.ts`, ou le workflow de déploiement) : **requis pour TECH-079** (dates de défi du jour) ; 6. publier le jeu 0.16.12 ; 7. si le workflow `verification-base.yml` est activé : vider `ECARTS_ATTENDUS` (il tolérait l'écart de `ghost_veh`).
+
+**Vérifications de production attendues** (à lire par le propriétaire ; rien de ceci n'a été constaté) :
+
+| Vérification | Attendu |
+|---|---|
+| `verify-prod.sql`, 6 lignes « lisibilité (TECH-021) » | `ok` (avant l'étape : `ILLISIBLES : ghost_veh` sur `scores`, pour `authenticated` et `anon`) ; `scores.inputs` et `scores.ghost` « aucune lisible » |
+| `verify-prod.sql`, lignes « étape 20 » | `close_season` « grâce de 600 s » ; `submit_best` « clé de base » ; le décompte des squats de variante est une **info** (voir ci-dessous) |
+| `verify-prod.sql`, « fonctions appelables SANS session hors liste » | `ok` (l'étape 20 ne crée aucune fonction) |
+| `select has_column_privilege('anon', 'public.scores', 'ghost_veh', 'select'), has_column_privilege('authenticated', 'public.scores', 'ghost_veh', 'select'), has_column_privilege('anon', 'public.scores', 'inputs', 'select');` | `t, t, f` |
+| Dans le jeu 0.16.12, classement d'un circuit joué : | boutons 👻, titres et véhicule affichés ; la requête du haut du classement réussit **du premier coup** dans l'onglet réseau du navigateur (avant : une requête refusée en 403, puis une relecture plus pauvre) |
+| Dans le jeu, ouvrir Classement puis Communauté **sans** avoir jamais joué en ligne (navigation privée) | aucune requête `/auth/v1/signup` ; **Authentication › Users** : aucun nouvel utilisateur anonyme créé par la seule lecture |
+| Fin de saison (lundi 00:00 UTC) | une course finie à 00:05 compte dans les points ; `select * from seasons` : la saison n'est close qu'à partir de 00:10 ; `division_history` la contient |
+| Export des données (Profil › Sauvegardes) | la table `scores` est un tableau (plus une erreur), `track_likes` présente, `server.omitted` liste ce qui n'est pas exporté |
+
+**Squats de variante déjà présents** (`TECH-081`) : avant l'étape 20, quelqu'un qui disposait d'une collision de la signature de 32 bits pouvait lier une clé de variante (`u-…~v1.veh-moto`) à une autre empreinte que celle de sa base. L'étape 20 empêche tout NOUVEAU cas mais **ne supprime rien** : la ligne d'info de `verify-prod.sql` compte les variantes de `track_binds` dont l'empreinte diffère de celle de leur base (attendu : 0 ; sur la production, jamais constaté ici). S'il y en a, le propriétaire décide (modération, hors périmètre) ; leurs temps éventuels restent dans `scores`.
+
+**Retour arrière** (aucune donnée n'est touchée dans aucun sens) : `revoke select (ghost_veh) on public.scores from anon, authenticated;` rétablit la lecture d'avant (le jeu retombe sur le repli) ; relancer `etape11-saisons.sql` remet `close_season` d'avant (clôture à l'heure) ; relancer `etape17-securite.sql` remet `submit_best` d'avant (liaison par variante). **Relancer l'étape 11 ou 17 APRÈS la 20 annule la correction correspondante** (relancer alors l'étape 20). Test : `tools/test-etape20-sql.sh` (`npm run test:sql`) et `tools/test-securite-sql.sh` (elle rejoue les attaques après l'étape 20, exécute pour de bon sous les rôles du jeu les lectures publiques, l'export et le classement).
+
 ### Étape 19 (avis des testeurs, 0.13.0) : `etape19-avis.sql`
 
 Pré-requis : étape 18 (elle redéfinit `purge_expired` et `health_report` en y ajoutant les avis). **Relançable ; ne supprime aucune donnée en
@@ -138,7 +170,8 @@ Cette automatisation n'a jamais tourné sur GitHub ni sur Supabase : tant qu'un 
 ### Contrôle des droits de lecture (TECH-021)
 
 `verify-prod.sql` contient des lignes « lisibilité (TECH-021) » : `has_column_privilege` sur les colonnes que le jeu lit (`scores` : track_key, player, time, phys_ver, track_name, updated_at, has_ghost, ghost_veh, splits ; `players` : name, title), pour `authenticated` et `anon`, et sur celles qu'il ne doit pas lire (`scores.inputs`, `scores.ghost`).
-**Un ÉCART « ILLISIBLES : ghost_veh » sur `scores` est ATTENDU** tant que le correctif SQL de la phase 13 n'est pas appliqué : aucune étape du dépôt n'accorde cette lecture (exécuté sur une base locale PGlite avec les étapes 1 à 19 : ces deux lignes, et elles seules, sortent en ÉCART). Ne pas « corriger » ce constat avec un `grant` improvisé. La tâche optionnelle `verification-base.yml` (désactivée par défaut) le tolère explicitement tout en l'affichant ; vider `ECARTS_ATTENDUS` dans ce fichier après la phase 13.
+Elles contrôlent les **droits**, pas l'existence : une colonne présente mais illisible est ce qui dégradait le classement mondial. **Un ÉCART « ILLISIBLES : ghost_veh » sur `scores` signifie que l'étape 20 n'est pas appliquée** : le jeu 0.16.12 fonctionne quand même (repli sans cette colonne, une requête de plus la première fois), mais sans véhicule dans le classement. Ne pas le « corriger » par un `grant` improvisé : lancer `etape20-droits-et-regles.sql`. La tâche optionnelle `verification-base.yml` (désactivée par défaut) tolère cet écart tant que `ECARTS_ATTENDUS` n'est pas vidé ; le vider quand l'étape 20 est appliquée et lue.
+Les tests (`tools/test-securite-sql.sh`) exécutent les mêmes lectures pour de bon sous les rôles `anon` et `authenticated` ; ils échouent si une colonne que le jeu demande n'est pas lisible.
 
 ## Déployer les fonctions (à la main, si le workflow n'est pas en service)
 

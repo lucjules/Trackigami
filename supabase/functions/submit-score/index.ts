@@ -19811,11 +19811,11 @@ function seasonOpen(n, t = Date.now()) {
 // js/verify.js
 var unknownPieces = (track) => !!(track && track.lost && track.lost.unknown > 0);
 var UNKNOWN_MSG = "Ce serveur ne conna\xEEt pas toutes les pi\xE8ces de ce circuit (version plus r\xE9cente du jeu) : son temps ne peut pas \xEAtre v\xE9rifi\xE9 ici.";
-function trackForKey(key2, code = "") {
+function trackForKey(key2, code = "", now = Date.now()) {
   key2 = String(key2 || "");
   const { base, variant } = splitKey(key2);
   if (key2.includes("~")) {
-    const off = trackForKey(base, code);
+    const off = trackForKey(base, code, now);
     const v = parseVariant(variant);
     if (v.duel != null || v.tour != null) {
       if (Object.keys(v).length !== 1 || off.kind !== "builtin") throw new Error("Comp\xE9tition possible seulement sur un circuit de la carri\xE8re.");
@@ -19834,7 +19834,7 @@ function trackForKey(key2, code = "") {
     if (v.sea != null) {
       const n = +v.sea;
       if (Object.keys(v).length !== 1 || off.kind !== "builtin" || !seasonTracks(n).some((d) => base.startsWith(`b-${d.id}-`))) throw new Error("Ce circuit ne fait pas partie de cette saison.");
-      const closed = seasonOpen(n);
+      const closed = seasonOpen(n, now);
       if (closed) throw new Error(closed);
       return {
         ...off,
@@ -19865,7 +19865,9 @@ function trackForKey(key2, code = "") {
     const day = key2.slice(6);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("D\xE9fi du jour introuvable.");
     const t = Date.parse(day + "T00:00:00Z");
-    if (!Number.isFinite(t) || Math.abs(t - Date.now()) > 2.5 * 864e5) throw new Error("D\xE9fi du jour hors dates valides.");
+    if (!Number.isFinite(t) || new Date(t).toISOString().slice(0, 10) !== day) throw new Error("D\xE9fi du jour introuvable.");
+    const today = Math.floor(now / 864e5) * 864e5;
+    if (Math.abs(t - today) > 864e5) throw new Error("D\xE9fi du jour hors dates valides.");
     const c = dailyChallenge(day);
     if (!c || c.key !== key2) throw new Error("D\xE9fi du jour introuvable.");
     return {
@@ -20419,4 +20421,4 @@ Deno.serve(createHandler({
   serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   allowedOrigin: Deno.env.get("ALLOWED_ORIGIN") ?? "*"
 }));
-globalThis.__COPYTRACK_BUILD__ = "e0d0222ce4fd31a3";
+globalThis.__COPYTRACK_BUILD__ = "b0ba031220d4f7fc";

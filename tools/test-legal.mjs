@@ -12,7 +12,7 @@ import { GAME_NAME, FILE_PREFIX } from '../js/version.js';
 import { BUILTIN_AUTHOR, authorLabel, BUILTIN_TRACKS, buildBuiltin } from '../js/tracks.js';
 import { CONFIG } from '../js/config.js';
 import { LEGAL_IDS, legalPage, contactHtml } from '../js/legal.js';
-import { buildExport, readableLocal, EXPORT_TABLES } from '../js/dataExport.js';
+import { buildExport, readableLocal, EXPORT_TABLES, SCORE_COLUMNS, PUBLIC_EXPORT_TABLES } from '../js/dataExport.js';
 import en from '../js/i18n/en.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -157,6 +157,48 @@ test('export : appareil lisible sans aucun jeton ; serveur lu table par table su
   assert.equal((await buildExport({ uid: 'pas-un-uuid', get: async () => { called = true; } })).server.status, 'no-online-session'); assert.equal(called, false);
 });
 
+test('export (TECH-032) : les temps sont demandés par COLONNES AUTORISÉES (jamais « select=* » sur scores), les « j’aime » sont exportés', async () => {
+  const uid = '0b9f3c2e-1111-4222-8333-444455556666', asked = [];
+  await buildExport({ uid, get: async (p) => { asked.push(p); return []; } });
+  const scores = asked.find((p) => p.startsWith('/rest/v1/scores?'));
+  assert.equal(scores, `/rest/v1/scores?select=${SCORE_COLUMNS}&player=eq.${uid}`);
+  assert.ok(!/inputs|ghost_veh|select=\*/.test(scores) && !/[=,]ghost[,&]/.test(scores), 'ni les commandes, ni les poses, ni le véhicule, ni « * »');
+  assert.ok(!SCORE_COLUMNS.split(',').some((c) => ['inputs', 'ghost', 'ghost_veh'].includes(c)), 'ni les commandes, ni les poses, ni la colonne véhicule (droit de l’étape 20 seulement)');
+  assert.ok(asked.some((p) => p === `/rest/v1/track_likes?select=track_id,player&player=eq.${uid}`), 'track_likes exportée');
+  assert.ok(asked.every((p) => !/scores\?select=\*/.test(p)));
+  const out = await buildExport({ uid, get: async () => [] });
+  assert.deepEqual(out.server.omitted.scores, ['inputs', 'ghost', 'ghost_veh'], 'ce qui n’est pas exporté est dit dans le fichier');
+});
+test('export (TECH-032) : l’invité gardé à côté du compte est inclus (session valable : tout ; sinon seulement les tables publiques) ; doublons et identités sans lien écartés', async () => {
+  const uid = '0b9f3c2e-1111-4222-8333-444455556666', guest = '7a1c0e55-2222-4333-8444-555566667777', asked = { main: [], full: [], partial: [] };
+  const out = await buildExport({
+    uid, get: async (p) => { asked.main.push(p); return [{ main: 1 }]; },
+    identities: [
+      { label: 'guest', uid: guest, complete: true, get: async (p) => { asked.full.push(p); return [{ full: 1 }]; } },
+      { label: 'ancien anonyme', uid: '9d2e1f66-3333-4444-8555-666677778888', complete: false, get: async (p) => { asked.partial.push(p); return [{ part: 1 }]; } },
+      { label: 'moi-même', uid, complete: true, get: async () => { throw new Error('jamais : même identifiant'); } },
+      { label: 'doublon', uid: guest, complete: true, get: async () => { throw new Error('jamais : déjà exporté'); } },
+      { label: 'faux', uid: 'pas-un-uuid', complete: true, get: async () => { throw new Error('jamais'); } },
+    ],
+  });
+  assert.equal(asked.main.length, EXPORT_TABLES.length); assert.equal(asked.full.length, EXPORT_TABLES.length);
+  assert.ok(asked.full.every((p) => p.includes(guest)) && !asked.full.some((p) => p.includes(uid)));
+  assert.equal(asked.partial.length, PUBLIC_EXPORT_TABLES.length);
+  assert.deepEqual(asked.partial.map((p) => p.split('?')[0].split('/').pop()).sort(), [...PUBLIC_EXPORT_TABLES].sort());
+  assert.equal(out.server.otherIdentities.length, 2);
+  assert.deepEqual(out.server.otherIdentities.map((o) => [o.label, o.uid, o.scope]), [['guest', guest, 'complete'], ['ancien anonyme', '9d2e1f66-3333-4444-8555-666677778888', 'public-only']]);
+  assert.deepEqual(out.server.otherIdentities[0].track_likes, [{ full: 1 }]);
+  assert.equal(out.server.otherIdentities[1].track_likes, undefined, 'une table privée n’est pas lue avec une session qui n’est pas la sienne (elle répondrait « vide » à tort)');
+  const none = await buildExport({ uid, get: async () => [] });
+  assert.equal(none.server.otherIdentities, undefined);
+});
+test('export (TECH-032) : une table en erreur n’arrête pas les autres ; la couverture de l’export est complète (accounts… community_modes, track_likes)', async () => {
+  const names = EXPORT_TABLES.map(([t]) => t);
+  for (const t of ['accounts', 'players', 'cloud_saves', 'scores', 'scores_archive', 'tracks', 'track_comments', 'track_likes', 'follows', 'friends', 'duels', 'tournament_players', 'ratings', 'season_divisions', 'division_history', 'playlists', 'community_modes']) assert.ok(names.includes(t), t);
+  assert.equal(new Set(names).size, names.length);
+  const out = await buildExport({ uid: '0b9f3c2e-1111-4222-8333-444455556666', get: async (p) => { if (p.includes('/scores?')) throw new Error('refusé'); return [1]; } });
+  assert.deepEqual(out.server.scores, { error: 'refusé' }); assert.deepEqual(out.server.track_likes, [1]);
+});
 test('statistiques anonymes : rien ne part sans un oui explicite (réglage absent = pas encore demandé)', () => {
   assert.match(read('js/storage.js'), /telemetry: null,/);
   assert.match(read('js/main.js'), /enabled: \(\) => this\.settings\.telemetry === true/);

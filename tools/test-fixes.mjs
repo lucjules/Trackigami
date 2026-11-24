@@ -79,6 +79,36 @@ test('défi du jour : seules les dates plausibles sont acceptées', () => {
   for (const bad of ['daily-abc', 'daily-9999-99-99', 'daily-2020-01-01', 'daily-' + d(30), 'daily-']) assert.throws(() => trackForKey(bad), undefined, bad);
 });
 
+test('défi du jour (TECH-079) : une date qui n’existe pas est refusée (2026-02-30, 2026-04-31…), la date relue doit redonner la même chaîne', () => {
+  const now = Date.UTC(2026, 1, 28, 12);      // 28 février 2026 (non bissextile), midi UTC : le 30 février serait « reporté » au 2 mars, à 2 jours : l'ancienne fenêtre de 2,5 jours l'acceptait
+  assert.equal(trackForKey('daily-2026-02-28', '', now).kind, 'daily');
+  assert.equal(trackForKey('daily-2026-03-01', '', now).kind, 'daily', 'demain : accepté');
+  for (const bad of ['daily-2026-02-30', 'daily-2026-02-29', 'daily-2026-02-31', 'daily-2026-13-01', 'daily-2026-00-10', 'daily-2026-03-00', 'daily-2026-03-32']) assert.throws(() => trackForKey(bad, '', now), /introuvable/, bad);
+  const apr = Date.UTC(2026, 3, 30, 12);      // 30 avril : « 31 avril » est reporté au 1er mai (demain, à 1 jour : accepté par l'ancien code)
+  assert.equal(trackForKey('daily-2026-04-30', '', apr).kind, 'daily');
+  assert.throws(() => trackForKey('daily-2026-04-31', '', apr), /introuvable/);
+  const leap = Date.UTC(2028, 1, 29, 8);       // année bissextile : le 29 février existe
+  assert.equal(trackForKey('daily-2028-02-29', '', leap).kind, 'daily');
+});
+test('défi du jour (TECH-079) : la fenêtre est EXACTEMENT hier, aujourd’hui, demain en UTC, de minuit à minuit, à tout instant de la journée', () => {
+  const day = Date.UTC(2026, 5, 10);          // 10 juin 2026, 00:00 UTC
+  const key = (n) => 'daily-' + new Date(day + n * 86400000).toISOString().slice(0, 10);
+  for (const at of [0, 1, 12 * 3600000, 86400000 - 1]) {    // minuit pile, une milliseconde après, midi, la dernière milliseconde du jour
+    const now = day + at;
+    for (const n of [-1, 0, 1]) assert.equal(trackForKey(key(n), '', now).kind, 'daily', `jour ${n} à +${at} ms`);
+    for (const n of [-3, -2, 2, 3]) assert.throws(() => trackForKey(key(n), '', now), /hors dates valides/, `jour ${n} à +${at} ms`);
+  }
+  // Une milliseconde avant minuit, « aujourd’hui » est encore le 10 ; à minuit pile c’est le 11 : le 9 sort de la fenêtre.
+  assert.equal(trackForKey(key(-1), '', day + 86400000 - 1).kind, 'daily');
+  assert.throws(() => trackForKey(key(-1), '', day + 86400000), /hors dates valides/);
+  assert.equal(trackForKey(key(2), '', day + 86400000).kind, 'daily');
+});
+test('défi du jour (TECH-079) : une variante d’un défi inexistant est refusée aussi (la clé de base est vérifiée)', () => {
+  const now = Date.UTC(2026, 1, 28, 12);
+  assert.throws(() => trackForKey('daily-2026-02-30~v1.veh-moto', '', now), /introuvable/);
+  assert.equal(trackForKey('daily-2026-03-01~v1.veh-moto', '', now).kind, 'daily');
+});
+
 console.log('Dalles solides');
 test('un deltaplane qui monte sous une dalle ne la traverse pas, ni la face d\'une plate-forme', () => {
   const tr = scriptTrack('t', 'start S U S4 finish');

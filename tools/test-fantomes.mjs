@@ -137,7 +137,7 @@ await test('classement : le bouton fantôme vient de has_ghost ; sans l\'étape 
   online._fetch = async (path) => { calls.push(path); if (path.includes('has_ghost')) throw new Error('column scores.has_ghost does not exist'); return [{ time: 20, player: 'p1', players: { name: 'A' } }]; };
   try {
     const lb = await online.leaderboard('b-x-1', 26, 10);
-    assert.equal(calls.length, 3, 'complète (titre + fantôme), sans titre, puis simple'); assert.ok(!calls[2].includes('has_ghost'));
+    assert.equal(calls.length, 2, 'complète (titre + fantôme), puis sans la colonne que PostgreSQL nomme (une requête perdue de moins qu\'avant : TECH-021)'); assert.ok(calls[0].includes('has_ghost') && calls[0].includes('title')); assert.ok(!calls[1].includes('has_ghost') && calls[1].includes('title'));
     assert.equal(lb.top.length, 1);
     calls.length = 0;
     online._fetch = async (path) => { calls.push(path); return [{ time: 20, player: 'p1', has_ghost: true, players: { name: 'A' } }]; };
