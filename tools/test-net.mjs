@@ -475,7 +475,7 @@ async function scenario(fn) {
 const pres = (w, code = 'ABC234') => w.rt.presence(topicOf(code));
 
 console.log('Banc simulé : présence par connexion (TECH-011)');
-await bugConnu('TECH-011', async () => {
+await test('présence (TECH-011) : join, meta, leave pour une même clé (deux connexions) : le pair est conservé', async () => {
   const sig = new SupabaseSignaling({ code: 'ABC234', selfId: 'me', WebSocketImpl: FakeWS, url: 'https://x.supabase.co', key: 'K' });
   const left = []; sig.on('leave', (id) => left.push(id));
   const p = sig.join({ name: 'Moi' });
@@ -497,8 +497,9 @@ await bugConnu('TECH-011', async () => {
     ws.recv({ topic: T, event: 'presence_diff', payload: { joins: {}, leaves: { bob: { metas: [{ phx_ref: 'b3', name: 'Bob' }] } } } });
     assert.deepEqual(left, ['bob'], 'sa dernière connexion fermée : il part');
   } finally { sig.leave(); }
-}, 'présence : join, meta, leave pour une même clé (deux connexions) : le pair est conservé');
+});
 
+// (bout en bout : demande aussi que la coupure de la signalisation ne coupe pas la liaison, TECH-046)
 await bugConnu('TECH-011', () => scenario(async (w) => {
   const ana = await w.host('ana'), bea = await w.join('bea');
   await w.clock.advance(2000);

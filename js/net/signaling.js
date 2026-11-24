@@ -9,7 +9,8 @@
 //   LocalSignaling    : BroadcastChannel du navigateur, pour essayer deux onglets sans serveur (?net=local) et pour les tests.
 //
 // Interface : join(meta) · track(meta) · send(to, data) · leave() · peers (Map id → meta, sans soi)
-//   événements : 'join'(id, meta) · 'leave'(id) · 'meta'(id, meta) · 'signal'(from, data) · 'closed'(reason)
+//   événements : 'join'(id, meta) · 'leave'(id) · 'meta'(id, meta, info) · 'signal'(from, data) · 'closed'(reason)
+//   (info.conn : ce joueur déjà présent a ouvert une NOUVELLE connexion, il s'est reconnecté ; présence suivie par connexion : voir _syncDiff)
 import { ONLINE } from '../online.js';
 
 export class Emitter {
@@ -21,6 +22,15 @@ export class Emitter {
 
 const JOIN_TIMEOUT = 6000;
 
+// Entrées de présence d'une clé (format Phoenix : { metas: [{ phx_ref, phx_ref_prev?, ...meta }] }) → [{ ref, prev, meta }] (métadonnées sans les champs Phoenix).
+function metasOf(entry) {
+  const metas = entry && Array.isArray(entry.metas) ? entry.metas : [];
+  return metas.filter((m) => m && typeof m === 'object').map((m) => {
+    const { phx_ref, phx_ref_prev, ...meta } = m;
+    return { ref: typeof phx_ref === 'string' || typeof phx_ref === 'number' ? String(phx_ref) : null, prev: phx_ref_prev != null ? String(phx_ref_prev) : null, meta };
+  });
+}
+
 // ---- Supabase Realtime (protocole Phoenix, version 1.0.0 : messages JSON {topic, event, payload, ref}) ----------------
 export class SupabaseSignaling extends Emitter {
   // observe : écouter l'annuaire d'un canal sans s'y inscrire (liste des salons publics : on regarde, on n'apparaît pas).
@@ -30,6 +40,7 @@ export class SupabaseSignaling extends Emitter {
     this.WS = WebSocketImpl; this.url = url; this.key = key; this.heartbeatMs = heartbeatMs;
     this.topic = `realtime:copytrack-room-${code}`;
     this.peers = new Map();
+    this._pres = new Map();          // clé → [{ ref, prev, meta }] : une entrée par connexion (TECH-011)
     this.ref = 0;
     this.ws = null; this.hb = null; this.joined = false;
   }
@@ -80,27 +91,58 @@ export class SupabaseSignaling extends Emitter {
   _onMessage(m) {
     if (m.topic !== this.topic) return;
     const p = m.payload || {};
-    if (m.event === 'presence_state') {
-      const fresh = new Set(Object.keys(p).filter((k) => k !== this.selfId));
-      for (const id of [...this.peers.keys()]) if (!fresh.has(id)) { this.peers.delete(id); this.emit('leave', id); }
-      for (const id of fresh) this._setMeta(id, p[id]);
-    } else if (m.event === 'presence_diff') {
-      for (const id of Object.keys(p.leaves || {})) if (id !== this.selfId && !(p.joins || {})[id] && this.peers.delete(id)) this.emit('leave', id);
-      for (const id of Object.keys(p.joins || {})) if (id !== this.selfId) this._setMeta(id, p.joins[id]);
-    } else if (m.event === 'broadcast' && p.event === 'signal' && p.payload) {
+    if (m.event === 'presence_state') this._syncState(p);
+    else if (m.event === 'presence_diff') this._syncDiff(p);
+    else if (m.event === 'broadcast' && p.event === 'signal' && p.payload) {
       const { from, to, data } = p.payload;
       if (to === this.selfId && typeof from === 'string' && from !== this.selfId) this.emit('signal', from, data);
     }
   }
 
-  _setMeta(id, entry) {
-    const metas = entry && entry.metas ? entry.metas : [];
-    const meta = metas[metas.length - 1];                 // la plus récente
-    if (!meta) return;
-    const { phx_ref, phx_ref_prev, ...clean } = meta;
-    const had = this.peers.has(id);
-    this.peers.set(id, clean);
-    this.emit(had ? 'meta' : 'join', id, clean);
+  // ---- Présence (TECH-011) : une entrée PAR CONNEXION, comme le client Phoenix (syncState / syncDiff) ---------------------------------------------
+  // Un joueur a une entrée par connexion ouverte (référence phx_ref) : après une coupure, sa nouvelle connexion arrive souvent AVANT que le serveur ait fermé
+  // l'ancienne ; un onglet dupliqué en a deux. Il est présent tant qu'il lui reste au moins une entrée ; ses métadonnées sont celles de l'entrée la plus récente.
+  // Le départ d'une entrée (leaves) ne retire que cette entrée. Repli prudent : une entrée sans phx_ref (serveur qui ne les donnerait pas) vaut pour toute la clé.
+  _syncState(state) {
+    const prev = this._pres;
+    this._pres = new Map();
+    for (const [key, entry] of Object.entries(state && typeof state === 'object' ? state : {})) { const list = metasOf(entry); if (list.length) this._pres.set(key, list); }
+    for (const key of prev.keys()) if (!this._pres.has(key)) this._presence(key, null, null);
+    for (const [key, list] of this._pres) this._presence(key, list, list.filter((e) => !(prev.get(key) || []).some((o) => o.ref === e.ref)), prev.get(key) || []);
+  }
+
+  _syncDiff({ joins, leaves } = {}) {
+    for (const [key, entry] of Object.entries(joins && typeof joins === 'object' ? joins : {})) {
+      const before = this._pres.get(key) || [], added = metasOf(entry);
+      if (!added.length) continue;
+      const refs = new Set(added.map((e) => e.ref));
+      const after = [...before.filter((e) => !refs.has(e.ref)), ...added];
+      this._pres.set(key, after);
+      this._presence(key, after, added, before);
+    }
+    for (const [key, entry] of Object.entries(leaves && typeof leaves === 'object' ? leaves : {})) {
+      const before = this._pres.get(key);
+      if (!before) continue;
+      const gone = metasOf(entry);
+      const after = gone.some((e) => e.ref == null) ? [] : before.filter((e) => !gone.some((g) => g.ref === e.ref));
+      if (after.length === before.length) continue;
+      if (after.length) this._pres.set(key, after); else this._pres.delete(key);
+      this._presence(key, after.length ? after : null, [], before);
+    }
+  }
+
+  // Une clé a changé : 'join' (arrivée), 'meta' (mise à jour, ou nouvelle connexion d'un joueur déjà là : info.conn), 'leave' (plus aucune connexion).
+  _presence(key, list, added = [], before = []) {
+    if (key === this.selfId) return;
+    const had = this.peers.has(key);
+    if (!list) { if (had) { this.peers.delete(key); this.emit('leave', key); } return; }
+    const meta = list[list.length - 1].meta;
+    const prevMeta = this.peers.get(key);
+    this.peers.set(key, meta);
+    if (!had) { this.emit('join', key, meta); return; }
+    // Nouvelle connexion (et non simple mise à jour) : une entrée qui ne remplace aucune entrée connue (phx_ref_prev absent ou inconnu).
+    const conn = added.some((e) => e.ref != null && !(e.prev != null && before.some((b) => b.ref === e.prev)));
+    if (added.length || JSON.stringify(prevMeta) !== JSON.stringify(meta)) this.emit('meta', key, meta, conn ? { conn: true } : undefined);
   }
 
   track(meta) { this.meta = meta; this._send(this.topic, 'presence', { type: 'presence', event: 'track', payload: meta }); }
