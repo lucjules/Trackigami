@@ -56,16 +56,46 @@ export class Championship {
   // ou n'est pas la suivante (un message qui arrive deux fois, ou dans le désordre, ne fausse rien).
   scoreRound(n, times, roster = Object.keys(times)) {
     if (n !== this.results.length || n >= this.rounds.length) return null;
-    const ids = [...new Set(roster)];
+    const r = this._score(n, times, roster);
+    this.results.push(r);
+    return r;
+  }
+
+  _score(n, times, roster) {
+    const ids = [...new Set(roster)].filter((id) => typeof id === 'string').slice(0, 16);
     const t = (id) => { const v = times[id]; return Number.isFinite(v) && v > 0 ? v : null; };
     const finishers = ids.filter((id) => t(id) != null).sort((a, b) => t(a) - t(b) || (a < b ? -1 : 1));
     const dnf = ids.filter((id) => t(id) == null).sort();
     const order = [...finishers, ...dnf];
     const points = {}, cleanTimes = {};
     order.forEach((id, i) => { points[id] = i < finishers.length ? pointsFor(i) : 0; cleanTimes[id] = t(id); });
-    const r = { n, order, times: cleanTimes, points };
-    this.results.push(r);
-    return r;
+    return { n, order, times: cleanTimes, points };
+  }
+
+  // Résultats versionnés (TECH-048) : une manche déjà rangée ne fait que s'ENRICHIR. On réunit les joueurs et les arrivées connues ; un temps déjà connu
+  // n'est jamais remplacé (chaque joueur annonce le sien une seule fois) : un second résultat plus pauvre n'écrase rien, un plus riche complète, et deux
+  // joueurs qui s'échangent leurs résultats finissent avec le même. La manche suivante (n = played) est rangée normalement. Renvoie vrai si elle a changé.
+  mergeRound(n, times, roster = Object.keys(times)) {
+    if (n === this.results.length) return !!this.scoreRound(n, times, roster);
+    const r = this.results[n];
+    if (!r || !times || typeof times !== 'object') return false;
+    const ids = [...new Set([...r.order, ...roster.filter((id) => typeof id === 'string')])].slice(0, 16);
+    const merged = {};
+    let changed = ids.length !== r.order.length;
+    for (const id of ids) {
+      const mine = r.times[id] != null ? r.times[id] : null, v = times[id], theirs = Number.isFinite(v) && v > 0 ? v : null;
+      merged[id] = mine != null ? mine : theirs;
+      if (mine == null && theirs != null) changed = true;
+    }
+    if (changed) this.results[n] = this._score(n, merged, ids);
+    return changed;
+  }
+
+  // Ai-je, pour une manche rangée, une arrivée (ou un joueur) que `other` (un résultat de la même manche) n'a pas ?
+  static richer(mine, other) {
+    if (!mine) return false;
+    if (!other) return true;
+    return mine.order.some((id) => !other.order.includes(id) || (mine.times[id] != null && other.times[id] == null));
   }
 
   // Classement général : [{ id, name, points, wins, places, rounds }] du premier au dernier.

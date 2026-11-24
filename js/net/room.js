@@ -45,6 +45,8 @@ const OUTBOX_MAX = 16;                                             // messages f
 
 export const ROOM_RE = /^[A-HJ-NP-Z2-9]{6}$/;
 const LATE_START_MS = 1500;                                        // rejoindre une course libre déjà lancée : départ dans 1,5 s, à son rythme
+// Avancement d'une manche : (n, en course < résultats) ; sans état : -1.
+const phaseRank = (st) => (st ? st.n * 2 + (st.phase === 'racing' ? 0 : 1) : -1);
 const trackOf = (id, name, sig) => ({ id: String(id).slice(0, 60), name: String(name || '').slice(0, 40), sig: String(sig || '').slice(0, 40) });
 export const MODES = ['race', 'cup', 'free'];
 export function normalizeCode(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
@@ -736,10 +738,23 @@ export class Room extends Emitter {
     });
   }
 
-  _sendCup(to) {
+  // État de la manche, tel qu'on l'envoie (cup, cupsync) : phase, numéro, grille, arrivées, délai avant la suivante, temps depuis le « GO » (négatif : à venir).
+  _cupStateJSON() {
     const st = this.cupState, now = this.now();
-    const state = st ? { phase: st.phase, n: st.n, roster: st.roster, nextIn: st.until ? Math.max(0, st.until - now) : 0, finishes: Object.fromEntries(st.finishes) } : null;
-    this.mesh.sendCtl({ k: 'cup', e: this.epoch, cup: this.cup.toJSON(), state }, to);
+    return st ? { phase: st.phase, n: st.n, roster: st.roster, nextIn: st.until ? Math.max(0, st.until - now) : 0, startIn: st.phase === 'racing' ? Math.round(st.t0 - now) : 0, finishes: Object.fromEntries(st.finishes) } : null;
+  }
+
+  _sendCup(to = null) { this.mesh.sendCtl({ k: 'cup', e: this.epoch, cup: this.cup.toJSON(), state: this._cupStateJSON() }, to); }
+
+  // Un état de manche reçu, validé et borné ; null s'il est invalide.
+  _cleanState(s) {
+    if (!s || typeof s !== 'object' || !['racing', 'results', 'done'].includes(s.phase) || !Array.isArray(s.roster)) return null;
+    const n = s.n | 0;
+    if (n < 0 || n >= (this.cup ? this.cup.total : MAX_ROUNDS)) return null;
+    const finishes = new Map();
+    for (const [id, v] of Object.entries(s.finishes && typeof s.finishes === 'object' ? s.finishes : {}).slice(0, MAX_PLAYERS)) { const st = +v | 0; if (st > 0 && st <= MAX_RUN_STEPS) finishes.set(id, st); }
+    return { phase: s.phase, n, roster: s.roster.filter((x) => typeof x === 'string').slice(0, MAX_PLAYERS), finishes,
+      nextIn: Math.max(0, Math.min(RESULTS_MS * 2, +s.nextIn || 0)), startIn: Math.max(-MAX_ROUND_MS, Math.min(15000, +s.startIn || 0)) };
   }
 
   _onCup(from, d) {
@@ -749,23 +764,65 @@ export class Room extends Emitter {
     const e = d.e | 0;
     this._see(e);
     if (e < this.epoch) return;                                    // un championnat d'avant un lancement plus récent
-    if (e > this.epoch) { this.epoch = e; this.launch = { e, kind: 'cup', track: null }; this.hostLive = null; this.cupState = null; this._pendingFinish = null; }
-    this.cup = Championship.from(d.cup);
-    const s = d.state;
-    // Un arrivant en cours de route : il suit la manche (sans y participer) puis part à la suivante. Un joueur qui revient d'une coupure (E16) garde
-    // sa manche en cours (il est sur la grille, sa course a continué) : on complète seulement les arrivées qu'il a manquées.
-    const mine = this.cupState;
-    if (s && ['racing', 'results'].includes(s.phase) && Array.isArray(s.roster)) {
-      const fin = new Map();
-      for (const [id, v] of Object.entries(s.finishes && typeof s.finishes === 'object' ? s.finishes : {})) { const st = +v | 0; if (typeof id === 'string' && st > 0 && st <= MAX_RUN_STEPS) fin.set(id, st); }
-      if (mine && mine.phase === 'racing' && s.phase === 'racing' && mine.n === (s.n | 0)) {
-        for (const [id, st] of fin) if (!mine.finishes.has(id) && mine.roster.includes(id)) this._noteFinish(id, st);
-      } else {
-        this.cupState = { phase: s.phase, n: s.n | 0, roster: s.roster.filter((x) => typeof x === 'string').slice(0, MAX_PLAYERS), finishes: fin, t0: this.now(), firstAt: fin.size ? this.now() : null, until: s.phase === 'results' ? this.now() + Math.max(0, +s.nextIn || 0) : 0 };
-      }
-    } else this.cupState = null;
+    if (e > this.epoch || !this.cup) {
+      // Un nouveau championnat, ou un arrivant : on prend celui de l'hôte. Une manche déjà commencée se suit sans la courir ; la suivante se court.
+      this.epoch = e; this.launch = { e, kind: 'cup', track: null }; this.hostLive = null; this.cupState = null; this._pendingFinish = null;
+      this.cup = Championship.from(d.cup);
+      const s = this._cleanState(d.state);
+      if (s) this._adoptPhase(s);
+    } else this._syncCup(Championship.from(d.cup), this._cleanState(d.state));
     this.emit('cup');
     this.emit('members');
+  }
+
+  // Même championnat, état reçu d'un autre joueur : les résultats ne font que s'enrichir, les arrivées de la manche en cours se complètent, la phase ne
+  // fait qu'avancer. Renvoie { changed, moved }.
+  _syncCup(remote, s) {
+    const cup = this.cup;
+    if (JSON.stringify(remote.rounds) !== JSON.stringify(cup.rounds)) return { changed: false, moved: false };
+    for (const [id, nm] of remote.names) if (!cup.names.has(id)) cup.setName(id, nm);
+    let changed = false, moved = false;
+    for (const r of remote.results) if (cup.mergeRound(r.n, r.times, r.order)) changed = true;
+    const mine = this.cupState;
+    if (s && mine && s.phase === 'racing' && mine.phase === 'racing' && s.n === mine.n) {
+      for (const [id, st] of s.finishes) if (!mine.finishes.has(id) && mine.roster.includes(id)) { this._noteFinish(id, st); changed = true; }
+    }
+    if (s && phaseRank(s) > phaseRank(mine)) { this._adoptPhase(s); moved = true; }
+    else if (mine && mine.phase === 'racing' && mine.n < cup.played) {          // ma manche est close (résultats connus), sans état plus avancé : je m'arrête
+      this._pendingFinish = null;
+      const n = mine.n;
+      this.cupState = { ...mine, phase: cup.finished ? 'done' : 'results', until: cup.finished ? 0 : this.now() + RESULTS_MS };
+      this._emitRound(n); moved = true;
+    }
+    return { changed, moved };
+  }
+
+  // L'état reçu est plus avancé que le mien. TECH-047 : si la manche que je courais a été close pendant mon absence, ma course est arrêtée et ses résultats
+  // affichés (cupround) ; si une manche suivante est en cours, je la cours si je suis sur sa grille (départ manqué), sinon je la suis.
+  _adoptPhase(s) {
+    const cup = this.cup, now = this.now(), prev = this.cupState;
+    const mine = prev && prev.phase === 'racing' ? prev.n : null;
+    const lost = mine != null && mine < cup.played;
+    if (lost) this._pendingFinish = null;
+    if (s.phase === 'racing') {
+      if (s.roster.includes(this.selfId) && !(prev && prev.phase === 'racing' && prev.n === s.n)) {
+        if (lost) this._emitRound(mine);
+        this._beginRound(s.n, s.roster, {}, Math.max(500, s.startIn));
+        for (const [id, st] of s.finishes) if (!this.cupState.finishes.has(id) && s.roster.includes(id)) this._noteFinish(id, st);
+        return;
+      }
+      this.cupState = { phase: 'racing', n: s.n, roster: s.roster, finishes: s.finishes, t0: now + s.startIn, firstAt: s.finishes.size ? now : null, until: 0 };
+      if (lost) this._emitRound(mine);                                // (le panneau dit alors « manche en cours : tu joueras la suivante »)
+      else this.emit('cupwait', { n: s.n, total: cup.total });
+    } else {
+      this.cupState = { phase: s.phase, n: s.n, roster: s.roster, finishes: s.finishes, t0: now, firstAt: s.finishes.size ? now : null, until: s.phase === 'results' ? now + s.nextIn : 0 };
+      if (lost) this._emitRound(mine);
+    }
+  }
+
+  _emitRound(n) {
+    const st = this.cupState, cup = this.cup;
+    this.emit('cupround', { n, result: cup.results[n], standings: cup.standings(), final: cup.finished, nextIn: st && st.until ? st.until - this.now() : 0 });
   }
 
   _onRound(from, d) {
@@ -830,7 +887,7 @@ export class Room extends Emitter {
     if (!result) return;
     st.phase = cup.finished ? 'done' : 'results';
     st.until = cup.finished ? 0 : this.now() + (nextIn || RESULTS_MS);
-    this.emit('cupround', { n, result, standings: cup.standings(), final: cup.finished, nextIn: st.until ? st.until - this.now() : 0 });
+    this._emitRound(n);
     this.emit('members');
   }
 

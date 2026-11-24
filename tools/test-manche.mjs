@@ -642,7 +642,7 @@ await test('un arrivant garde les meilleurs temps synchronisés (TECH-042) quand
   } finally { env.end(); }
 });
 
-await bugConnu('TECH-047', async () => {
+await test('joueur revenu après la clôture d\'une manche (TECH-047) : écran de résultats, course arrêtée', async () => {
   const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
   env.open(); a.startCup({ rounds: ROUNDS });
   const retry = b.schedule; b.schedule = () => {};                 // Ben reste coupé (ses tentatives sont mises de côté)
@@ -656,8 +656,29 @@ await bugConnu('TECH-047', async () => {
   assert.equal(env.events.b.round.length, 1, 'Ben revenu voit la clôture (écran de résultats, course arrêtée)');
   assert.deepEqual(env.events.b.round[0].result.order, ['a', 'c', 'b']);
   assert.notEqual(b.cupState.phase, 'racing');
+  env.open();
+  assert.equal(env.events.b.round.length, 1, 'un état renvoyé de nouveau ne refait pas l\'écran de résultats');
   } finally { env.end(); }
-}, 'joueur revenu après la clôture d\'une manche : écran de résultats, course arrêtée');
+});
+await test('joueur revenu (TECH-047) alors que la manche suivante a déjà commencé sans lui : résultats de sa manche, il suit la suivante, joue celle d\'après', async () => {
+  const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
+  env.open(); a.startCup({ rounds: [...ROUNDS, { id: 'b-trois-c3', name: 'Trois' }] });
+  const retry = b.schedule; b.schedule = () => {};
+  env.cut('b');
+  a.reportFinish(4000); c.reportFinish(4100);
+  await env.advance(RESUME_MS + 500);                              // manche 0 close sans Ben
+  await env.advance(RESULTS_MS + 500);                             // manche 1 partie sans lui
+  precondition(a.cupState.phase === 'racing' && a.cupState.n === 1 && !a.cupState.roster.includes('b'), 'manche 1 en cours, sans Ben');
+  env.heal('b'); b.schedule = retry; b._retry(0);
+  await env.advance(RETRY_MS[0] + 100); env.open();
+  assert.equal(env.events.b.round.length, 1); assert.equal(env.events.b.round[0].n, 0, 'résultats de SA manche (la 0)');
+  assert.deepEqual([b.cupState.phase, b.cupState.n, b.cupState.roster.includes('b')], ['racing', 1, false], 'il suit la manche 1 sans la courir');
+  assert.equal(env.events.b.start.length, 1, 'aucun départ imposé dans une manche déjà commencée');
+  a.reportFinish(5000); c.reportFinish(5100);                       // manche 1 close
+  await env.advance(RESULTS_MS + 500);
+  assert.equal(env.events.b.start.length, 2, 'il part à la manche 2'); assert.equal(env.events.b.start[1].cup.n, 2);
+  } finally { env.end(); }
+});
 
 await bugConnu('TECH-048', async () => {
   const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];

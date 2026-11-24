@@ -399,6 +399,7 @@ export default {
   'Quitter le championnat': 'Leave the championship',
   'Manche {n:w}/{m:w} : tu rejoins à la prochaine manche.': 'Round {n}/{m}: you join at the next round.',
   'Manche suivante{a} dans {n:w} s': 'Next round{a} in {n} s',
+  'Manche {n:w}/{m:w}{a} en cours : tu joueras la suivante.': 'Round {n}/{m}{a} in progress: you will play the next one.',
   'L\'hôte a arrêté le championnat.': 'The host stopped the championship.',
 
   // ---------------------------------------------------------------- serveur : erreurs

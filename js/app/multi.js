@@ -545,6 +545,8 @@ export const multiMethods = {
       const tick = () => {
         const st = room.cupState;
         if (!document.body.contains(el) || !st) { clearInterval(this._cupPanel && this._cupPanel.timer); return; }
+        // (TECH-047) revenu après la clôture alors que la manche suivante est déjà partie sans lui : il la suit et jouera celle d'après
+        if (st.phase === 'racing') { const cur = cup.rounds[st.n]; next.textContent = `Manche ${st.n + 1}/${cup.total}${cur && cur.name ? ' · ' + cur.name : ''} en cours : tu joueras la suivante.`; return; }
         const left = Math.max(0, Math.ceil((st.until - room.now()) / 1000));
         const nx = cup.rounds[cup.played];
         next.textContent = `Manche suivante${nx && nx.name ? ' : ' + nx.name : ''} dans ${left} s`;
