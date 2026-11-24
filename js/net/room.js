@@ -15,6 +15,8 @@
 //     temps de tous) · cupstop (l'hôte arrête). Une manche se clôt quand tous ont fini ou quitté, FINISH_GRACE_MS après la première arrivée, ou au plafond.
 // Reconnexion (E16, NET_VER 4 ; voir resume.js) : hello (à l'ouverture d'une liaison) · bye (départ volontaire) · hostover (un nouvel hôte se marque).
 //     Une coupure n'est pas un départ : la place est gardée RESUME_MS (« away »), le joueur coupé retente de rejoindre la salle avec le même identifiant.
+//     Les liaisons WebRTC ne dépendent pas de la signalisation (TECH-046) : quand seule la signalisation tombe, on continue de jouer ; une place n'est gardée
+//     que quand la LIAISON tombe aussi (canal fermé, ou silence malgré les pings : _checkLinks). Arrivées non reçues : renvoyées à la réouverture.
 import { Emitter, SupabaseSignaling, LocalSignaling } from './signaling.js';
 import { PeerMesh } from './transport.js';
 import { packSnapshot, unpackSnapshot } from './snapshot.js';
@@ -32,6 +34,10 @@ const MAX_PACKETS_PER_SEC = 80;                                    // au-delà, 
 export const FINISH_GRACE_MS = 30000;                              // championnat : temps laissé aux autres après la première arrivée
 export const MAX_ROUND_MS = 600000;                                // championnat : une manche ne dure jamais plus de 10 minutes
 export const RESULTS_MS = 12000;                                   // championnat : affichage des résultats avant la manche suivante
+// Une liaison « ouverte » dont on n'entend plus rien (ni pong, ni paquet) depuis LINK_SILENCE_MS, après 3 pings sans réponse, est en panne (TECH-046). Un trou
+// plus court (réseau qui saute quelques secondes) est rattrapé par la liaison elle-même : les messages fiables sont retransmis.
+export const LINK_SILENCE_MS = 10000;
+const OUTBOX_MAX = 16;                                             // messages fiables gardés par joueur, à renvoyer quand sa liaison se rouvre
 
 export const ROOM_RE = /^[A-HJ-NP-Z2-9]{6}$/;
 export const MODES = ['race', 'cup', 'free'];
@@ -129,31 +135,33 @@ export class Room extends Emitter {
       if (host[1].v !== PHYS_VER || host[1].net !== NET_VER) throw new RoomError('Version du jeu différente de celle de l\'hôte : recharge la page.', 'version');
     }
     for (const [id, meta] of present) this._onPeer(id, meta);
-    this._pingTimer = setInterval(() => { this._sweepLinks(); this._pingAll(); this._expireAway(); }, 2000);
+    this._pingTimer = setInterval(() => { this._sweepLinks(); this._checkLinks(); this._pingAll(); this._expireAway(); }, 2000);
     this._cupTimer = setInterval(() => this._cupTick(), 400);
     this.emit('members');
   }
 
   _wire(sig) {
     sig.on('join', (id, meta) => { if (sig === this.signaling) this._onPeer(id, meta); });
-    sig.on('meta', (id, meta) => { if (sig === this.signaling) this._onPeer(id, meta); });
+    sig.on('meta', (id, meta, info) => { if (sig === this.signaling) this._onPeer(id, meta, info); });
     sig.on('leave', (id) => { if (sig === this.signaling) this._onLeave(id); });
     sig.on('closed', (why) => { if (sig === this.signaling) this._lost(why); });
   }
 
   // ---- Reconnexion (E16) ---------------------------------------------------------------------------------------------
-  // La signalisation est perdue (réseau coupé) : la salle reste ouverte chez nous (la course continue) et on retente de la rejoindre, avec le même
-  // identifiant, pendant RESUME_MS ; au-delà, on sort pour de bon.
+  // La signalisation est perdue (réseau coupé, canal fermé par le serveur, battements sans réponse) : la salle reste ouverte chez nous (la course continue)
+  // et on retente de la rejoindre, avec le même identifiant, à délais croissants bornés (RETRY_MS, puis le dernier). TECH-046 : les liaisons WebRTC n'en
+  // dépendent pas ; tant qu'il en reste une ouverte, on continue de jouer et de réessayer ; sans aucune, on abandonne au-delà de RESUME_MS.
   _lost(why) {
     if (this.closed || this.reconnecting) return;
     this.reconnecting = true;
     this._lostAt = this.now();
     this._lostWhy = why;
-    for (const id of [...this.members.keys()]) this._markAway(id);
     this.emit('reconnecting');
     this.emit('members');
     this._retry(0);
   }
+
+  _openCount() { let n = 0; for (const m of this.members.values()) if (m.link === 'open') n++; return n; }
 
   _retry(i) {
     this.schedule(async () => {
@@ -163,32 +171,91 @@ export class Room extends Emitter {
         this.signaling = sig;
         this._wire(sig);
         if (this.mesh.setSignaling) this.mesh.setSignaling(sig);       // avant join : les offres WebRTC des retrouvailles passent par la nouvelle signalisation
+        // Une liaison qui n'était pas ouverte a perdu sa négociation avec l'ancienne signalisation : elle sera refaite à neuf (après la jonction, par _onPeer).
+        for (const m of this.members.values()) if (m.link !== 'open' && m.link !== 'away' && m.link !== 'incompatible') { this.mesh.removePeer(m.id); m.link = 'connecting'; }
         await sig.join(this.meta);
       } catch {
         try { sig.leave(); } catch { /* déjà fermée */ }          // tentative ratée : fermée (TECH-044 ; la signalisation le fait aussi d'elle-même)
         if (this.closed) return;
-        if (i + 1 < RETRY_MS.length && this.now() - this._lostAt + RETRY_MS[i + 1] < RESUME_MS) { this._retry(i + 1); return; }
+        const next = RETRY_MS[Math.min(i + 1, RETRY_MS.length - 1)];
+        if (this._openCount() || this.now() - this._lostAt + next < RESUME_MS) { this._retry(i + 1); return; }
         this.emit('error', new RoomError(this._lostWhy || 'Connexion perdue.', 'closed'));
         this._dispose(); this.emit('closed');
         return;
       }
-      if (this.closed) { try { sig.leave(); } catch { /* fermé */ } return; }
+      if (this.closed || this.signaling !== sig) { try { sig.leave(); } catch { /* fermé */ } return; }
       // Un autre a pris la place d'hôte pendant l'absence (hostover) : on ne la reprend pas avec un état peut-être périmé.
       if (this.meta.host && [...sig.peers.values()].some((m) => m && m.host)) { this.meta.host = false; sig.track(this.meta); }
       this.reconnecting = false;
       for (const [id, meta] of sig.peers.entries()) this._onPeer(id, meta);
+      // Ceux qu'on ne retrouve pas dans l'annuaire : on continue avec ceux dont la liaison est ouverte ; les autres sont absents depuis notre coupure.
+      for (const m of [...this.members.values()]) {
+        if (sig.peers.has(m.id)) continue;
+        m.listed = false;
+        if (m.link === 'open' || m.link === 'away' || m.link === 'incompatible') continue;
+        if (m.everOpen) this._markAway(m.id, this._lostAt); else this._drop(m.id);
+      }
       this.emit('reconnected');
       this.emit('members');
-    }, RETRY_MS[i]);
+    }, RETRY_MS[Math.min(i, RETRY_MS.length - 1)]);
   }
 
-  // Un joueur disparaît de l'annuaire sans dire au revoir (coupure) : sa place est gardée RESUME_MS.
-  _markAway(id) {
+  // Un joueur disparaît (annuaire ET liaison) sans dire au revoir : sa place est gardée RESUME_MS.
+  _markAway(id, since = this.now()) {
     const m = this.members.get(id);
     if (!m) return;
-    if (m.link !== 'away') m.awaySince = this.now();
+    if (m.link !== 'away') m.awaySince = since;
     m.link = 'away';
     this.mesh.removePeer(id);
+  }
+
+  // Liaison refaite à neuf (connexion neuve et nouvelle négociation).
+  _relink(id) {
+    if (this.mesh.restartPeer) this.mesh.restartPeer(id);
+    else { this.mesh.removePeer(id); this.mesh.addPeer(id); }
+  }
+
+  // Une liaison qui marchait est tombée (canal fermé, ou silence : _checkLinks). Le joueur est encore dans l'annuaire : on refait la liaison (l'autre côté
+  // voit la sienne tomber et fait de même) ; sinon (ou si c'est nous qui sommes coupés), sa place est gardée RESUME_MS. Les messages fiables qu'il n'a
+  // peut-être pas reçus (envoyés depuis la dernière fois qu'on l'a entendu) lui seront renvoyés à la réouverture.
+  _linkDown(id) {
+    const m = this.members.get(id);
+    if (!m || m.link === 'away' || m.link === 'incompatible') return;
+    for (const e of m.sentLog || []) if (e.at >= (m.heardAt || 0)) this._queue(m, e.msg);
+    m.sentLog = [];
+    if (m.listed !== false && !this.reconnecting) { m.link = 'connecting'; this._relink(id); }
+    else { this._markAway(id); this.emit('away', id); }
+    this.emit('members');
+  }
+
+  // Vraie panne d'une liaison « ouverte » : plus rien reçu depuis LINK_SILENCE_MS malgré 3 pings (un ping reçoit toujours sa réponse, même d'un onglet caché).
+  _checkLinks() {
+    const now = this.now();
+    for (const m of [...this.members.values()]) if (m.link === 'open' && (m.unanswered || 0) >= 3 && now - (m.heardAt || 0) >= LINK_SILENCE_MS) this._linkDown(m.id);
+  }
+
+  _heard(id) { const m = this.members.get(id); if (m) { m.heardAt = this.now(); m.unanswered = 0; } }
+
+  // ---- Messages fiables renvoyés après une coupure (TECH-046) ----------------------------------------------------------
+  _queue(m, msg) { m.outbox = (m.outbox || []).concat([msg]).slice(-OUTBOX_MAX); }
+
+  // Message fiable à tous ; ceux dont la liaison n'est pas ouverte le recevront à sa réouverture.
+  _sendReliable(msg) {
+    const r = this.mesh.sendCtl(msg);
+    const sent = new Set(Array.isArray(r) ? r : [...this.members.values()].filter((m) => m.link === 'open').map((m) => m.id));
+    const at = this.now();
+    for (const m of this.members.values()) {
+      if (m.link === 'incompatible') continue;
+      if (sent.has(m.id)) m.sentLog = (m.sentLog || []).concat([{ at, msg }]).slice(-OUTBOX_MAX);
+      else this._queue(m, msg);
+    }
+  }
+
+  _flushOutbox(id) {
+    const m = this.members.get(id);
+    if (!m || !m.outbox || !m.outbox.length) return;
+    const q = m.outbox, at = this.now(); m.outbox = [];
+    for (const msg of q) { this.mesh.sendCtl(msg, id); m.sentLog = (m.sentLog || []).concat([{ at, msg }]).slice(-OUTBOX_MAX); }
   }
 
   // TECH-045 : la signalisation n'ouvre une liaison que pour un membre présent dans l'annuaire, d'une version compatible, dont la place n'est pas « absente ».
@@ -258,22 +325,30 @@ export class Room extends Emitter {
   get isHost() { return this.hostId === this.selfId; }
   get list() { return [{ id: this.selfId, ...this.meta, self: true, link: 'self', rtt: 0 }, ...this.members.values()]; }
 
-  _onPeer(id, meta) {
+  _onPeer(id, meta, info = null) {
     if (id === this.selfId || !meta) return;
     const prev = this.members.get(id);
     const back = prev && prev.link === 'away';                     // retour d'un joueur coupé : sa liaison est à refaire
     if (back) this.mesh.removePeer(id);
-    const m = { id, name: String(meta.name || '?').slice(0, 20), host: !!meta.host, ready: !!meta.ready, car: cleanCarMeta(meta.car), want: meta.want === 'rematch' ? 'rematch' : null, mode: MODES.includes(meta.mode) ? meta.mode : null, racing: !!meta.racing, v: meta.v, net: meta.net, t: meta.t || 0, link: prev && !back ? prev.link : 'connecting', rtt: prev ? prev.rtt : 0, token: prev ? prev.token : null, everOpen: !!(prev && prev.everOpen) };
+    const m = { id, name: String(meta.name || '?').slice(0, 20), host: !!meta.host, ready: !!meta.ready, car: cleanCarMeta(meta.car), want: meta.want === 'rematch' ? 'rematch' : null, mode: MODES.includes(meta.mode) ? meta.mode : null, racing: !!meta.racing, v: meta.v, net: meta.net, t: meta.t || 0, link: prev && !back ? prev.link : 'connecting', rtt: prev ? prev.rtt : 0, token: prev ? prev.token : null, everOpen: !!(prev && prev.everOpen),
+      listed: true, heardAt: prev ? prev.heardAt : 0, unanswered: prev ? prev.unanswered : 0, outbox: prev ? prev.outbox : [], sentLog: prev ? prev.sentLog : [] };
     this.members.set(id, m);
-    if (m.v === PHYS_VER && m.net === NET_VER && !this.closed) this.mesh.addPeer(id);     // un joueur d'une autre version ne peut pas courir avec nous
-    else m.link = 'incompatible';
+    if (m.v === PHYS_VER && m.net === NET_VER && !this.closed) {        // un joueur d'une autre version ne peut pas courir avec nous
+      if (m.link === 'incompatible') m.link = 'connecting';
+      // Il a rouvert sa signalisation (nouvelle connexion) et notre liaison n'est pas ouverte : l'initiateur la refait (l'autre attend son offre).
+      if (info && info.conn && !back && m.link !== 'open' && this.selfId < id) this._relink(id);
+      else this.mesh.addPeer(id);
+    } else m.link = 'incompatible';
     this.emit('members');
   }
 
-  // Disparu de l'annuaire : coupure ou départ ; sans « bye », on garde sa place RESUME_MS.
+  // Disparu de l'annuaire : coupure ou départ ; sans « bye », on garde sa place RESUME_MS. TECH-046 : si sa liaison est ouverte, c'est sa signalisation qui est
+  // tombée, pas lui : on continue de jouer avec lui (sa place n'est gardée qu'une fois la liaison tombée aussi, voir _linkDown).
   _onLeave(id) {
     const m = this.members.get(id);
     if (!m) return;
+    m.listed = false;
+    if (m.link === 'open') { this.emit('members'); return; }
     if (!m.everOpen) { this._drop(id); return; }                   // jamais relié (salle prise, introuvable, autre version…) : rien à garder
     this._markAway(id);
     this.emit('members');
@@ -282,8 +357,12 @@ export class Room extends Emitter {
 
   _onLink(id, status) {
     const m = this.members.get(id);
-    if (m && !(m.link === 'away' && status !== 'open')) m.link = status;      // une liaison fermée d'un joueur coupé : il reste « en reconnexion »
-    if (m && status === 'open') m.everOpen = true;
+    // Une liaison qui marchait se ferme (l'autre a fermé la sienne, ou elle est morte) : refaite, ou place gardée (TECH-046).
+    if (m && status === 'closed' && m.link === 'open') { this._linkDown(id); return; }
+    // Échec d'un joueur qui n'est plus dans l'annuaire : sa place est gardée (il revient : la liaison est refaite).
+    if (m && status === 'failed' && m.listed === false && m.everOpen && m.link !== 'away') { this._markAway(id); this.emit('away', id); this.emit('members'); return; }
+    if (m && !(m.link === 'away' && status !== 'open') && m.link !== 'incompatible') m.link = status;      // une liaison fermée d'un joueur coupé : il reste « en reconnexion »
+    if (m && status === 'open') { m.everOpen = true; m.heardAt = this.now(); m.unanswered = 0; m.sentLog = []; }
     // L'hôte informe un nouvel arrivant du circuit choisi.
     if (status === 'open') {
       this.mesh.sendCtl({ k: 'hello', token: this.token }, id);
@@ -292,6 +371,7 @@ export class Room extends Emitter {
       if (this.isHost && this.rules) this.mesh.sendCtl({ k: 'rules', r: this.rules }, id);        // les règles d'abord : elles s'appliquent au circuit qui suit
       if (this.isHost && this.cup && !this.cup.finished) this._sendCup(id);       // en championnat, un arrivant reçoit le championnat, pas le circuit seul
       else if (this.isHost && this.track) this._sendTrack(id);
+      this._flushOutbox(id);                                                    // mes messages fiables qu'il n'a pas reçus (arrivées pendant une coupure)
       const mine = this.results.get(this.selfId);
       if (mine) this.mesh.sendCtl({ k: 'finish', steps: mine.best, sync: true }, id);   // le nouvel arrivant voit mon meilleur temps
     }
@@ -310,6 +390,7 @@ export class Room extends Emitter {
 
   // ---- Messages fiables ----------------------------------------------------------------------------------------------
   _onMessage(from, kind, data) {
+    this._heard(from);
     if (kind === 'state') return this._onState(from, data);
     const m = this.members.get(from);
     switch (data.k) {
@@ -361,7 +442,7 @@ export class Room extends Emitter {
   _pingAll() {
     this._pings = this._pings || new Map();
     const id = Math.random().toString(36).slice(2, 8);
-    for (const m of this.members.values()) if (m.link === 'open') this._pings.set(m.id + ':' + id, this.now());
+    for (const m of this.members.values()) if (m.link === 'open') { this._pings.set(m.id + ':' + id, this.now()); m.unanswered = (m.unanswered || 0) + 1; }
     this.mesh.sendCtl({ k: 'ping', id });
     if (this._pings.size > 64) this._pings.clear();
   }
@@ -431,6 +512,7 @@ export class Room extends Emitter {
     this.state = 'racing';
     this.started = true;
     this.results.clear();                // un nouveau circuit : on repart de zéro (les temps d'avant ne se comparent pas)
+    for (const m of this.members.values()) { m.outbox = []; m.sentLog = []; }         // (les arrivées d'avant ne sont plus à renvoyer)
     this.meta.racing = true; this.meta.ready = false; this.meta.want = null; this.signaling.track(this.meta);
     this.emit('start', { trackId, track: this.track, startLocal: this.now() + inMs });
   }
@@ -461,7 +543,7 @@ export class Room extends Emitter {
     const r = this.results.get(this.selfId) || { best: steps, last: steps, n: 0 };
     r.best = Math.min(r.best, steps); r.last = steps; r.n++;
     this.results.set(this.selfId, r);
-    this.mesh.sendCtl({ k: 'finish', steps });
+    this._sendReliable({ k: 'finish', steps });                       // renvoyée après une coupure à qui ne l'a pas reçue (TECH-046)
     this.emit('results');
     return r.best === steps;      // vrai : nouveau meilleur temps personnel dans cette salle
   }
@@ -597,7 +679,8 @@ export class Room extends Emitter {
   _cupTick() {
     if (!this.closed) this._expireAway();
     const st = this.cupState, cup = this.cup;
-    if (!cup || !st || this.closed || !this.isHost || this.reconnecting) return;
+    // (signalisation coupée : l'hôte continue de conduire la manche tant qu'il a des liaisons ouvertes ; les joueurs dont la liaison est tombée sont absents)
+    if (!cup || !st || this.closed || !this.isHost || (this.reconnecting && !this._openCount())) return;
     const now = this.now();
     if (st.phase === 'racing') {
       const present = (id) => id === this.selfId || this.members.has(id);

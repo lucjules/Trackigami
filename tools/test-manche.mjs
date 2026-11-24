@@ -229,11 +229,11 @@ test('collisions unifiées (E16) : avec 160 ms de retard d\'affichage, les deux 
 // ---- Salon : réseau simulé en mémoire --------------------------------------------------------------------------------
 function lan(ids, { code = 'ABC234' } = {}) {
   const clock = { t: 1000 };
-  const reg = new Map(), rooms = [], cut = new Set(), timers = [];
+  const reg = new Map(), rooms = [], cut = new Set(), sigCut = new Set(), timers = [];
   const sigFor = (id) => {
     const sig = new Emitter(); sig.peers = new Map(); sig.id = id;
     sig.join = async (meta) => {
-      if (cut.has(id)) throw new Error('réseau coupé');
+      if (cut.has(id) || sigCut.has(id)) throw new Error('réseau coupé');
       sig.meta = meta; for (const [oid, o] of reg) sig.peers.set(oid, o.meta); reg.set(id, sig); for (const [oid, o] of reg) if (oid !== id) { o.peers.set(id, meta); o.emit('join', id, meta); }
     };
     sig.track = (meta) => { sig.meta = meta; for (const [oid, o] of reg) if (oid !== id) { o.peers.set(id, meta); o.emit('meta', id, meta); } };
@@ -254,15 +254,32 @@ function lan(ids, { code = 'ABC234' } = {}) {
   const opts = (name, selfId) => ({ name, selfId, code, makeSignaling: ({ selfId: s }) => sigFor(s), makeMesh, now: () => clock.t, schedule: (fn, ms) => timers.push({ fn, at: clock.t + ms }) });
   const open = () => { for (const r of rooms) for (const o of rooms) if (r !== o && !r.closed && !o.closed && !cut.has(r.selfId) && !cut.has(o.selfId) && r.members.has(o.selfId) && r.members.get(o.selfId).link !== 'away') r._onLink(o.selfId, 'open'); };
   const env = { clock, rooms, open, events: {}, timers };
-  // Coupure réseau d'un joueur (sans « bye ») : il disparaît de l'annuaire des autres, sa signalisation se ferme chez lui.
+  // Coupure réseau d'un joueur (sans « bye ») : il disparaît de l'annuaire des autres, sa signalisation se ferme chez lui, et ses liaisons de jeu tombent
+  // aussi (plus rien ne passe : sendCtl ci-dessus). Depuis TECH-046, c'est la chute de la LIAISON (et non celle de l'annuaire) qui met une place en attente ;
+  // le vrai transport la signale par la fermeture des canaux ou par le silence (Room._checkLinks) ; ce faux le dit tout de suite.
   env.cut = (id) => {
     cut.add(id);
     const sig = reg.get(id);
     reg.delete(id);
     for (const o of reg.values()) { o.peers.delete(id); o.emit('leave', id); }
     if (sig) sig.emit('closed', 'réseau coupé');
+    const me = rooms.find((r) => r.selfId === id);
+    for (const r of rooms) {
+      if (r.closed || r === me) continue;
+      if (r.members.has(id) && r.members.get(id).link === 'open') r._onLink(id, 'closed');
+      if (me && !me.closed && me.members.has(r.selfId) && me.members.get(r.selfId).link === 'open') me._onLink(r.selfId, 'closed');
+    }
   };
   env.heal = (id) => { cut.delete(id); };
+  // Coupure de la SIGNALISATION seule (TECH-046) : il sort de l'annuaire et sa signalisation se ferme, mais ses liaisons de jeu continuent (sendCtl passe).
+  env.cutSignaling = (id) => {
+    sigCut.add(id);
+    const sig = reg.get(id);
+    reg.delete(id);
+    for (const o of reg.values()) { o.peers.delete(id); o.emit('leave', id); }
+    if (sig) sig.emit('closed', 'signalisation coupée');
+  };
+  env.healSignaling = (id) => { sigCut.delete(id); };
   // Fait avancer l'horloge en exécutant les tentatives de reconnexion dues.
   env.advance = async (ms, step = 100) => {
     const end = clock.t + ms;
@@ -411,6 +428,20 @@ await test('l\'hôte coupé trop longtemps : le suivant prend la suite et se mar
   for (const r of [a, b, c]) assert.equal(r.cup.finished, true, 'fin de championnat correcte chez tous : ' + r.selfId);
   assert.deepEqual(c.cup.standings().map((r) => r.id), ['b', 'c', 'a']);
   assert.deepEqual(a.cup.standings(), c.cup.standings(), 'le même classement chez l\'ancien hôte');
+  env.end();
+});
+await test('signalisation de l\'hôte coupée en pleine manche (TECH-046) : ses liaisons marchent, personne n\'est « absent », il clôt la manche', async () => {
+  const env = lan(); const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
+  env.open(); a.startCup({ rounds: ROUNDS });
+  env.cutSignaling('a');
+  assert.equal(a.reconnecting, true, 'Ana se sait sans signalisation');
+  assert.equal(b.members.get('a').link, 'open', 'chez Ben, Ana reste reliée'); assert.equal(a.members.get('b').link, 'open', 'chez Ana, Ben aussi');
+  assert.deepEqual(a.cupRoster().sort(), ['a', 'b', 'c'], 'tout le monde reste sur la grille');
+  b.reportFinish(4000); c.reportFinish(4100); a.reportFinish(4200);
+  assert.equal(env.events.b.round.length, 1, 'l\'hôte clôt la manche par ses liaisons, malgré sa signalisation coupée');
+  assert.deepEqual(env.events.c.round[0].result.order, ['b', 'c', 'a']);
+  env.healSignaling('a'); await env.advance(RETRY_MS[0] + 100);
+  assert.equal(a.reconnecting, false, 'signalisation retrouvée'); assert.equal(b.members.get('a').link, 'open', 'liaison jamais refaite : elle n\'était pas tombée');
   env.end();
 });
 test('mémoire de la place (onglet rechargé) : identifiant et jeton gardés 20 s pour ce salon seulement', () => {

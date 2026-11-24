@@ -9,6 +9,7 @@ import { RemoteCar, darkness, FADE_NEAR, FADE_FAR, MAX_DARKEN } from '../js/remo
 import { SupabaseSignaling, Emitter, tokenExpiry } from '../js/net/signaling.js';
 import { PeerMesh } from '../js/net/transport.js';
 import { Room, cleanCarMeta, newRoomCode, normalizeCode, ROOM_RE } from '../js/net/room.js';
+import { RESUME_MS, RETRY_MS } from '../js/net/resume.js';
 import { RaceLogic } from '../js/raceLogic.js';
 import { Track } from '../js/track.js';
 import { PHYS_VER, NET_VER } from '../js/version.js';
@@ -504,8 +505,7 @@ await test('présence (TECH-011) : join, meta, leave pour une même clé (deux c
   } finally { sig.leave(); }
 });
 
-// (bout en bout : demande aussi que la coupure de la signalisation ne coupe pas la liaison, TECH-046)
-await bugConnu('TECH-011', () => scenario(async (w) => {
+await test('reconnexion avant que le serveur ait fermé l\'ancienne connexion (TECH-011, TECH-046) : aucun faux départ, liaison gardée', () => scenario(async (w) => {
   const ana = await w.host('ana'), bea = await w.join('bea');
   await w.clock.advance(2000);
   precondition(w.linked(ana, bea), 'liaison ouverte');
@@ -517,7 +517,7 @@ await bugConnu('TECH-011', () => scenario(async (w) => {
   assert.ok(ana.signaling.peers.has('bea'), 'Ana voit toujours Bea');
   await w.clock.advance(25000);
   assert.ok(ana.members.has('bea') && ana.members.get('bea').link === 'open', 'Bea n\'est ni marquée absente ni retirée : ' + JSON.stringify(ana.members.get('bea') && ana.members.get('bea').link));
-}), 'reconnexion avant que le serveur ait fermé l\'ancienne connexion : aucun faux départ, liaison gardée');
+}));
 
 console.log('Banc simulé : fermeture, erreur, expiration, battements (TECH-012)');
 const lossCase = (label, hurt) => test(label + ' (TECH-012) : _lost se déclenche et la reconnexion démarre', () => scenario(async (w) => {
@@ -637,7 +637,7 @@ await test('signalisation (TECH-045) : un non-membre ne crée aucun lien ; un ca
 
 console.log('Banc simulé : liens de jeu découplés de la signalisation (TECH-046)');
 const racing = (w, r) => { let tick = 0; return w.clock.setInterval(() => { if (!r.closed) r.sendSnapshot(snap(tick += 6, tick / 10)); }, 50); };
-await bugConnu('TECH-046', () => scenario(async (w) => {
+await test('coupure de la signalisation (TECH-046, 5 s) : liens WebRTC ouverts, voitures non figées, arrivée reçue', () => scenario(async (w) => {
   const ana = await w.host('ana'), bea = await w.join('bea');
   await w.clock.advance(2000);
   precondition(w.linked(ana, bea), 'liaison ouverte');
@@ -658,8 +658,8 @@ await bugConnu('TECH-046', () => scenario(async (w) => {
   assert.equal(ana.results.get('bea') && ana.results.get('bea').n, 1, 'l\'arrivée envoyée pendant la coupure est reçue');
   await w.clock.advance(10000);
   assert.equal(bea.reconnecting, false, 'signalisation retrouvée');
-}), 'coupure de la signalisation (5 s) : liens WebRTC ouverts, voitures non figées, arrivée reçue');
-await bugConnu('TECH-046', () => scenario(async (w) => {
+}));
+await test('vraie coupure (TECH-046 ; signalisation et liens, 12 s) : liaison refaite, arrivée renvoyée après reconnexion', () => scenario(async (w) => {
   const ana = await w.host('ana'), bea = await w.join('bea');
   await w.clock.advance(2000);
   precondition(w.linked(ana, bea), 'liaison ouverte');
@@ -670,8 +670,9 @@ await bugConnu('TECH-046', () => scenario(async (w) => {
   await w.clock.advance(40000);
   assert.ok(w.linked(ana, bea), 'liaison refaite après la coupure');
   assert.equal(ana.results.get('bea') && ana.results.get('bea').n, 1, 'l\'arrivée faite pendant la coupure est renvoyée et comptée');
-}), 'vraie coupure (signalisation et liens) : liaison refaite, arrivée renvoyée après reconnexion');
-await bugConnu('TECH-046', () => scenario(async (w) => {
+  assert.equal(ana.results.get('bea').best, 4321);
+}));
+await test('panne du lien seul (TECH-046) : détectée, refaite quand le chemin revient', () => scenario(async (w) => {
   const ana = await w.host('ana'), bea = await w.join('bea');
   await w.clock.advance(2000);
   precondition(w.linked(ana, bea), 'liaison ouverte');
@@ -680,7 +681,28 @@ await bugConnu('TECH-046', () => scenario(async (w) => {
   w.rtc.heal('bea');
   await w.clock.advance(20000);
   assert.ok(w.linked(ana, bea), 'la liaison en panne est refaite et rouverte des deux côtés : ' + ana.members.get('bea').link + ' / ' + bea.members.get('ana').link);
-}), 'panne du lien seul : détectée, refaite quand le chemin revient');
+}));
+await test('signalisation absente 40 s, liaisons saines (TECH-046) : la salle reste ouverte, la reconnexion continue (délais bornés) puis aboutit', () => scenario(async (w) => {
+  const ana = await w.host('ana'), bea = await w.join('bea');
+  await w.clock.advance(2000);
+  precondition(w.linked(ana, bea), 'liaison ouverte');
+  w.rt.cut('bea', 40000);
+  await w.clock.advance(39000);
+  assert.equal(bea.closed, false, 'au-delà des 20 s, la salle reste ouverte : la liaison avec Ana marche');
+  assert.equal(bea.reconnecting, true);
+  assert.ok(w.linked(ana, bea), 'liaison ouverte pendant toute la coupure');
+  await w.clock.advance(1000 + RETRY_MS[RETRY_MS.length - 1] + 1000);       // fin de la coupure + une attente bornée (la plus longue) + la jonction
+  assert.equal(bea.reconnecting, false, 'reconnectée au plus une attente maximale après la fin de la coupure'); assert.ok(pres(w).has('bea'));
+}));
+await test('sans aucune liaison ouverte, la reconnexion abandonne après les 20 s de place gardée (inchangé)', () => scenario(async (w) => {
+  w.rt.ghostMs = 5000;                                   // (le serveur retire la connexion morte au bout de 5 s ; Ana ne peut rendre la place qu'après l'avoir vue partir)
+  const ana = await w.host('ana'), bea = await w.join('bea');
+  await w.clock.advance(2000);
+  w.rt.cut('bea', 120000); w.rtc.cut('bea');
+  await w.clock.advance(RESUME_MS + 15000);
+  assert.equal(bea.closed, true, 'Bea, isolée, a fini par sortir');
+  assert.equal(ana.members.has('bea'), false, 'sa place est rendue chez Ana');
+}));
 
 console.log('Banc simulé : serveurs ICE (TECH-050)');
 await bugConnu('TECH-050', () => scenario(async (w) => {
