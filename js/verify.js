@@ -25,11 +25,11 @@ const UNKNOWN_MSG = 'Ce serveur ne connaît pas toutes les pièces de ce circuit
 //   <clé>~v1.…           variante de record (variants.js) : le circuit de la clé officielle, transformé par ses règles
 //   b-…~v1.sea-N         saison hebdomadaire N (seasons.js) : acceptée seulement pendant sa semaine, sur ses trois circuits
 //   b-…~v1.duel-N / tour-N  duel ou tournoi (E17) : le circuit officiel ; la fonction serveur vérifie en base la fenêtre et les participants
-export function trackForKey(key, code = '') {
+export function trackForKey(key, code = '', now = Date.now()) {
   key = String(key || '');
   const { base, variant } = splitKey(key);
   if (key.includes('~')) {                       // (une clé terminée par « ~ » est une variante vide : refusée par parseVariant)
-    const off = trackForKey(base, code);
+    const off = trackForKey(base, code, now);
     const v = parseVariant(variant);
     if (v.duel != null || v.tour != null) {      // duel ou tournoi (E17) : seul, sur un circuit de la carrière ; la fenêtre et les participants sont en base (submit-score)
       if (Object.keys(v).length !== 1 || off.kind !== 'builtin') throw new Error('Compétition possible seulement sur un circuit de la carrière.');
@@ -39,7 +39,7 @@ export function trackForKey(key, code = '') {
     if (v.sea != null) {                         // saison hebdomadaire (E15) : seule, sur un circuit de la saison, pendant sa semaine
       const n = +v.sea;
       if (Object.keys(v).length !== 1 || off.kind !== 'builtin' || !seasonTracks(n).some((d) => base.startsWith(`b-${d.id}-`))) throw new Error('Ce circuit ne fait pas partie de cette saison.');
-      const closed = seasonOpen(n);
+      const closed = seasonOpen(n, now);
       if (closed) throw new Error(closed);
       return { ...off, name: `${off.name} · saison ${n}`, variant: v, season: n };
     }
@@ -55,9 +55,13 @@ export function trackForKey(key, code = '') {
   if (key.startsWith('daily-')) {
     const day = key.slice(6);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('Défi du jour introuvable.');
-    // Seuls hier, aujourd'hui et demain sont acceptés (décalages d'horloge) : pas de génération à la demande pour des dates arbitraires.
+    // Une date INEXISTANTE (2026-02-30, 2026-04-31) est reportée par Date.parse au jour suivant (2 mars, 1er mai) : on exige que la date relue redonne la MÊME chaîne (TECH-079).
+    // Seuls hier, aujourd'hui et demain, en UTC (le jeu prend la date en UTC : js/daily.js, dayKey), sont acceptés (décalages d'horloge) : pas de génération à la demande pour des
+    // dates arbitraires. La comparaison se fait de minuit à minuit : exactement trois jours, pas « ± 2,5 jours » autour de l'instant présent.
     const t = Date.parse(day + 'T00:00:00Z');
-    if (!Number.isFinite(t) || Math.abs(t - Date.now()) > 2.5 * 86400000) throw new Error('Défi du jour hors dates valides.');
+    if (!Number.isFinite(t) || new Date(t).toISOString().slice(0, 10) !== day) throw new Error('Défi du jour introuvable.');
+    const today = Math.floor(now / 86400000) * 86400000;
+    if (Math.abs(t - today) > 86400000) throw new Error('Défi du jour hors dates valides.');
     const c = dailyChallenge(day);
     if (!c || c.key !== key) throw new Error('Défi du jour introuvable.');
     return { track: c.track, kind: 'daily', name: c.track.name };

@@ -589,4 +589,15 @@ test('publication : nom et description nettoyés (espaces, longueur, rien d\'int
   assert.equal(cap.status, 422); assert.equal(j.trackCap, true); assert.match(j.error, /100 au plus/);
 });
 
+test('TECH-079 : une clé de défi du jour inexistante (daily-2026-02-30, -04-31) est refusée par la fonction serveur (422), rien n\'est écrit ; la même date relue redonne la même chaîne', async () => {
+  const day = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  for (const key of ['daily-2026-02-30', 'daily-2026-04-31', 'daily-2026-02-29', 'daily-' + day(0).slice(0, 8) + '32', 'daily-' + day(2), 'daily-' + day(-2)]) {
+    const sb = fakeSupabase();
+    const r = await make(sb)(request({ ...good, trackKey: key }));
+    assert.equal(r.status, 422, key);
+    assert.match((await r.json()).error, /Défi du jour/, key);
+    assert.equal(submitCalls(sb).length, 0, key + ' : rien écrit');
+  }
+});
+
 await finish('Tous les tests de la fonction serveur passent.');
