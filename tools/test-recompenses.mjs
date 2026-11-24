@@ -143,8 +143,8 @@ await test('titre : set_title est appelé avec l\'identifiant (ou vide)', async 
 await test('classement : la lecture essaie la requête complète (titre, fantôme), puis des plus simples quand les colonnes récentes manquent', async () => {
   const orig = { _fetch: online._fetch, _count: online._count }; const sel = [];
   try {
-    online._count = async () => 1;
-    online._fetch = async (path) => { const s = new URLSearchParams(path.split('?')[1]).get('select'); sel.push(s); if (s.includes('title') || s.includes('has_ghost')) throw new Error('column does not exist'); return [{ time: 20, player: 'p' }]; };
+    online._count = async () => 1;     // (le refus nomme la colonne absente, comme PostgREST)
+    online._fetch = async (path) => { const s = new URLSearchParams(path.split('?')[1]).get('select'); sel.push(s); if (s.includes('title')) throw new Error('column players_1.title does not exist'); if (s.includes('has_ghost')) throw new Error('column scores.has_ghost does not exist'); return [{ time: 20, player: 'p' }]; };
     const lb = await online.leaderboard('b-x-1', 26, 10);
     assert.equal(sel.length, 3); assert.ok(sel[0].includes('title') && sel[0].includes('has_ghost')); assert.ok(sel[1].includes('has_ghost') && !sel[1].includes('title')); assert.ok(!sel[2].includes('has_ghost'));
     assert.equal(lb.top.length, 1);

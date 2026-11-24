@@ -25,17 +25,42 @@ import { PHYS_VER } from './version.js';
 
 export const ONLINE = CONFIG.supabase;      // { url, key } : voir js/config.js
 
+// Fonctions de la base appelables SANS session (droit execute de anon : voir verify-prod.sql et tools/test-securite-sql.sh, qui comparent cette liste à la base).
+export const PUBLIC_RPC = ['follower_count', 'get_ghost', 'modes_list', 'playlists_list', 'random_track', 'recommended_tracks', 'season_standings', 'sector_board', 'track_comments_list', 'track_stats', 'trending_tracks'];
+
 export class OnlineError extends Error {
   constructor(message, code = '', status = 0) { super(message); this.code = code; this.status = status; }
 }
 
 // Messages d'erreur compréhensibles.
-function explain(status, body) {
-  const e = explain1(status, body);
+function explain(status, body, retryAfter = null) {
+  const e = explain1(status, body, retryAfter);
   e.status = status;
   return e;
 }
-function explain1(status, body) {
+
+// Refus « trop de demandes » (HTTP 429, ou limite de la fonction serveur) : le délai que le serveur annonce est CONSERVÉ (TECH-080 b), au lieu d'un « dans quelques minutes » générique.
+// Il vient de l'en-tête Retry-After (secondes ou date HTTP) ; à défaut, du texte du serveur (« réessaie dans 12 s »). Sans délai connu : le message générique.
+export function parseRetryAfter(header, now = Date.now()) {
+  const h = String(header == null ? '' : header).trim();
+  if (!h) return null;
+  if (/^\d{1,6}$/.test(h)) return Math.max(1, +h);
+  const t = Date.parse(h);
+  return Number.isFinite(t) ? Math.max(1, Math.ceil((t - now) / 1000)) : null;
+}
+const delayInText = (msg) => { const m = /réessaie dans (\d{1,5}) ?(s|min|h)\b/i.exec(msg || ''); return m ? Math.max(1, +m[1] * (m[2].toLowerCase() === 'h' ? 3600 : m[2].toLowerCase() === 'min' ? 60 : 1)) : null; };
+// « réessaie dans 12 s » (jusqu'à 90 s), puis en minutes ; ces deux phrases sont dans le dictionnaire anglais.
+export function waitText(sec) {
+  const n = Math.max(1, Math.ceil(sec));
+  return n <= 90 ? `Trop de demandes : réessaie dans ${n} s.` : `Trop de demandes : réessaie dans ${Math.ceil(n / 60)} min.`;
+}
+function rateError(body, retryAfter, msg, generic) {
+  const wait = retryAfter != null ? retryAfter : delayInText(msg);
+  const e = new OnlineError(wait != null ? waitText(wait) : generic, 'rate');
+  if (wait != null) e.retryAfter = wait;
+  return e;
+}
+function explain1(status, body, retryAfter = null) {
   const msg = (body && (body.message || body.msg || body.error_description || body.error)) || '';
   // Le serveur refuse une course ou une publication parce que sa version de physique n'est pas celle du jeu : il le dit par un DRAPEAU (`versionMismatch`, avec `serverPhysVer`),
   // jamais par son texte (la phrase française peut changer ou être traduite). Les deux cas se distinguent par `serverPhysVer` : voir versionMismatchText.
@@ -53,6 +78,7 @@ function explain1(status, body) {
     return new OnlineError('Fonction « submit-score » introuvable sur le serveur.', 'no-function');
   }
   if (/Trop de publications/.test(msg)) return new OnlineError(msg, 'rate');
+  if (status === 429 && /Trop de courses/.test(msg)) return rateError(body, retryAfter, msg, 'Trop de courses envoyées : réessaie dans un instant.');
   // Comptes (Supabase Auth)
   const ec = (body && (body.error_code || body.code)) || '';
   if (ec === 'user_already_exists' || /already registered|already been registered/i.test(msg)) return new OnlineError('Ce pseudo est déjà pris.', 'name-taken');
@@ -60,10 +86,10 @@ function explain1(status, body) {
   if (ec === 'weak_password') return new OnlineError('Mot de passe trop faible : au moins 8 caractères.', 'weak-password');
   if (ec === 'email_address_invalid' || ec === 'validate_failed' || /email address.*invalid/i.test(msg)) return new OnlineError('Le serveur refuse les comptes (voir COMPTES.md).', 'server-config');
   if (ec === 'signup_disabled') return new OnlineError('Les inscriptions sont désactivées sur le serveur.', 'server-config');
-  if (ec === 'over_request_rate_limit' || ec === 'over_email_send_rate_limit' || status === 429) return new OnlineError('Trop d’essais : réessaie dans quelques minutes.', 'rate');
+  if (ec === 'over_request_rate_limit' || ec === 'over_email_send_rate_limit' || status === 429) return rateError(body, retryAfter, msg, 'Trop d’essais : réessaie dans quelques minutes.');
   if (/Database error saving new user/i.test(msg)) return new OnlineError('Ce pseudo est déjà pris ou invalide.', 'name-taken');
   if (/appartient à un compte/.test(msg)) return new OnlineError('Ce pseudo appartient à un compte : choisis-en un autre.', 'name-taken');
-  if (status === 401 || status === 403) return new OnlineError('Accès refusé par le serveur.', 'denied');
+  if (status === 401 || status === 403) { const d = new OnlineError('Accès refusé par le serveur.', 'denied'); d.permission = !!body && body.code === '42501'; return d; }
   return new OnlineError(msg || `Erreur du serveur (${status}).`, 'http');
 }
 
@@ -219,12 +245,18 @@ class OnlineClient {
     }
   }
 
-  async _fetchRaw(path, { method = 'GET', body, headers = {}, auth = true } = {}) {
+  // Lecture ou écriture REST. auth : true (défaut : session exigée, créée au besoin), false (clé publique seule, aucune session) ou 'optional' (la session de l'appareil si elle
+  // existe et peut être reprise, sinon la clé publique : une LECTURE PUBLIQUE ne crée jamais de joueur anonyme, TECH-031). Renvoie { res, data } : toute requête passe ici,
+  // donc toute erreur réseau devient la même OnlineError lisible (TECH-080 a).
+  async _send(path, { method = 'GET', body, headers = {}, auth = true } = {}) {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new OnlineError('Pas de connexion internet.', 'offline');
     const h = { apikey: ONLINE.key, 'Content-Type': 'application/json', ...headers };
-    if (auth) {
+    if (auth === true) {
       await this.ensureSession();
       h.Authorization = 'Bearer ' + this.session.access_token;
+    } else if (auth === 'optional') {
+      const s = await this._optionalSession();
+      if (s) h.Authorization = 'Bearer ' + s.access_token;
     }
     let res;
     try {
@@ -235,21 +267,37 @@ class OnlineClient {
     const text = await res.text();
     let data;
     try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-    if (!res.ok) throw explain(res.status, data);
-    return data;
+    if (!res.ok) throw explain(res.status, data, parseRetryAfter(res.headers && res.headers.get && res.headers.get('retry-after')));
+    return { res, data };
+  }
+  async _fetchRaw(path, opts = {}) { return (await this._send(path, opts)).data; }
+
+  // La session de l'appareil pour une lecture publique : celle qui existe (renouvelée si besoin), jamais une neuve. Aucune ne marche : null (clé publique seule).
+  async _optionalSession() {
+    try { return await this.ensureSession(false); } catch { return null; }
+  }
+
+  // Lectures PUBLIQUES (clé publique, session de l'appareil seulement si elle existe) : classement, circuits, fantômes, saisons… Une action (publier, aimer, jouer un temps)
+  // exige toujours une session, créée à ce moment-là seulement. PUBLIC_RPC : les fonctions que la base ouvre à anon (vérifié par tools/test-securite-sql.sh).
+  read(path) { return this._fetch(path, { auth: 'optional' }); }
+  readRpc(name, body = {}) {
+    if (!PUBLIC_RPC.includes(name)) throw new OnlineError('Fonction non publique : ' + name, 'no-sql-step');
+    return this._fetch('/rest/v1/rpc/' + name, { method: 'POST', body, auth: 'optional' });
   }
 
   // Session anonyme : créée au premier besoin, rafraîchie avant expiration. Deux onglets (TECH-026) : chacun relit la session ENREGISTRÉE avant de renouveler (un autre a pu
   // le faire : son jeton de renouvellement, à usage unique, est alors déjà consommé), sous un verrou entre onglets ; un refus n'est un vrai refus qu'après relecture.
-  async ensureSession() {
+  // create = false : ne JAMAIS inscrire un nouvel utilisateur anonyme (lecture publique, TECH-031) ; renvoie null si la session de l'appareil ne peut pas être reprise.
+  async ensureSession(create = true) {
     if (!fresh(this.session)) this._adoptStored();
     if (fresh(this.session)) return this.session;
+    if (!create) return this.session && this.session.refresh_token ? this._withLock(() => this._renew(false)) : null;
     // (le verrou ne sert qu'à RENOUVELER un jeton existant : une toute première session n'a rien à protéger)
     if (!this._authP) this._authP = Promise.resolve(this.session && this.session.refresh_token ? this._withLock(() => this._renew()) : this._renew()).finally(() => { this._authP = null; });
     return this._authP;
   }
 
-  async _renew() {
+  async _renew(create = true) {
     this._adoptStored();                                  // (pendant l'attente du verrou, un autre onglet a peut-être renouvelé)
     if (fresh(this.session)) return this.session;
     const s = this.session;
@@ -277,6 +325,7 @@ class OnlineClient {
         if (other) return other;
       }
     }
+    if (!create) return null;                              // lecture publique : jamais d'inscription (la prochaine ACTION en créera une, annoncée)
     const had = !!(s && s.user && s.user.id);
     this.session = this._norm(await this._fetch('/auth/v1/signup', { method: 'POST', body: { data: {} }, auth: false }));
     this.player = null;
@@ -328,13 +377,13 @@ class OnlineClient {
   async _listTracks({ sort = 'recent', search = '', mine = false, authors = null, limit = 30, offset = 0 } = {}, desc = true) {
     const q = new URLSearchParams();
     q.set('select', OnlineClient.FIELDS + (desc ? ',description' : ''));
-    if (mine) { await this.ensureSession(); q.set('author', 'eq.' + this.uid); }
+    if (mine) { const s = await this._optionalSession(); if (!s) return []; q.set('author', 'eq.' + s.user.id); }       // « mes circuits » : sans session sur cet appareil, il n'y en a pas (rien à créer pour le savoir)
     else if (Array.isArray(authors)) q.set('author', 'in.(' + authors.filter((x) => /^[0-9a-f-]{36}$/.test(x)).join(',') + ')');     // auteurs suivis (E15)
     if (search.trim()) q.set('name', 'ilike.*' + search.trim().replace(/[*,()]/g, ' ') + '*');
     q.set('order', sort === 'popular' ? 'likes.desc,plays.desc,created_at.desc' : sort === 'played' ? 'plays.desc,created_at.desc' : 'created_at.desc');
     q.set('limit', String(limit));
     q.set('offset', String(offset));
-    return this._fetch('/rest/v1/tracks?' + q.toString());
+    return this.read('/rest/v1/tracks?' + q.toString());
   }
 
   // Un circuit de la communauté par son identifiant (favoris du Race Hub) : la ligne complète, ou null s'il a été retiré.
@@ -344,15 +393,15 @@ class OnlineClient {
     q.set('select', OnlineClient.FIELDS + (this.hasDesc === false ? '' : ',description'));
     q.set('id', 'eq.' + id);
     let rows;
-    try { rows = await this._fetch('/rest/v1/tracks?' + q.toString()); }
-    catch (e) { if (!OnlineClient.noDesc(e)) throw e; this.hasDesc = false; q.set('select', OnlineClient.FIELDS); rows = await this._fetch('/rest/v1/tracks?' + q.toString()); }
+    try { rows = await this.read('/rest/v1/tracks?' + q.toString()); }
+    catch (e) { if (!OnlineClient.noDesc(e)) throw e; this.hasDesc = false; q.set('select', OnlineClient.FIELDS); rows = await this.read('/rest/v1/tracks?' + q.toString()); }
     return Array.isArray(rows) && rows[0] ? rows[0] : null;
   }
 
   // Les circuits les plus joués ces derniers jours (étape 8). Renvoie les lignes complètes (comme listTracks), dans l'ordre, avec week_players ; [] si la fonction n'existe pas.
   async trending({ days = 7, limit = 24, offset = 0 } = {}) {
     let ranks;
-    try { ranks = await this._fetch('/rest/v1/rpc/trending_tracks', { method: 'POST', body: { days, lim: limit, off: offset } }); }
+    try { ranks = await this.readRpc('trending_tracks', { days, lim: limit, off: offset }); }
     catch (e) { if (e && e.code === 'http' && /trending_tracks|function|404/i.test(e.message)) return null; throw e; }
     if (!Array.isArray(ranks) || !ranks.length) return [];
     const ids = ranks.map((r) => r.id).filter((id) => /^[0-9a-f-]{36}$/.test(id));
@@ -360,8 +409,8 @@ class OnlineClient {
     q.set('select', OnlineClient.FIELDS + (this.hasDesc === false ? '' : ',description'));
     q.set('id', 'in.(' + ids.join(',') + ')');
     let rows;
-    try { rows = await this._fetch('/rest/v1/tracks?' + q.toString()); }
-    catch (e) { if (!OnlineClient.noDesc(e)) throw e; this.hasDesc = false; q.set('select', OnlineClient.FIELDS); rows = await this._fetch('/rest/v1/tracks?' + q.toString()); }
+    try { rows = await this.read('/rest/v1/tracks?' + q.toString()); }
+    catch (e) { if (!OnlineClient.noDesc(e)) throw e; this.hasDesc = false; q.set('select', OnlineClient.FIELDS); rows = await this.read('/rest/v1/tracks?' + q.toString()); }
     const by = new Map((rows || []).map((r) => [r.id, r]));
     return ranks.filter((r) => by.has(r.id)).map((r) => ({ ...by.get(r.id), week_players: +r.week_players || 0 }));
   }
@@ -436,33 +485,50 @@ class OnlineClient {
     return this._fetch('/functions/v1/submit-score', { method: 'POST', body: { trackKey, code, inputs, time, physVer } });
   }
 
-  // Colonnes demandées au classement, de la plus complète à la plus simple (TECH-021). Chaque colonne récente peut manquer, ou ne pas être ACCORDÉE en lecture :
-  //   has_ghost (étape 7), players.title (étape 8 + droits de l'étape 14), ghost_veh (étape 7, lecture accordée par l'étape 20 : avant elle, PostgreSQL refusait la requête
-  //   complète). Le jeu marche AVEC ou SANS chacune : un refus de colonne fait passer au niveau suivant, MAIS pas une autre erreur (réseau, serveur, trop d'essais), qui remonte.
-  static LB_SELECTS = [
-    'time,player,updated_at,has_ghost,ghost_veh,players!scores_player_fkey(name,title)',      // 0 : tout (étapes 7, 8 et 20 appliquées)
-    'time,player,updated_at,has_ghost,players!scores_player_fkey(name,title)',                // 1 : sans la colonne véhicule (étape 20 pas appliquée)
-    'time,player,updated_at,has_ghost,ghost_veh,players!scores_player_fkey(name)',            // 2 : sans titres (étape 8 ou droit de players.title absents)
-    'time,player,updated_at,has_ghost,players!scores_player_fkey(name)',                      // 3 : ni titres ni véhicule
-    'time,player,updated_at,players!scores_player_fkey(name)',                                // 4 : sans fantômes (étape 7 absente)
-  ];
-  // Une erreur qui vient d'un schéma ou d'un droit qui diffère (colonne absente ou non accordée, relation inconnue) : on peut réessayer plus simple. Pas le réseau, ni le débit.
-  static schemaMismatch(e) { return !!e && (e.code === 'denied' || (e.code === 'http' && (e.status === 400 || e.status === 404))); }
+  // Colonnes demandées au classement (TECH-021). Trois sont récentes et peuvent manquer, ou ne pas être ACCORDÉES en lecture :
+  //   ghost (has_ghost, étape 7), title (players.title, étape 8 + droits de l'étape 14), veh (ghost_veh, étape 7 ; lecture accordée par l'étape 20 : avant elle, PostgreSQL
+  //   refusait la requête complète). Le jeu marche AVEC ou SANS chacune : on demande tout, et un refus de COLONNE retire celle qu'il nomme (PostgreSQL nomme une colonne absente ;
+  //   un droit refusé ne nomme rien : la colonne véhicule, seule jamais accordée avant l'étape 20, saute la première). Au plus trois relectures. Une autre erreur (réseau,
+  //   serveur, trop d'essais, session) remonte tout de suite.
+  static lbSelect(f) {
+    return ['time,player,updated_at', f.ghost && 'has_ghost', f.ghost && f.veh && 'ghost_veh', `players!scores_player_fkey(${f.title ? 'name,title' : 'name'})`].filter(Boolean).join(',');
+  }
+  // Une erreur qui vient d'un schéma ou d'un droit qui diffère : colonne absente (400), relation inconnue, droit de colonne refusé (42501), ou le même texte venu d'ailleurs.
+  static schemaMismatch(e) {
+    if (!e || e.code === 'offline' || e.code === 'rate') return false;
+    if (e.code === 'denied') return e.permission === true;                  // 403/401 par DROIT (42501) ; un jeton refusé (session) n'est pas un schéma différent
+    if (e.code === 'http' && (e.status === 400 || e.status === 404)) return true;
+    return /does not exist|column|relationship|schema cache/i.test(e.message || '');
+  }
+  // Les colonnes à demander après ce refus, ou null s'il n'y a plus rien à retirer.
+  static lbDegrade(f, e) {
+    const m = String((e && e.message) || ''), n = { ...f };
+    if (/has_ghost/.test(m)) { n.ghost = false; n.veh = false; }
+    else if (/ghost_veh/.test(m)) n.veh = false;
+    else if (/title/.test(m)) n.title = false;
+    else if (n.ghost && n.veh) n.veh = false;
+    else if (n.title) n.title = false;
+    else if (n.ghost) n.ghost = false;
+    return n.ghost === f.ghost && n.veh === f.veh && n.title === f.title ? null : n;
+  }
 
-  // Lit le classement au niveau le plus complet que la base accorde ; le niveau qui a marché est retenu (30 min : après l'étape 20 appliquée, le jeu le retrouve sans recharger).
+  // Lit le classement avec les colonnes que la base accorde ; le résultat est retenu 30 min (après l'étape 20 appliquée, le jeu retrouve la lecture complète sans recharger).
   async _leaderboardRows(q) {
     const now = Date.now();
-    if (this._lbLevel && now - (this._lbAt || 0) > 30 * 60000) this._lbLevel = 0;
-    let lastErr = null;
-    for (let i = this._lbLevel || 0; i < OnlineClient.LB_SELECTS.length; i++) {
-      q.set('select', OnlineClient.LB_SELECTS[i]);
+    if (!this._lbFlags || now - (this._lbAt || 0) > 30 * 60000) this._lbFlags = { ghost: true, veh: true, title: true };
+    let f = this._lbFlags;
+    for (;;) {
+      q.set('select', OnlineClient.lbSelect(f));
       try {
-        const rows = await this._fetch('/rest/v1/scores?' + q.toString());
-        this._lbLevel = i; this._lbAt = now;
+        const rows = await this.read('/rest/v1/scores?' + q.toString());
+        this._lbFlags = f; this._lbAt = now;
         return rows;
-      } catch (e) { lastErr = e; if (!OnlineClient.schemaMismatch(e)) throw e; }
+      } catch (e) {
+        const next = OnlineClient.schemaMismatch(e) ? OnlineClient.lbDegrade(f, e) : null;
+        if (!next) throw e;
+        f = next;
+      }
     }
-    throw lastErr;
   }
 
   async leaderboard(trackKey, physVer, limit = 10) {
@@ -475,7 +541,7 @@ class OnlineClient {
     // Ma place, si j'ai un temps.
     let me = null;
     if (this.uid) {
-      const mine = await this._fetch(`/rest/v1/scores?select=time&track_key=eq.${encodeURIComponent(trackKey)}&phys_ver=eq.${physVer}&player=eq.${this.uid}`);
+      const mine = await this.read(`/rest/v1/scores?select=time&track_key=eq.${encodeURIComponent(trackKey)}&phys_ver=eq.${physVer}&player=eq.${this.uid}`);
       if (mine && mine.length) {
         const before = await this._count(`track_key=eq.${encodeURIComponent(trackKey)}&phys_ver=eq.${physVer}&time=lt.${mine[0].time}`);
         me = { time: mine[0].time, rank: before + 1 };
@@ -487,18 +553,16 @@ class OnlineClient {
 
   // Le fantôme du n° rank (1 à 10) du classement d'un circuit : { name, time, ghost (base64), veh } ou null (record d'avant l'étape 7, ou hors du top 10).
   async ghost(trackKey, rank, physVer) {
-    const rows = await this._fetch('/rest/v1/rpc/get_ghost', { method: 'POST', body: { k: trackKey, r: rank, pv: physVer } });
+    const rows = await this.readRpc('get_ghost', { k: trackKey, r: rank, pv: physVer });
     const g = Array.isArray(rows) ? rows[0] : null;
     return g && typeof g.ghost === 'string' ? { name: String(g.name || '?'), time: +g.time, ghost: g.ghost, veh: g.ghost_veh || [] } : null;
   }
 
+  // Nombre de lignes de scores qui répondent au filtre (en-tête Content-Range) : par la MÊME voie que les autres lectures (erreurs réseau lisibles, délai d'un 429 gardé :
+  // TECH-080 a, b) et sans session obligatoire (TECH-031).
   async _count(query) {
-    const h = { apikey: ONLINE.key, Prefer: 'count=exact', Range: '0-0' };
-    await this.ensureSession();
-    h.Authorization = 'Bearer ' + this.session.access_token;
-    const r = await fetch(`${ONLINE.url}/rest/v1/scores?${query}&select=player`, { headers: h });
-    if (!r.ok) throw explain(r.status, null);
-    return parseInt((r.headers.get('content-range') || '*/0').split('/')[1], 10) || 0;
+    const { res } = await this._send(`/rest/v1/scores?${query}&select=player`, { auth: 'optional', headers: { Prefer: 'count=exact', Range: '0-0' } });
+    return parseInt((res.headers.get('content-range') || '*/0').split('/')[1], 10) || 0;
   }
 
   // ---- Amis et abonnements (supabase/etape10-social.sql, E15) : comptes seulement pour les amis ---------------------------
@@ -510,16 +574,17 @@ class OnlineClient {
   async friendsBoard(trackKey, physVer, limit = 20) { const r = await this.rpc('friends_board', { k: trackKey, pv: physVer, lim: limit }); return Array.isArray(r) ? r : []; }
   async follow(authorId, playerName) { await this.ensurePlayer(playerName); return this.rpc('follow', { author_id: authorId }); }
   async unfollow(authorId) { return this.rpc('unfollow', { author_id: authorId }); }
-  async followerCount(authorId) { return +(await this.rpc('follower_count', { author_id: authorId })) || 0; }
-  async myFollows() { await this.ensureSession(); const r = await this._fetch('/rest/v1/follows?select=author&follower=eq.' + this.uid); return new Set((r || []).map((x) => x.author)); }
+  async followerCount(authorId) { return +(await this.readRpc('follower_count', { author_id: authorId })) || 0; }
+  async myFollows() { const s = await this._optionalSession(); if (!s) return new Set(); const r = await this.read('/rest/v1/follows?select=author&follower=eq.' + s.user.id); return new Set((r || []).map((x) => x.author)); }
 
   // ---- Classements par secteur (etape9-secteurs.sql) ----------------------------------------------------------------------
-  async sectorBoard(trackKey, physVer, i, limit = 10) { const r = await this.rpc('sector_board', { k: trackKey, pv: physVer, i, lim: limit }); return Array.isArray(r) ? r : []; }
+  async sectorBoard(trackKey, physVer, i, limit = 10) { const r = await this.readRpc('sector_board', { k: trackKey, pv: physVer, i, lim: limit }); return Array.isArray(r) ? r : []; }
 
   // ---- Saisons (etape11-saisons.sql) : la base clôt les saisons finies avant qu'on les lise ---------------------------------
+  // La clôture (close_due_seasons) exige une session : sans session sur l'appareil, on lit le classement tel quel (la clôture se fera à la prochaine lecture d'un joueur connecté).
   async seasonStandings(n, limit = 20) {
-    try { await this.rpc('close_due_seasons'); } catch (e) { if (e.code === 'no-sql-step') throw e; }
-    const r = await this.rpc('season_standings', { n, lim: limit });
+    if (await this._optionalSession()) { try { await this.rpc('close_due_seasons'); } catch (e) { if (e.code === 'no-sql-step') throw e; } }
+    const r = await this.readRpc('season_standings', { n, lim: limit });
     return Array.isArray(r) ? r : [];
   }
   async mySeason(n) { const r = await this.rpc('my_season', { n }); return Array.isArray(r) && r[0] ? r[0] : null; }
@@ -537,8 +602,9 @@ class OnlineClient {
   async tournamentBoard(id) { const r = await this.rpc('tournament_board', { tid: id }); return Array.isArray(r) ? r : []; }
 
   async myLikes() {
-    await this.ensureSession();
-    const rows = await this._fetch('/rest/v1/track_likes?select=track_id&player=eq.' + this.uid);
+    const s = await this._optionalSession();
+    if (!s) return new Set();                                            // aucune session sur cet appareil : rien n'a été aimé (et afficher la communauté ne crée pas de joueur)
+    const rows = await this.read('/rest/v1/track_likes?select=track_id&player=eq.' + s.user.id);
     return new Set((rows || []).map((r) => r.track_id));
   }
 }

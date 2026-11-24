@@ -198,6 +198,23 @@ select public.chk('B22 sans session (anon) : aucune donnée privée (comptes, sa
   and public.denied($$insert into players (id, name) values (gen_random_uuid(), 'pirate')$$) and public.denied($$update players set name = 'pirate'$$) and public.denied($$delete from players$$) and public.denied($$delete from tracks$$)
   and public.denied($$insert into tracks (name, decor, code, signature, author_time, pieces) values ('x', 'x', 'c', 'sigW', 1, 5)$$) and public.denied($$update scores set time = 1$$) and public.denied($$delete from scores$$));
 select public.chk('B23 sans session (anon) : la lecture publique marche (profils, circuits visibles, temps)', public.rows_of($$select 1 from players$$) >= 7 and public.rows_of($$select 1 from tracks$$) = 2 and public.rows_of($$select time from scores$$) = 1);
+-- TECH-031 : les lectures publiques du jeu se font SANS session (rôle anon, clé publique seule) : chaque fonction de PUBLIC_RPC est ouverte à anon et répond SANS erreur,
+-- et les tables lues directement (circuits avec le pseudo de l'auteur, temps et titres du classement, « j'aime » = privés) se comportent comme le client le suppose.
+select public.chk('B23b TECH-031 : chaque fonction de PUBLIC_RPC (js/online.js) est appelable sans session : ' || :'pubrpc', (
+  select count(*) = array_length(string_to_array(:'pubrpc', ','), 1) from (select distinct p.proname from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = any (string_to_array(:'pubrpc', ','))
+    and has_function_privilege('anon', p.oid, 'execute')) x));
+select public.chk('B23c TECH-031 : sans session, les lectures du classement et de la communauté répondent sans erreur (circuits + pseudo de l''auteur, temps + pseudo + titre, tendances, fantôme, secteurs, saison, commentaires, playlists, modes, statistiques)',
+  public.rows_of($$select t.id, t.name, p.name from tracks t join players p on p.id = t.author order by t.created_at desc limit 30$$) >= 0
+  and public.rows_of($$select s.time, s.player, s.updated_at, s.has_ghost, s.ghost_veh, p.name, p.title from scores s join players p on p.id = s.player where s.track_key = 'b-test-1' and s.phys_ver = 35 order by s.time, s.updated_at limit 10$$) >= 0
+  and public.rows_of($$select count(player) from scores where track_key = 'b-test-1'$$) >= 0
+  and public.rows_of($$select * from public.trending_tracks(7, 24, 0)$$) >= 0 and public.rows_of($$select * from public.get_ghost('b-test-1', 1, 35)$$) >= 0
+  and public.rows_of($$select * from public.sector_board('b-test-1', 35, 0, 10)$$) >= 0 and public.rows_of($$select * from public.season_standings(1, 20)$$) >= 0
+  and public.rows_of($$select public.follower_count('00000000-0000-0000-0000-0000000000b0')$$) >= 0 and public.rows_of($$select * from public.track_comments_list('00000000-0000-0000-0000-00000000f001', 30, 0)$$) >= 0
+  and public.rows_of($$select * from public.playlists_list(false, 30, 0)$$) >= 0 and public.rows_of($$select * from public.modes_list(false, 30, 0)$$) >= 0
+  and public.rows_of($$select * from public.track_stats('eclats', 35)$$) >= 0 and public.rows_of($$select * from public.recommended_tracks(12)$$) >= 0 and public.rows_of($$select public.random_track('{}')$$) >= 0);
+select public.chk('B23d TECH-031 : sans session, ce qui exige une session reste refusé (j''aime, clôture des saisons, règlement des duels, mes duels) : la lecture publique n''ouvre rien de plus',
+  public.rows_of($$select public.toggle_like('00000000-0000-0000-0000-00000000f001')$$) = -1 and public.rows_of($$select public.close_due_seasons()$$) = -1 and public.rows_of($$select public.settle_due()$$) = -1
+  and public.rows_of($$select 1 from track_likes$$) = -1);
 reset role;
 
 -- ================================================================ C. Failles CONFIRMÉES (corrigées par l'étape 17)
@@ -306,7 +323,10 @@ reset role;
 select public.chk('E2 après suppression : plus de profil, de sauvegarde ni de circuit de bob ; alice intacte', not exists (select 1 from players where id = '00000000-0000-0000-0000-0000000000b0') and not exists (select 1 from cloud_saves where user_id = '00000000-0000-0000-0000-0000000000b0')
   and not exists (select 1 from tracks where author = '00000000-0000-0000-0000-0000000000b0') and exists (select 1 from cloud_saves where user_id = '00000000-0000-0000-0000-00000000a11c') and exists (select 1 from scores where player = '00000000-0000-0000-0000-00000000a11c'));
 SQL
-$P -d $DB -f "$TMP/attaques.sql" > /dev/null 2>"$TMP/err.txt" || true
+# La liste des fonctions que le CLIENT lit sans session (js/online.js, PUBLIC_RPC) : la base doit les ouvrir à anon (TECH-031 ; une fonction retirée de la liste attendue du jeu ne passerait plus).
+PUBRPC="$(node --input-type=module -e "import('./js/online.js').then((m) => console.log(m.PUBLIC_RPC.join(',')))")"
+[ -n "$PUBRPC" ] || { echo "ÉCHEC : liste PUBLIC_RPC introuvable dans js/online.js"; exit 1; }
+$P -d $DB -v pubrpc="$PUBRPC" -f "$TMP/attaques.sql" > /dev/null 2>"$TMP/err.txt" || true
 
 # F. Concurrence : vraies sessions simultanées (psql en parallèle) sur les compteurs (j'aime, signalements, parties). Six manches de huit pilotes chacune : avant l'étape 17,
 #    des mises à jour étaient PERDUES (likes = 7 pour 8 lignes, reports = 6 pour 8 lignes), de façon non déterministe : d'où plusieurs manches.
