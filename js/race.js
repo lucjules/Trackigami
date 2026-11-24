@@ -89,7 +89,7 @@ export class RaceSession {
     this.replay = opts.replay ? decodeInputs(opts.replay.inputs) : null;
     this.replaySpeed = 1;
     this.replayPaused = false;
-    this.replayCam = 0;   // 0 = caméra de course, puis TV, orbite
+    this.replayCam = 0;   // caméra du replay : un index de camList, puis TV, orbite, etc. (REPLAY_CAMS) ; fixée à la caméra réglée plus bas (camMode)
     // Fantômes simulés (or, importé).
     this.ghosts = [];
     this.rivals = [];       // fantômes du haut d'un classement en ligne (setRivals)
@@ -112,6 +112,7 @@ export class RaceSession {
     if (opts.rivals && !this.demo && !this.replay && !this.multi) this.setRivals(opts.rivals);
     this.camList = cameraList(CAM_MODES, app.settings.cameras);          // les 4 d'origine puis celles du joueur (camprefs.js)
     this.camMode = this.demo ? 0 : clampCamIndex(app.settings.camera || 0, this.camList);
+    this.replayCam = this.camMode;      // (TECH-068 : le replay et le Theater partent de la caméra réglée par le joueur, pas de la première ; le nom affiché et le premier C la suivent)
 
     this.up = new THREE.Vector3(0, 1, 0);
     this.quat = new THREE.Quaternion();
@@ -337,14 +338,14 @@ export class RaceSession {
     if (ev.land > 4) { this._feel.dipT = 0; this._feel.dipI = ev.land; }          // tassement de la caméra à la réception
     if (ev.wall > 3) {
       app.audio.thud(ev.wall);
-      app.input.rumble(Math.min(1, ev.wall * 0.06), 0.4, 140);
+      if (!this.demo) app.input.rumble(Math.min(1, ev.wall * 0.06), 0.4, 140);      // (TECH-067 : pas de vibration dans la démonstration du menu)
       const p = this.phys.pos;
       app.particles.burst(p.x, p.y + 0.8, p.z, Math.min(16, ev.wall), 7, 0.4, 0.45, '#ffb84d', 12);
       this.shake = Math.max(this.shake, Math.min(0.5, ev.wall * 0.03));
     }
     if (ev.land > 4) {
       app.audio.land(ev.land);
-      app.input.rumble(Math.min(1, ev.land * 0.05), 0.3, 120);
+      if (!this.demo) app.input.rumble(Math.min(1, ev.land * 0.05), 0.3, 120);
       const p = this.phys.pos;
       app.particles.burst(p.x, p.y + 0.3, p.z, Math.min(20, ev.land * 1.5), 6, 0.6, 0.8, app.scenery.theme.dust, 3);
       this.shake = Math.max(this.shake, Math.min(0.6, ev.land * 0.04));
@@ -375,7 +376,7 @@ export class RaceSession {
     if (ev.loopIn) app.audio.whoosh();
     if (ev.miniTurbo) {
       app.audio.miniTurbo(ev.miniTurbo);
-      app.input.rumble(0.4, 0.2, 120);
+      if (!this.demo) app.input.rumble(0.4, 0.2, 120);
       const p = this.phys.pos;
       app.particles.burst(p.x, p.y + 0.5, p.z, 16, 7, 0.4, 0.5, this.fx.spark || (ev.miniTurbo === 2 ? '#ffb84d' : '#5ff2ff'), 2);
     }
@@ -443,7 +444,8 @@ export class RaceSession {
 
       // Hors piste (0,5 s) ou noyade : réapparition automatique (le suivi du hors-piste est dans Simulation.score).
       if (sank && this.state === 'racing') { if (this.demo) this.restart(); else this.respawn(); return; }
-      if (this.sim.groundT > this.sim.offTrackLimit) {
+      // (TECH-072 : une arrivée franchie dans ce même pas l'emporte, comme dans Simulation.score : pas de message « Hors piste » après la ligne)
+      if (this.state === 'racing' && this.sim.groundT > this.sim.offTrackLimit) {
         if (this.demo) this.restart(); else { this._say(MSG.offTrack); this.respawn(); }
       }
     }
