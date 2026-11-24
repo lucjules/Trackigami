@@ -108,6 +108,11 @@ connexion à un compte existant : l'invité A reste tel quel sur l'appareil ; la
 - **La session d'un invité n'est jamais détruite sans raison** : la déconnexion la retrouve (avant 0.16.11, elle l'effaçait : données orphelines,
   un anonyme de plus à chaque cycle) ; seule une conversion la retire. Un jeton REFUSÉ par le serveur (révoqué) donne une nouvelle identité
   d'invité, et le joueur en est prévenu.
+- **Lire n'est pas agir** (0.16.12, TECH-031) : afficher un classement, la communauté, les tendances, un fantôme ou une saison **ne crée plus de joueur anonyme** : ces lectures publiques
+  se font avec la clé publique seule, ou avec la session de l'appareil si elle existe (« ma place » au classement, mes « j'aime »). Une session anonyme n'est créée que par une **action**
+  (envoyer un temps, publier, aimer, commenter, s'inscrire…). Avant, chaque lecture en créait une : derrière une adresse partagée (école), la limite d'inscriptions anonymes de Supabase
+  (par adresse IP ; valeur exacte à vérifier dans Authentication › Rate Limits, non constatée ici) pouvait refuser les classements. Les fonctions lues sans session sont listées dans
+  `PUBLIC_RPC` (`js/online.js`) ; `tools/test-securite-sql.sh` vérifie qu'`anon` peut les appeler et que tout le reste exige une session.
 - **Deux onglets** : avant de renouveler, le jeu relit la session enregistrée (un autre onglet a pu consommer le jeton, à usage unique) ; le
   renouvellement se fait sous un verrou entre onglets (`navigator.locks`) ; sans lui (navigateurs anciens), un bail dans le stockage
   (`copytrack.authLease`, non atomique : il rend la course très improbable, pas impossible) et, sur un refus, une attente qu'un autre onglet ait

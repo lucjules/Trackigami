@@ -15,6 +15,8 @@
 //
 //   Où sont les sessions : invité → `online.session` dans la portée de l'invité (storage.js, jamais dans un code joueur : DEVICE_ONLY_KEYS) ;
 //   compte → la clé globale `copytrack.account` (account.js). Une session d'invité n'est retirée QUE lorsqu'elle est devenue celle d'un compte.
+//   LIRE n'est pas une action (TECH-031) : classement, communauté, tendances, fantômes, saisons… se lisent avec la clé publique seule (ou la session déjà présente) ; la session
+//   anonyme n'est créée que par une ACTION (jouer un temps, publier, aimer, commenter, s'inscrire). Voir read / readRpc / PUBLIC_RPC plus bas.
 //   Renouvellement (jeton à usage unique) : relire la session enregistrée, puis renouveler sous verrou entre onglets (navigator.locks ; repli : bail
 //   `copytrack.authLease`), écouter l'évènement « storage ». Un vrai refus du serveur (jeton révoqué) : compte → « session expirée » ; invité → une
 //   nouvelle identité, ANNONCÉE (onNotice). Aucun jeton n'est jamais écrit dans un journal.
