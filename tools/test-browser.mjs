@@ -2360,8 +2360,12 @@ try {
       assert.equal(await B.evaluate((id) => (window.copytrack.room.members.get(id) || {}).commit, aId), commit, 'l\'engagement épinglé d\'Ana n\'a pas changé');
       assert.equal(await B.evaluate(() => window.copytrack.room.isHost), true, 'Bea est toujours l\'hôte par intérim');
       // Ana revient avec son secret (même onglet) : même identifiant, même engagement, rôle retrouvé ; Bea redevient invitée.
+      const tBack = Date.now();
       await A.goto(url(code), { waitUntil: 'load' }); await named(A, 'Ana');
-      await wait(A, () => window.copytrack && window.copytrack.room && window.copytrack.room.list.some((m) => !m.self && m.link === 'open'));
+      // (le résumé de l'état de chacun s'ajoute à l'échec : une attente expirée dit où en était chaque onglet)
+      const brief = (p) => p.evaluate((id) => { const A = window.copytrack, r = A && A.room; return r ? { self: r.selfId === id ? 'ana' : 'autre', host: r.isHost, settled: r._settled, order: r._order, inheriting: r._inheriting, members: [...r.members.values()].map((m) => [m.id === id ? 'ana' : m.id.slice(0, 4), m.link, !!m.commit, m.returning]), saved: !!sessionStorage.getItem('copytrack.mp.resume'), toast: (document.querySelector('.toast, #toast') || {}).textContent } : { room: null, mode: A && A.mode, url: location.href.slice(-20), saved: !!sessionStorage.getItem('copytrack.mp.resume') }; }, aId).catch((e) => String(e));
+      try { await wait(A, () => window.copytrack && window.copytrack.room && window.copytrack.room.list.some((m) => !m.self && m.link === 'open')); }
+      catch (e) { throw new Error(e.message.split('\n')[0] + ' — ' + Math.round((Date.now() - tBack) / 1000) + ' s après le retour ; Ana : ' + JSON.stringify(await brief(A)) + ' ; Bea : ' + JSON.stringify(await brief(B)) + ' ; imposteur : ' + JSON.stringify(await brief(C))); }
       assert.equal(await A.evaluate(() => window.copytrack.room.selfId), aId, 'même identifiant');
       assert.equal(await A.evaluate(() => window.copytrack.room.ident.commit), commit, 'même engagement : c\'est bien son secret');
       await wait(A, () => window.copytrack.room.isHost === true, null, 20000);
