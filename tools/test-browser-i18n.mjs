@@ -204,6 +204,10 @@ try {
     };
     const { ctx, page } = await device('en-US', { server, before: () => { const real = Date.now.bind(Date), off = Date.UTC(2026, 10, 18, 12) - real(); Date.now = () => real() + off; } });
     await enter(page);
+    // Ce joueur a DÉJÀ une session en ligne (il a joué en ligne : action qui en crée une) : depuis la 0.16.12 (TECH-031), la seule lecture d'un classement n'en crée plus, et « ma saison »
+    // (ma division, ma place) n'existe que pour un joueur qui a une session. Sans elle, le même écran montre le classement public sans « ma saison ». (Le stockage n'est pas pré-rempli :
+    // un appareil qui a déjà des données reste en français, ce qui changerait la langue de l'essai.)
+    await page.evaluate(async () => { await (await import('./js/online.js')).online.ensureSession(); });
     try {
       await page.evaluate(() => window.copytrack.showMenu('tracks'));
       await page.waitForFunction(() => document.querySelectorAll('.season-group .season-card').length === 3);

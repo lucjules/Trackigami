@@ -2507,6 +2507,9 @@ try {
       await p2.locator('#wl-name').fill('Testeur');
       await clk('#wl-submit');
       await wait(() => window.copytrack && window.copytrack.mode === 'menu');
+      // Ce joueur a DÉJÀ une session en ligne (invité qui a joué en ligne : une action en crée une) : depuis la 0.16.12 (TECH-031), lire un classement n'en crée plus, et la clôture des saisons
+      // (close_due_seasons) comme « ma saison » exigent une session ; sans elle, le classement public s'affiche tel quel (tools/test-lectures-en-ligne.mjs).
+      await ap(async () => { await (await import('./js/online.js')).online.ensureSession(); });
       // Écran Circuits : la saison de la semaine, ses trois circuits
       await ap(() => window.copytrack.showMenu('tracks'));
       await wait(() => document.querySelectorAll('.season-group .season-card').length === 3);
