@@ -47,6 +47,7 @@ if [ -z "${AVANT:-}" ]; then
   [ "$(echo "$VP" | grep -c 'étape 17')" -ge 9 ] || { echo "  FAIL verify-prod.sql ne contient pas les lignes de l'étape 17"; VPFAIL=1; }
   [ "$(echo "$VP" | grep -c 'étape 18')" -ge 8 ] || { echo "  FAIL verify-prod.sql ne contient pas les lignes de l'étape 18"; VPFAIL=1; }
   [ "$(echo "$VP" | grep -c 'étape 19')" -ge 1 ] || { echo "  FAIL verify-prod.sql ne contient pas la ligne de l'étape 19"; VPFAIL=1; }
+  [ "$(echo "$VP" | grep -c 'étape 20')" -ge 3 ] || { echo "  FAIL verify-prod.sql ne contient pas les trois lignes de l'étape 20"; VPFAIL=1; }
   [ "$(echo "$VP" | grep -c 'lisibilité (TECH-021)')" -ge 6 ] || { echo "  FAIL verify-prod.sql ne contient pas les six lignes de lisibilité des colonnes (TECH-021)"; VPFAIL=1; }
 else VPFAIL=0; fi
 

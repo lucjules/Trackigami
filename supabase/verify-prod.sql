@@ -240,6 +240,26 @@ checks as (
               else 'ok' end
   from (select distinct ord, tbl, want, role from col_state) g
   union all
+  -- ---- 4 sexies. étape 20 (droits suivis, règles du jeu et de la base alignées : TECH-076, TECH-081 ; TECH-021 : lignes « lisibilité » ci-dessus) ------------------------------
+  select 130, 'étape 20 : close_season clôt après la fin de la saison + la grâce (600 s = SEASON_GRACE_MS de js/seasons.js, TECH-076)', 'grâce de 600 s',
+         case when to_regprocedure('public.close_season(integer)') is null then 'fonction absente'
+              when (select prosrc from pg_proc where oid = to_regprocedure('public.close_season(integer)')) like '%make_interval(secs => 600)%' then 'grâce de 600 s'
+              else 'SANS grâce (ancienne version de l''étape 11 : clôt à l''heure)' end,
+         case when to_regprocedure('public.close_season(integer)') is null then 'MANQUE'
+              when (select prosrc from pg_proc where oid = to_regprocedure('public.close_season(integer)')) like '%make_interval(secs => 600)%' then 'ok' else 'ÉCART' end
+  union all
+  select 131, 'étape 20 : submit_best lie l''empreinte d''un circuit de joueur à la clé de BASE, variantes comprises (TECH-081)', 'clé de base',
+         case when to_regprocedure('public.submit_best(uuid,text,double precision,text,integer,text,jsonb,text,jsonb,text)') is null then 'fonction absente'
+              when (select prosrc from pg_proc where oid = to_regprocedure('public.submit_best(uuid,text,double precision,text,integer,text,jsonb,text,jsonb,text)')) like '%split_part(tk, ''~'', 1)%' then 'clé de base'
+              else 'chaque variante séparément (ancienne version de l''étape 17)' end,
+         case when to_regprocedure('public.submit_best(uuid,text,double precision,text,integer,text,jsonb,text,jsonb,text)') is null then 'MANQUE'
+              when (select prosrc from pg_proc where oid = to_regprocedure('public.submit_best(uuid,text,double precision,text,integer,text,jsonb,text,jsonb,text)')) like '%split_part(tk, ''~'', 1)%' then 'ok' else 'ÉCART' end
+  union all
+  select 132, 'étape 20 : lignes de track_binds d''une VARIANTE dont l''empreinte diffère de celle de sa base (squat d''avant l''étape 20 : à examiner, rien n''est supprimé)', '0',
+         case when to_regclass('public.track_binds') is null then 'table absente'
+              else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.track_binds v join public.track_binds b on b.track_key = split_part(v.track_key, ''~'', 1) where v.track_key like ''%~%'' and v.strong <> b.strong', false, true, '')))[1]::text end,
+         'info'
+  union all
   -- ---- 5. renseignements ---------------------------------------------------------------------------------------------------------------------
   select 70, 'circuits publiés dont le temps auteur n''est PAS vérifié (publiés avant l''étape 15)', 'info',
          case when exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'tracks' and column_name = 'author_verified')

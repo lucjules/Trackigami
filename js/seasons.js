@@ -9,7 +9,9 @@ import { rng } from './daily.js';
 export const SEASON_EPOCH = Date.UTC(2026, 10, 9);          // lundi 9 novembre 2026, 00:00 UTC
 export const SEASON_MS = 7 * 86400000;
 export const SEASON_TRACKS = 3;
-export const SEASON_GRACE_MS = 10 * 60000;                   // une course finie juste après minuit (lundi) compte encore pour la saison qui vient de finir
+// Une course finie juste après minuit (lundi) compte encore pour la saison qui vient de finir. La base ne CLÔT une saison (montées, descentes) qu'après sa fin + cette grâce :
+// `close_season` (supabase/etape20-droits-et-regles.sql, `make_interval(secs => 600)`). Les deux valeurs changent ENSEMBLE : tools/test-seasons.mjs et tools/test-etape20-sql.sh le vérifient.
+export const SEASON_GRACE_MS = 10 * 60000;
 
 // Numéro de la saison à l'instant t (ms) ; 0 avant la saison 1.
 export const seasonOf = (t = Date.now()) => (t < SEASON_EPOCH ? 0 : Math.floor((t - SEASON_EPOCH) / SEASON_MS) + 1);

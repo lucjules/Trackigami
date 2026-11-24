@@ -33,6 +33,20 @@ function botRun(def) {
 }
 
 console.log('Dates et circuits');
+test('la grâce de fin de saison est la MÊME dans le jeu (SEASON_GRACE_MS) et dans la base (close_season de l’étape 20) : une course acceptée par le serveur n’arrive jamais après la clôture (TECH-076)', () => {
+  const sql = readFileSync(new URL('../supabase/etape20-droits-et-regles.sql', import.meta.url), 'utf8');
+  const body = sql.slice(sql.indexOf('create or replace function public.close_season('), sql.indexOf('revoke execute on function public.close_season'));
+  const m = [...body.matchAll(/make_interval\(secs => (\d+)\)/g)];
+  assert.equal(m.length, 1, 'une seule grâce dans close_season');
+  assert.equal(+m[0][1] * 1000, SEASON_GRACE_MS, 'SEASON_GRACE_MS (js/seasons.js) et la base doivent changer ENSEMBLE');
+  assert.match(body, /season_clock\(\) < e then return -1/, 'avant la fin de la grâce : pas de clôture');
+  assert.match(sql, new RegExp(`${SEASON_GRACE_MS / 1000} s = SEASON_GRACE_MS`), 'le commentaire de la base nomme la constante du jeu');
+  // La grâce du jeu se lit aussi dans verify-prod.sql (ligne « étape 20 » : la valeur attendue y est écrite).
+  assert.match(readFileSync(new URL('../supabase/verify-prod.sql', import.meta.url), 'utf8'), new RegExp(`make_interval\\(secs => ${SEASON_GRACE_MS / 1000}\\)`));
+  // seasonOpen : encore ouverte à ends + grâce - 1 ms, fermée à ends + grâce (la base clôt à partir de cet instant exactement).
+  const { ends } = seasonBounds(1);
+  assert.equal(seasonOpen(1, ends + SEASON_GRACE_MS - 1), ''); assert.notEqual(seasonOpen(1, ends + SEASON_GRACE_MS), '');
+});
 test('la saison 1 commence le lundi 9 novembre 2026 à 00:00 UTC, comme dans supabase/etape11-saisons.sql ; une saison dure 7 jours', () => {
   assert.equal(new Date(SEASON_EPOCH).toISOString(), '2026-11-09T00:00:00.000Z');
   assert.equal(new Date(SEASON_EPOCH).getUTCDay(), 1, 'un lundi');
