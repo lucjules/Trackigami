@@ -2,7 +2,7 @@
 // (départ commun, arrivées, clôture, manche suivante, abandon, hôte parti, arrivant en cours de route), annuaire des salons publics.
 // node tools/test-manche.mjs   (npm test)
 import assert from 'node:assert/strict';
-import { test, finish } from './harness.mjs';
+import { test, finish, bugConnu, precondition } from './harness.mjs';
 import { POINTS, Championship, buildPlaylist, poolFor, liveOrder, pointsFor, MAX_ROUNDS } from '../js/net/championship.js';
 import { ProgressTracker, checkpointProgress, gridSpawn, GRID_COLS } from '../js/net/progress.js';
 import { softCollide, presentState, CAR_R, MAX_DV_STEP, MAX_LEAD_S } from '../js/net/collide.js';
@@ -292,6 +292,7 @@ function lan(ids, { code = 'ABC234' } = {}) {
   const spy = (r) => {
     const ev = env.events[r.selfId] = { start: [], round: [], stop: 0, wait: [], cup: 0 };
     r.on('start', (e) => ev.start.push(e)); r.on('cupround', (e) => ev.round.push(e)); r.on('cupstop', () => ev.stop++); r.on('cupwait', (e) => ev.wait.push(e)); r.on('cup', () => ev.cup++);
+    // (une course commencée se termine par une arrivée, et le joueur revient au salon : comme l'interface le fait)
   };
   env.add = async (name, id) => { const r = rooms.length ? await Room.join(code, opts(name, id)) : await Room.create(opts(name, id)); rooms.push(r); spy(r); return r; };
   env.end = () => { for (const r of rooms) r.leave(); };
@@ -547,6 +548,160 @@ await test('NET_VER : le salon refuse un hôte qui parle un autre protocole', as
   await assert.rejects(() => env.add('Zoé', 'z'), (e) => e.code === 'version', 'même physique, autre protocole : refusé');
   env.end();
 });
+
+console.log('État de la salle : lancements, résultats, migration (phase 16 ; défauts reproduits avant correction)');
+const T1 = { id: 'b-un-a1', name: 'Un' }, T2 = { id: 'b-deux-b2', name: 'Deux' };
+const lobbyAll = (rs) => { for (const r of rs) if (!r.closed) r.backToLobby(); };
+const starts = (env, ...ids) => ids.reduce((n, id) => n + env.events[id].start.length, 0);
+await bugConnu('TECH-008', async () => {
+  const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
+  env.open();
+  a.selectTrack(T1); a.start();
+  precondition(b.state === 'racing' && c.state === 'racing', 'tout le monde court');
+  lobbyAll([a, b, c]);
+  const n0 = starts(env, 'b', 'c');
+  a.selectTrack(T2); a.selectTrack(T1); env.open();               // l'hôte parcourt la liste ; une liaison se rouvre
+  assert.equal(b.state, 'lobby'); assert.equal(c.state, 'lobby');
+  assert.equal(starts(env, 'b', 'c'), n0, 'aucun départ sur un simple choix de circuit');
+  } finally { env.end(); }
+}, 'course libre : retour au salon, l\'hôte change de circuit : les invités restent au salon');
+await bugConnu('TECH-008', async () => {
+  const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
+  env.open();
+  a.startCup({ rounds: ROUNDS });
+  precondition(b.state === 'racing', 'Ben court la manche');
+  a.stopCup(); lobbyAll([a, b]);
+  const n0 = starts(env, 'b');
+  a.selectTrack(T2); env.open();
+  assert.equal(b.state, 'lobby'); assert.equal(starts(env, 'b'), n0, 'aucun départ après « Arrêter le championnat »');
+  } finally { env.end(); }
+}, 'après « Arrêter le championnat », l\'hôte change de circuit : l\'invité reste au salon');
+await bugConnu('TECH-008', async () => {
+  const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
+  env.open();
+  a.selectTrack(T1); a.start(); lobbyAll([a, b]);                  // une course libre a eu lieu
+  a.startCup({ rounds: [T1] });                                    // puis une « Course » (championnat d'une manche), terminée
+  a.reportFinish(4000); b.reportFinish(4100);
+  precondition(a.cup.finished && b.cup.finished, 'course unique terminée');
+  lobbyAll([a, b]);
+  a.selectTrack(T2);
+  const d = await env.add('Dan', 'd'); env.open();                 // un arrivant, alors que tout le monde est au salon
+  assert.equal(b.state, 'lobby', 'Ben reste au salon');
+  assert.equal(d.state, 'lobby', 'l\'arrivant n\'est pas lancé : personne ne court');
+  assert.equal(env.events.d.start.length, 0);
+  } finally { env.end(); }
+}, 'après une course unique terminée : un arrivant n\'est pas lancé alors que tout le monde est au salon');
+
+await bugConnu('TECH-042', async () => {
+  const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
+  env.open();
+  a.selectTrack(T1); a.start();
+  // L'arrivée de Ben (sur Un) est en vol vers Cléo quand l'hôte relance sur Deux.
+  const held = [], hear = c._onMessage.bind(c);
+  c._onMessage = (from, kind, data) => { if (from === 'b' && data && data.k === 'finish') held.push([from, kind, data]); else hear(from, kind, data); };
+  b.reportFinish(4321);
+  a.selectTrack(T2); a.start();
+  c._onMessage = hear; for (const m of held) hear(...m);
+  assert.equal(c.results.has('b'), false, 'chez Cléo : le temps fait sur Un n\'est pas crédité à Deux');
+  } finally { env.end(); }
+}, 'arrivée envoyée pendant un changement de circuit : créditée à son lancement, pas au suivant');
+await bugConnu('TECH-042', async () => {
+  const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
+  env.open();
+  a.selectTrack(T1); a.start();
+  b.reportFinish(4000);
+  const d = await env.add('Dan', 'd');
+  b._onLink('d', 'open');                                          // la liaison Ben → Dan s'ouvre avant celle de l'hôte : le meilleur temps de Ben arrive d'abord
+  a._onLink('d', 'open'); c._onLink('d', 'open'); for (const r of [b, c, a]) d._onLink(r.selfId, 'open');
+  assert.equal(d.results.get('b') && d.results.get('b').best, 4000, 'l\'arrivant garde le temps synchronisé, quel que soit l\'ordre des messages');
+  } finally { env.end(); }
+}, 'un arrivant garde les meilleurs temps synchronisés quand l\'état de l\'hôte arrive après eux');
+
+await bugConnu('TECH-047', async () => {
+  const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
+  env.open(); a.startCup({ rounds: ROUNDS });
+  const retry = b.schedule; b.schedule = () => {};                 // Ben reste coupé (ses tentatives sont mises de côté)
+  env.cut('b');
+  a.reportFinish(4000); c.reportFinish(4100);
+  await env.advance(RESUME_MS + 500);                              // sa place est rendue : la manche se clôt sans lui
+  precondition(env.events.a.round.length === 1, 'manche close chez l\'hôte');
+  precondition(b.cupState && b.cupState.phase === 'racing' && env.events.b.round.length === 0, 'Ben, coupé, croit la manche en cours');
+  env.heal('b'); b.schedule = retry; b._retry(0);
+  await env.advance(RETRY_MS[0] + 100); env.open();
+  assert.equal(env.events.b.round.length, 1, 'Ben revenu voit la clôture (écran de résultats, course arrêtée)');
+  assert.deepEqual(env.events.b.round[0].result.order, ['a', 'c', 'b']);
+  assert.notEqual(b.cupState.phase, 'racing');
+  } finally { env.end(); }
+}, 'joueur revenu après la clôture d\'une manche : écran de résultats, course arrêtée');
+
+await bugConnu('TECH-048', async () => {
+  const env = lan(); try { const [a, b, c] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
+  env.open(); a.startCup({ rounds: ROUNDS });
+  // Ben manque l'arrivée d'Ana et la clôture de la manche (sa liaison avec Ana a sauté un instant).
+  const hear = b._onMessage.bind(b);
+  b._onMessage = (from, kind, data) => (from === 'a' && data && (data.k === 'finish' || data.k === 'rend') ? undefined : hear(from, kind, data));
+  b.reportFinish(4100); c.reportFinish(4200); a.reportFinish(4000);
+  precondition(env.events.c.round.length === 1 && env.events.b.round.length === 0, 'Cléo a la clôture, Ben non');
+  b._onMessage = hear;
+  a.leave();                                                       // l'hôte part : Ben, l'identifiant le plus petit, prend la suite
+  precondition(b.isHost, 'Ben est le nouvel hôte');
+  b._cupTick(); c._cupTick();
+  const d = await env.add('Dan', 'd');
+  for (const r of [b, c]) { r._onLink('d', 'open'); d._onLink(r.selfId, 'open'); }   // (seules les liaisons de l'arrivant s'ouvrent)
+  const st = (r) => JSON.stringify(r.cup.standings().map((x) => [x.id, x.points]));
+  assert.equal(st(b), st(c), 'classements identiques chez Ben et Cléo');
+  assert.equal(st(d), st(c), 'un arrivant copie le même classement');
+  for (const r of [b, c, d]) assert.equal(r.cup.results[0].times.a, 4000, 'l\'état le plus complet est repris (le temps d\'Ana compte) chez ' + r.selfId);
+  } finally { env.end(); }
+}, 'migration d\'hôte après une clôture manquée : classements identiques chez tous');
+
+await bugConnu('TECH-084', async () => {
+  const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
+  env.open(); a.startCup({ rounds: ROUNDS });
+  const send = b.mesh.sendCtl; b.mesh.sendCtl = () => {};          // Ben finit la manche 0 pendant que sa liaison avec l'hôte est coupée
+  b.reportFinish(3000);
+  b.mesh.sendCtl = send;
+  precondition(!a.cupState.finishes.has('b'), 'l\'hôte n\'a pas l\'arrivée de Ben');
+  a.stopCup(); a.startCup({ rounds: ROUNDS });                     // arrêt, puis nouveau championnat
+  b._onLink('a', 'open');                                          // la liaison se rouvre : Ben renvoie ce qu'il avait en attente
+  assert.equal(a.cupState.finishes.has('b'), false, 'aucune arrivée de l\'ancien championnat rejouée dans le nouveau');
+  } finally { env.end(); }
+}, 'arrêt puis nouveau championnat : aucune arrivée rejouée');
+
+await bugConnu('TECH-085', async () => {
+  const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b'), await env.add('Cléo', 'c')];
+  env.open();
+  a.members.get('c').link = 'failed';                              // Cléo n'est pas reliée à l'hôte : elle ne part pas sur la grille
+  a.startCup({ rounds: ROUNDS });
+  precondition(!a.cupState.roster.includes('c'), 'Cléo hors grille');
+  b.reportFinish(4000);                                            // Ana ne finit pas (0 point)
+  env.clock.t += FINISH_GRACE_MS + 1; a._cupTick();
+  assert.deepEqual(a.cup.standings().map((r) => r.id), ['b', 'a'], 'Cléo, qui n\'a pas couru, n\'est pas au classement');
+  } finally { env.end(); }
+}, 'classement général : un joueur qui n\'a jamais couru en est absent');
+bugConnu('TECH-085', () => {
+  // x : deux manches sans arrivée dans des manches à 2 (places 3 et 3 : somme 6, moyenne 3) ; y : une seule manche sans arrivée dans une manche à 3 (place 4).
+  const cup = new Championship({ rounds: [{ id: 'b-1' }, { id: 'b-2' }, { id: 'b-3' }] });
+  cup.scoreRound(0, { x: null, p: 4000 }, ['x', 'p']);
+  cup.scoreRound(1, { x: null, q: 4000 }, ['x', 'q']);
+  cup.scoreRound(2, { y: null, r: 4000, s: 4100 }, ['y', 'r', 's']);
+  const ids = cup.standings().map((r) => r.id);
+  assert.ok(ids.indexOf('x') < ids.indexOf('y'), 'départage par moyenne des places (3 contre 4), pas par somme (6 contre 4) : ' + ids.join(','));
+}, 'départage : moyenne des places, qui n\'avantage pas celui qui a joué moins de manches');
+
+await bugConnu('GAME-008', async () => {
+  const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
+  env.open();
+  a.setMode('race'); a.selectTrack(T1); a.startCup({ rounds: [T1] });     // « Course » : un championnat d'une manche
+  const c = await env.add('Cléo', 'c'); env.open();                // Cléo arrive pendant la manche
+  assert.equal(c.state, 'lobby');
+  assert.equal(c.track && c.track.id, T1.id, 'l\'arrivant voit le circuit');
+  assert.equal(typeof c.lobbyStatus, 'function', 'état du salon pour l\'arrivant');
+  assert.deepEqual(c.lobbyStatus(), { running: 'race', n: 0, total: 1, track: T1.name, next: true }, 'manche en cours, il jouera la suivante');
+  a.reportFinish(4000); b.reportFinish(4100); lobbyAll([a, b]);
+  assert.equal(c.track && c.track.id, T1.id, 'après la course, le circuit reste affiché');
+  } finally { env.end(); }
+}, 'arrivant pendant une « Course » : circuit visible et « manche en cours, tu joueras la suivante »');
 
 console.log('Annuaire des salons publics');
 test('fiche : valide, bornée, d\'une version compatible seulement ; jamais de balisage', () => {

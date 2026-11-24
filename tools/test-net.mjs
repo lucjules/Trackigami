@@ -13,7 +13,7 @@ import { RESUME_MS, RETRY_MS } from '../js/net/resume.js';
 import { RaceLogic } from '../js/raceLogic.js';
 import { Track } from '../js/track.js';
 import { PHYS_VER, NET_VER } from '../js/version.js';
-import { test, finish, precondition } from './harness.mjs';
+import { test, finish, precondition, bugConnu } from './harness.mjs';
 import { VirtualClock, FakeRealtime, FakeRTCNet } from './fake-realtime.mjs';
 import { PublicDirectory, LOBBY_CODE } from '../js/net/directory.js';
 import { createIceLoader } from '../js/net/ice.js';
@@ -793,5 +793,35 @@ await test('banc : aucun jeton dans les journaux (connexion, renouvellement, exp
   const leaks = out.filter((line) => w.rt.issued.some((t) => line.includes(t) || line.includes(t.split('.')[1])));
   assert.deepEqual(leaks, []);
 }));
+
+console.log('État de la salle : lancements (phase 16 ; défauts reproduits avant correction)');
+await bugConnu('TECH-042', async () => {
+  const env = fakeRoomEnv();
+  const host = await Room.create({ name: 'H', code: 'ABC234', makeSignaling: ({ code, selfId }) => env.make(selfId, code), makeMesh: env.makeMesh, now: () => 5 });
+  try {
+    host.selectTrack({ id: 'b-un-a1', name: 'Un' }); host.start();
+    const e1 = host.epoch;
+    host.selectTrack({ id: 'b-deux-b2', name: 'Deux' }); host.start();          // relance sur un autre circuit
+    host.reportFinish(4000, e1);                                                  // l'ancienne course (sur Un) finit pendant le chargement de Deux
+    assert.equal(host.results.has(host.selfId), false, 'l\'arrivée de l\'ancien lancement n\'est pas créditée au nouveau');
+  } finally { host.leave(); }
+}, 'arrivée d\'une course précédente pendant le chargement de la suivante : non créditée au nouveau circuit');
+await bugConnu('TECH-049', async () => {
+  if (!globalThis.localStorage) {
+    const mem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), key: (i) => [...m.keys()][i] ?? null, get length() { return m.size; } }; };
+    globalThis.localStorage = mem(); globalThis.sessionStorage = mem();
+  }
+  const { multiMethods } = await import('../js/app/multi.js');
+  const played = [];
+  const app = {
+    ui: { modalOpen: false, closeModal() {}, flash() {} }, _removeCupPanel() {}, _mountBoard() {}, multiLobby() {},
+    // un circuit de la communauté lent à télécharger, puis un circuit intégré immédiat
+    _resolveMultiTrack: async (room, spec) => { await new Promise((r) => setTimeout(r, spec.id.startsWith('c:') ? 60 : 5)); return { id: spec.id }; },
+    playTrack: (t) => played.push(t.id),
+  };
+  const room = { rules: null, closed: false, backToLobby() {} };
+  await Promise.all([multiMethods._startMultiRace.call(app, room, { id: 'c:lent' }, 0), multiMethods._startMultiRace.call(app, room, { id: 'b-vite' }, 0)]);
+  assert.deepEqual(played, ['b-vite'], 'seule la dernière demande est lancée : ' + played.join(', '));
+}, 'deux lancements rapprochés (circuit lent puis intégré) : la dernière demande gagne');
 
 await finish('Tous les tests réseau passent.');
