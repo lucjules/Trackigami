@@ -15,7 +15,7 @@ Une ligne par partie terminée ou abandonnée (après au moins 3 s de course), u
 | `outcome` | `finish` (arrivée) ou `quit` (abandon) |
 | `time` | temps de la partie (s) |
 | `progress` | à l'abandon : avancement atteint (0 à 1) |
-| `attempt` | numéro d'essai sur ce circuit pour cette installation |
+| `attempt` | numéro d'essai sur ce circuit pour cette installation (l'appareil ne retient que les 200 circuits les plus récemment joués : un circuit non joué depuis longtemps repart de 1, TECH-080 e) |
 | `respawns` | retours au checkpoint |
 | `medal` | médaille obtenue (arrivée) |
 | `pv` | version de la physique |

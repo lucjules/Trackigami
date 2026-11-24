@@ -14,6 +14,7 @@ export const STATE_KEY = 'telemetry.state';
 export const MAX_QUEUE = 300;            // au-delà, les plus anciens sont jetés
 export const BATCH = 50;                  // évènements par envoi (le serveur en accepte 50 au plus)
 export const MAX_AGE_MS = 14 * 86400000;  // un évènement plus vieux que ça n'est plus envoyé
+export const MAX_TRACKED = 200;          // circuits dont le numéro d'essai est gardé (les plus récemment joués) : la table des essais ne grossit plus avec chaque circuit de la communauté (TECH-080 e)
 const MIN_BACKOFF_MS = 30000, MAX_BACKOFF_MS = 3600000;
 
 // Identifiant d'un circuit pour les statistiques : « b-<id>-<empreinte> » (circuit intégré) -> <id> ; « daily-… » -> « daily » ;
@@ -41,6 +42,8 @@ export class Telemetry {
     this.state = this.store.get(STATE_KEY, null) || {};
     if (!/^[0-9a-f]{16}$/.test(this.state.install || '')) { this.state = { ...this.state, install: newInstallId(this.random), attempts: this.state.attempts || {} }; this._saveState(); }
     this.state.attempts = this.state.attempts || {};
+    this.state.attemptsAt = this.state.attemptsAt && typeof this.state.attemptsAt === 'object' ? this.state.attemptsAt : {};
+    if (this._trimAttempts()) this._saveState();                       // (un état déjà gonflé, écrit par une version d'avant la borne)
     this.flushing = false; this.nextTry = 0; this.backoff = MIN_BACKOFF_MS; this.timer = null;
   }
 
@@ -49,6 +52,17 @@ export class Telemetry {
   _load() {
     const q = this.store.get(QUEUE_KEY, []);
     return Array.isArray(q) ? q.filter((e) => e && typeof e === 'object') : [];
+  }
+  // Borne la table des essais (TECH-080 e) : au plus MAX_TRACKED circuits, les plus récemment joués ; les plus anciens sont oubliés (leur prochain essai repart de 1 : seule
+  // conséquence, sur des circuits qu'on n'a plus joués depuis longtemps). Une entrée sans date (état d'une version précédente) est la plus ancienne. Renvoie vrai si quelque chose a été retiré.
+  _trimAttempts() {
+    const a = this.state.attempts, at = this.state.attemptsAt;
+    const keys = Object.keys(a);
+    for (const k of Object.keys(at)) if (!Object.hasOwn(a, k)) delete at[k];
+    if (keys.length <= MAX_TRACKED) return false;
+    keys.sort((x, y) => (+at[x] || 0) - (+at[y] || 0) || (x < y ? -1 : x > y ? 1 : 0));
+    for (const k of keys.slice(0, keys.length - MAX_TRACKED)) { delete a[k]; delete at[k]; }
+    return true;
   }
   _saveQueue() { this.store.set(QUEUE_KEY, this.queue); }
   _saveState() { this.store.set(STATE_KEY, this.state); }
@@ -62,6 +76,8 @@ export class Telemetry {
     if (t == null) return false;
     const attempt = (this.state.attempts[track] || 0) + 1;
     this.state.attempts[track] = Math.min(attempt, 100000);
+    this.state.attemptsAt[track] = this.now();
+    this._trimAttempts();
     this._saveState();
     const ev = { track, outcome, time: Math.round(t * 1000) / 1000, attempt: Math.min(attempt, 100000), respawns: Math.max(0, Math.min(1000, respawns | 0)), pv: PHYS_VER, ts: this.now() };
     const p = num(progress, 0, 1);

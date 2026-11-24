@@ -1,7 +1,7 @@
 // Statistiques anonymes : file locale, accord du joueur, lots, échecs réseau, contenu envoyé : node tools/test-telemetry.mjs   (npm test)
 import assert from 'node:assert/strict';
 import { test, finish } from './harness.mjs';
-import { Telemetry, trackIdOf, newInstallId, MAX_QUEUE, BATCH, MAX_AGE_MS, QUEUE_KEY } from '../js/telemetry.js';
+import { Telemetry, trackIdOf, newInstallId, MAX_QUEUE, BATCH, MAX_AGE_MS, QUEUE_KEY, MAX_TRACKED, STATE_KEY } from '../js/telemetry.js';
 import { PHYS_VER } from '../js/version.js';
 import { analyse, toMarkdown, parseRows } from './telemetry-report.mjs';
 import { proposeFromSample, proposeFromHumans, quantile } from './medals.mjs';
@@ -171,6 +171,42 @@ test('rapport Markdown et lecture CSV', () => {
   const rows = parseRows(csv, 'x.csv');
   assert.equal(rows[0].track, 'eclats'); assert.equal(+rows[0].time, 21.5);
   assert.equal(analyse(rows, { defs: [], golden: {} }).tracks[0].finishers, 1);
+});
+
+
+console.log('Table des essais bornée (TECH-080 e)');
+test('une entrée par circuit de la communauté ne fait plus grossir la table des essais sans fin : au plus MAX_TRACKED, les plus récemment joués', () => {
+  const { tm, store, clock } = setup();
+  const id = (n) => 'u-c' + n.toString(36).padStart(5, '0');
+  for (let n = 0; n < MAX_TRACKED * 5; n++) { clock.t += 1000; assert.ok(tm.record({ trackKey: id(n), outcome: 'finish', time: 30 })); }
+  assert.equal(Object.keys(tm.state.attempts).length, MAX_TRACKED, 'bornée');
+  assert.equal(Object.keys(store.get(STATE_KEY).attempts).length, MAX_TRACKED, 'et dans le stockage aussi');
+  assert.ok(Object.keys(store.get(STATE_KEY).attemptsAt).length <= MAX_TRACKED, 'les dates suivent');
+  assert.ok(Object.keys(tm.state.attempts).includes('u_' + id(MAX_TRACKED * 5 - 1).slice(2)), 'le dernier joué est gardé');
+  assert.ok(!Object.keys(tm.state.attempts).includes('u_' + id(0).slice(2)), 'le plus ancien est oublié');
+});
+test('le numéro d\'essai d\'un circuit rejoué souvent est conservé (il reste récent), celui d\'un circuit ancien repart de 1', () => {
+  const { tm, clock } = setup();
+  for (let n = 0; n < 3; n++) { clock.t += 1000; tm.record({ trackKey: KEY, outcome: 'quit', time: 10, progress: 0.5 }); }
+  assert.equal(tm.state.attempts.eclats, 3);
+  for (let n = 0; n < MAX_TRACKED + 20; n++) { clock.t += 1000; tm.record({ trackKey: 'u-z' + n.toString(36).padStart(4, '0'), outcome: 'finish', time: 30 }); clock.t += 1000; tm.record({ trackKey: KEY, outcome: 'quit', time: 10, progress: 0.5 }); }
+  assert.equal(tm.state.attempts.eclats, 3 + MAX_TRACKED + 20, 'un circuit joué sans cesse n\'est jamais évincé : son numéro d\'essai continue');
+  assert.equal(Object.keys(tm.state.attempts).length, MAX_TRACKED);
+});
+test('un état déjà gonflé (version d\'avant la borne) est élagué au chargement ; les entrées sans date sont les plus anciennes ; un état abîmé ne plante pas', () => {
+  const mem = new Map(); const attempts = {}, attemptsAt = {};
+  for (let n = 0; n < 1000; n++) attempts['u_x' + n] = n + 1;
+  for (let n = 900; n < 1000; n++) attemptsAt['u_x' + n] = 5000 + n;
+  mem.set(STATE_KEY, JSON.stringify({ install: '0102030405060708', attempts }));
+  mem.set('autre', '1');
+  const store = { get: (k, d) => (mem.has(k) ? JSON.parse(mem.get(k)) : d), set: (k, v) => { mem.set(k, JSON.stringify(v)); } };
+  const tm = new Telemetry({ store, enabled: () => true, now: () => 9000 });
+  assert.equal(Object.keys(tm.state.attempts).length, MAX_TRACKED);
+  assert.equal(JSON.parse(mem.get(STATE_KEY)).attempts['u_x999'], 1000, 'le plus récent est gardé avec son compteur');
+  assert.equal(Object.keys(JSON.parse(mem.get(STATE_KEY)).attempts).length, MAX_TRACKED, 'écrit élagué dans le stockage');
+  mem.set(STATE_KEY, JSON.stringify({ install: '0102030405060708', attempts: null, attemptsAt: 7 }));
+  const bad = new Telemetry({ store, enabled: () => true, now: () => 1 });
+  assert.deepEqual(bad.state.attempts, {}); assert.ok(bad.record({ trackKey: KEY, outcome: 'finish', time: 20 }));
 });
 
 await finish('Tous les tests des statistiques anonymes passent.');
