@@ -13,7 +13,7 @@ import { RESUME_MS, RETRY_MS } from '../js/net/resume.js';
 import { RaceLogic } from '../js/raceLogic.js';
 import { Track } from '../js/track.js';
 import { PHYS_VER, NET_VER } from '../js/version.js';
-import { test, finish, bugConnu, precondition } from './harness.mjs';
+import { test, finish, precondition } from './harness.mjs';
 import { VirtualClock, FakeRealtime, FakeRTCNet } from './fake-realtime.mjs';
 import { PublicDirectory, LOBBY_CODE } from '../js/net/directory.js';
 import { createIceLoader } from '../js/net/ice.js';
@@ -744,7 +744,7 @@ await test('serveurs ICE : sans réponse du chargeur, une liaison n\'attend pas 
 }));
 
 console.log('Banc simulé : capacité (TECH-086)');
-await bugConnu('TECH-086', () => scenario(async (w) => {
+await test('salle à 8 avec un absent (TECH-086) : le 9e est refusé, l\'absent retrouve sa place', () => scenario(async (w) => {
   w.rt.ghostMs = 2000;
   const ids = ['ana', 'bea', 'cid', 'dan', 'eve', 'fay', 'gus', 'hal'];
   const rooms = [await w.host('ana')];
@@ -761,8 +761,25 @@ await bugConnu('TECH-086', () => scenario(async (w) => {
   assert.ok(rooms.slice(0, 7).every((r) => !r.mesh.links.has('ivy')), 'aucun lien pour le 9e');
   await w.clock.advance(15000);
   assert.ok(rooms.slice(0, 7).every((r) => r.members.get('hal') && r.members.get('hal').link === 'open'), 'Hal revenu retrouve sa place et ses liaisons');
+  assert.ok(rooms.slice(0, 7).every((r) => !r.members.has('ivy')), 'le 9e reste refusé : la salle est pleine');
   void ivy;
-}), 'salle à 8 avec un absent : le 9e est refusé, l\'absent retrouve sa place');
+}));
+await test('salle à 8 (TECH-086) : le 9e refusé est admis dès que la place gardée est rendue', () => scenario(async (w) => {
+  w.rt.ghostMs = 2000;
+  const ids = ['ana', 'bea', 'cid', 'dan', 'eve', 'fay', 'gus', 'hal'];
+  const rooms = [await w.host('ana')];
+  for (const id of ids.slice(1)) rooms.push(await w.join(id));
+  await w.clock.advance(5000);
+  w.rt.cut('hal', Infinity); w.rtc.cut('hal');           // Hal ne revient pas
+  await w.clock.advance(12500);
+  precondition(rooms[0].members.get('hal').link === 'away', 'Hal est absent (place gardée)');
+  const ivy = await w.join('ivy');
+  await w.clock.advance(1500);
+  precondition(!rooms[0].members.has('ivy'), 'Ivy refusée tant que la place de Hal est gardée');
+  await w.clock.advance(RESUME_MS + 5000);
+  assert.ok(rooms.slice(0, 7).every((r) => !r.members.has('hal')), 'place de Hal rendue');
+  assert.ok(rooms.slice(0, 7).every((r) => w.linked(r, ivy)), 'Ivy admise et reliée à tous');
+}));
 
 await test('banc : aucun jeton dans les journaux (connexion, renouvellement, expiration)', () => scenario(async (w) => {
   const out = [];

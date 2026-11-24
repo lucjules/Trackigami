@@ -85,6 +85,7 @@ export class Room extends Emitter {
     this.cup = null;                    // championnat en cours ou terminé (Championship) ; null en mode libre
     this.cupState = null;               // manche en cours : { phase: 'racing' | 'results' | 'done', n, roster, finishes, t0, firstAt, until }
     this.closed = false;
+    this._refused = new Set();          // arrivants refusés faute de place (places gardées comprises : TECH-086), admis dès qu'une place se libère
   }
 
   // ---- Ouverture -----------------------------------------------------------------------------------------------------
@@ -286,6 +287,17 @@ export class Room extends Emitter {
     this.emit('left', id);
     if (!wasHost && this.isHost) this._becomeHost();
     this._cupTick();                 // un joueur qui part ne doit pas bloquer la manche (ni, si c'était l'hôte, la rendre orpheline)
+    this._readmit();
+  }
+
+  // Une place s'est libérée : les arrivants refusés encore présents dans l'annuaire sont admis, dans l'ordre d'arrivée.
+  _readmit() {
+    for (const id of [...this._refused]) {
+      if (this.closed || this.members.size + 1 >= MAX_PLAYERS) return;
+      this._refused.delete(id);
+      const meta = this.signaling && this.signaling.peers && this.signaling.peers.get(id);
+      if (meta) this._onPeer(id, meta);
+    }
   }
 
   // Nouvel hôte (l'ancien est parti) : il se marque, pour que l'ancien, s'il revient, ne reprenne pas la main.
@@ -299,6 +311,7 @@ export class Room extends Emitter {
 
   _dispose() {
     this.closed = true;
+    this._refused.clear();
     clearInterval(this._pingTimer); clearInterval(this._cupTimer);
     try { this.mesh && this.mesh.closeAll(); } catch { /* déjà fermé */ }
     try { this.signaling && this.signaling.leave(); } catch { /* déjà fermé */ }
@@ -326,6 +339,10 @@ export class Room extends Emitter {
   _onPeer(id, meta, info = null) {
     if (id === this.selfId || !meta) return;
     const prev = this.members.get(id);
+    // TECH-086 : 8 joueurs au plus, places gardées (absents) comprises. L'arrivant ne voit que l'annuaire (pas les absents) : ce sont les membres qui le
+    // refusent (aucune liaison, aucune place sur la grille) ; il est admis dès qu'une place se libère. Un absent qui revient retrouve toujours la sienne.
+    if (!prev && this.members.size + 1 >= MAX_PLAYERS) { this._refused.add(id); return; }
+    this._refused.delete(id);
     const back = prev && prev.link === 'away';                     // retour d'un joueur coupé : sa liaison est à refaire
     if (back) this.mesh.removePeer(id);
     const m = { id, name: String(meta.name || '?').slice(0, 20), host: !!meta.host, ready: !!meta.ready, car: cleanCarMeta(meta.car), want: meta.want === 'rematch' ? 'rematch' : null, mode: MODES.includes(meta.mode) ? meta.mode : null, racing: !!meta.racing, v: meta.v, net: meta.net, t: meta.t || 0, link: prev && !back ? prev.link : 'connecting', rtt: prev ? prev.rtt : 0, token: prev ? prev.token : null, everOpen: !!(prev && prev.everOpen),
@@ -343,6 +360,7 @@ export class Room extends Emitter {
   // Disparu de l'annuaire : coupure ou départ ; sans « bye », on garde sa place RESUME_MS. TECH-046 : si sa liaison est ouverte, c'est sa signalisation qui est
   // tombée, pas lui : on continue de jouer avec lui (sa place n'est gardée qu'une fois la liaison tombée aussi, voir _linkDown).
   _onLeave(id) {
+    this._refused.delete(id);
     const m = this.members.get(id);
     if (!m) return;
     m.listed = false;
