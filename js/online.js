@@ -436,20 +436,42 @@ class OnlineClient {
     return this._fetch('/functions/v1/submit-score', { method: 'POST', body: { trackKey, code, inputs, time, physVer } });
   }
 
+  // Colonnes demandées au classement, de la plus complète à la plus simple (TECH-021). Chaque colonne récente peut manquer, ou ne pas être ACCORDÉE en lecture :
+  //   has_ghost (étape 7), players.title (étape 8 + droits de l'étape 14), ghost_veh (étape 7, lecture accordée par l'étape 20 : avant elle, PostgreSQL refusait la requête
+  //   complète). Le jeu marche AVEC ou SANS chacune : un refus de colonne fait passer au niveau suivant, MAIS pas une autre erreur (réseau, serveur, trop d'essais), qui remonte.
+  static LB_SELECTS = [
+    'time,player,updated_at,has_ghost,ghost_veh,players!scores_player_fkey(name,title)',      // 0 : tout (étapes 7, 8 et 20 appliquées)
+    'time,player,updated_at,has_ghost,players!scores_player_fkey(name,title)',                // 1 : sans la colonne véhicule (étape 20 pas appliquée)
+    'time,player,updated_at,has_ghost,ghost_veh,players!scores_player_fkey(name)',            // 2 : sans titres (étape 8 ou droit de players.title absents)
+    'time,player,updated_at,has_ghost,players!scores_player_fkey(name)',                      // 3 : ni titres ni véhicule
+    'time,player,updated_at,players!scores_player_fkey(name)',                                // 4 : sans fantômes (étape 7 absente)
+  ];
+  // Une erreur qui vient d'un schéma ou d'un droit qui diffère (colonne absente ou non accordée, relation inconnue) : on peut réessayer plus simple. Pas le réseau, ni le débit.
+  static schemaMismatch(e) { return !!e && (e.code === 'denied' || (e.code === 'http' && (e.status === 400 || e.status === 404))); }
+
+  // Lit le classement au niveau le plus complet que la base accorde ; le niveau qui a marché est retenu (30 min : après l'étape 20 appliquée, le jeu le retrouve sans recharger).
+  async _leaderboardRows(q) {
+    const now = Date.now();
+    if (this._lbLevel && now - (this._lbAt || 0) > 30 * 60000) this._lbLevel = 0;
+    let lastErr = null;
+    for (let i = this._lbLevel || 0; i < OnlineClient.LB_SELECTS.length; i++) {
+      q.set('select', OnlineClient.LB_SELECTS[i]);
+      try {
+        const rows = await this._fetch('/rest/v1/scores?' + q.toString());
+        this._lbLevel = i; this._lbAt = now;
+        return rows;
+      } catch (e) { lastErr = e; if (!OnlineClient.schemaMismatch(e)) throw e; }
+    }
+    throw lastErr;
+  }
+
   async leaderboard(trackKey, physVer, limit = 10) {
     const q = new URLSearchParams();
     q.set('track_key', 'eq.' + trackKey);
     q.set('phys_ver', 'eq.' + physVer);
     q.set('order', 'time.asc,updated_at.asc');
     q.set('limit', String(limit));
-    // has_ghost (étape 7) et players.title (étape 8) : colonnes récentes ; absentes (étape pas lancée), on relit sans elles, de la plus complète à la plus simple.
-    let top, lastErr;
-    // ghost_veh (étape 7) : les véhicules de la course (Race Hub : véhicule à l'arrivée).
-    for (const sel of ['time,player,updated_at,has_ghost,ghost_veh,players!scores_player_fkey(name,title)', 'time,player,updated_at,has_ghost,ghost_veh,players!scores_player_fkey(name)', 'time,player,updated_at,players!scores_player_fkey(name)']) {
-      q.set('select', sel);
-      try { top = await this._fetch('/rest/v1/scores?' + q.toString()); lastErr = null; break; } catch (e) { lastErr = e; }
-    }
-    if (lastErr) throw lastErr;
+    const top = await this._leaderboardRows(q);
     // Ma place, si j'ai un temps.
     let me = null;
     if (this.uid) {

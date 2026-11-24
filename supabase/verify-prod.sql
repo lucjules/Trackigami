@@ -10,8 +10,8 @@
 -- Les lignes « après 15b » ne sont attendues QU'APRÈS l'étape 15b (voir MIGRATIONS.md) : avant, un « ÉCART » sur ces lignes est NORMAL.
 -- Les lignes « lisibilité (TECH-021) » vérifient que le jeu PEUT LIRE les colonnes qu'il demande (scores : ghost_veh, has_ghost, splits, track_name… ; players : name, title) et ne
 -- peut PAS lire scores.inputs ni scores.ghost. Elles contrôlent les DROITS (has_column_privilege), pas l'existence : une colonne présente mais illisible est ce qui dégrade le
--- classement mondial (boutons de fantôme et titres absents). UN « ÉCART » SUR scores.ghost_veh EST ATTENDU tant que le correctif SQL de la phase 13 n'est pas appliqué
--- (aucune étape du dépôt n'accorde cette lecture) : voir supabase/MIGRATIONS.md, « Contrôle des droits de lecture ». Le lire, ne pas le « corriger » ici.
+-- classement mondial (boutons de fantôme et titres absents). Un « ÉCART » ILLISIBLES : ghost_veh signifie que l'étape 20 (supabase/etape20-droits-et-regles.sql) n'est pas appliquée :
+-- le jeu fonctionne quand même (repli sans cette colonne) mais le classement est dégradé. Voir supabase/MIGRATIONS.md, « Contrôle des droits de lecture ».
 -- =====================================================================================
 with
 t(n, ord) as (values ('rate_hits', 1), ('track_binds', 2), ('submit_rate', 3), ('scores', 4), ('tracks', 5)),

@@ -38,6 +38,7 @@ $P -d $DB -f supabase/etape15b-publication-verifiee.sql >/dev/null
 $P -d $DB -f supabase/etape16-durcissement.sql >/dev/null
 if [ -z "${AVANT:-}" ]; then $P -d $DB -f supabase/etape17-securite.sql >/dev/null; $P -d $DB -f supabase/etape17-securite.sql >/dev/null; fi          # relançable
 if [ -z "${AVANT:-}" ]; then $P -d $DB -f supabase/etape18-maintenance.sql >/dev/null; $P -d $DB -f supabase/etape19-avis.sql >/dev/null; fi          # (0.12.5) les attaques se rejouent sur l'état final de la base
+if [ -z "${AVANT:-}" ]; then $P -d $DB -f supabase/etape20-droits-et-regles.sql >/dev/null; $P -d $DB -f supabase/etape20-droits-et-regles.sql >/dev/null; fi          # (0.16.12) relançable
 
 # verify-prod.sql (lecture seule) sur la base COMPLÈTE (étapes 1 à 17), avant tout objet d'essai : aucune ligne MANQUE ni ÉCART (ses lignes « étape 17 », « étape 16 » et « RLS partout »).
 VP="$($P -d $DB -At -F'|' -f supabase/verify-prod.sql)"
@@ -46,6 +47,7 @@ if [ -z "${AVANT:-}" ]; then
   [ "$(echo "$VP" | grep -c 'étape 17')" -ge 9 ] || { echo "  FAIL verify-prod.sql ne contient pas les lignes de l'étape 17"; VPFAIL=1; }
   [ "$(echo "$VP" | grep -c 'étape 18')" -ge 8 ] || { echo "  FAIL verify-prod.sql ne contient pas les lignes de l'étape 18"; VPFAIL=1; }
   [ "$(echo "$VP" | grep -c 'étape 19')" -ge 1 ] || { echo "  FAIL verify-prod.sql ne contient pas la ligne de l'étape 19"; VPFAIL=1; }
+  [ "$(echo "$VP" | grep -c 'lisibilité (TECH-021)')" -ge 6 ] || { echo "  FAIL verify-prod.sql ne contient pas les six lignes de lisibilité des colonnes (TECH-021)"; VPFAIL=1; }
 else VPFAIL=0; fi
 
 cat > "$TMP/attaques.sql" <<'SQL'
@@ -109,6 +111,16 @@ select public.chk('A5 aucun truncate / references / trigger pour anon ni authent
   and (has_table_privilege('anon', c.oid, 'truncate') or has_table_privilege('anon', c.oid, 'trigger') or has_table_privilege('authenticated', c.oid, 'truncate') or has_table_privilege('authenticated', c.oid, 'references') or has_table_privilege('authenticated', c.oid, 'trigger'))));
 select public.chk('A6 colonnes sensibles illisibles : scores.inputs et scores.ghost (anon et authenticated), players.created_at reste lisible', not has_column_privilege('anon', 'public.scores', 'inputs', 'select') and not has_column_privilege('authenticated', 'public.scores', 'inputs', 'select')
   and not has_column_privilege('anon', 'public.scores', 'ghost', 'select') and not has_column_privilege('authenticated', 'public.scores', 'ghost', 'select'));
+-- TECH-021 : le classement mondial demande ghost_veh (js/online.js) ; la requête de colonnes doit RÉUSSIR sous les deux rôles du jeu, et inputs / ghost rester refusées (le droit n'est pas élargi).
+-- Les requêtes sont exécutées pour de bon avec les droits de chaque rôle (rows_of renvoie -1 sur un refus de PostgreSQL).
+set role anon;
+select public.chk('A6b TECH-021 : anon lit les colonnes du classement mondial, ghost_veh comprise (requête réelle), mais ni inputs ni ghost, ni l''ensemble des colonnes (select *)', public.rows_of($$select time, player, updated_at, has_ghost, ghost_veh, splits, track_name from scores$$) >= 0
+  and public.rows_of($$select inputs from scores$$) = -1 and public.rows_of($$select ghost from scores$$) = -1 and public.rows_of($$select * from scores$$) = -1);
+reset role;
+set role authenticated; select public.as_user('00000000-0000-0000-0000-0000000000b0');
+select public.chk('A6c TECH-021 : authenticated lit les colonnes du classement mondial, ghost_veh comprise (requête réelle), mais ni inputs ni ghost', public.rows_of($$select time, player, updated_at, has_ghost, ghost_veh, splits, track_name from scores$$) >= 0
+  and public.rows_of($$select inputs from scores$$) = -1 and public.rows_of($$select ghost from scores$$) = -1);
+reset role;
 select public.chk('A7 tables internes illisibles de anon et authenticated : rate_hits, submit_rate, track_binds, run_stats, moderators, comment_reports, mode_reports, track_reports, track_plays, mode_plays', not exists (
   select 1 from unnest(array['rate_hits', 'submit_rate', 'track_binds', 'run_stats', 'moderators', 'comment_reports', 'mode_reports', 'track_reports', 'track_plays', 'mode_plays']) t
   where has_table_privilege('anon', 'public.' || t, 'select') or has_table_privilege('authenticated', 'public.' || t, 'select')));
