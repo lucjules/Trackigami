@@ -27,8 +27,10 @@ Trafic : environ 0,8 Ko/s par liaison, rien sur Supabase pendant la course.
 
 Les serveurs STUN publics (`iceServers` de `js/config.js`) suffisent pour la plupart des box. Un réseau d'entreprise, ou certaines connexions
 mobiles (NAT symétrique : 10 à 20 % des paires), empêche la liaison directe : la salle affiche alors « ✕ liaison impossible » pour cet adversaire.
-Il faut pour cela un **relais TURN**. Le jeu l'obtient **à l'ouverture de chaque salle** auprès de la fonction serveur `ice`, qui fabrique des identifiants
-**à durée limitée** (1 h par défaut, 2 h au plus ; le jeu les redemande aux 3/4 de leur durée) : aucun secret durable n'est lisible dans le jeu. Sans la fonction (ou en cas de panne), le jeu retombe sur le STUN seul, sans attendre plus de 2,5 s.
+Il faut pour cela un **relais TURN**. Le jeu l'obtient auprès de la fonction serveur `ice`, qui fabrique des identifiants
+**à durée limitée** (1 h par défaut, 2 h au plus) : aucun secret durable n'est lisible dans le jeu. Depuis 0.16.14 (TECH-050), les serveurs sont redemandés **à chaque connexion
+neuve** (arrivant tardif, liaison refaite après une coupure) et **avant chaque relance ICE** ; le chargeur ne refait la requête qu'aux 3/4 de leur durée (sinon il rend
+ceux qu'il a). Sans la fonction (ou en cas de panne), le jeu retombe sur le STUN seul, sans attendre plus de 2,5 s.
 
 Déploiement (une fois, Supabase > Edge Functions) :
 1. Nouvelle fonction **`ice`**, code = `supabase/functions/ice/index.ts` (généré : `npm run build:function`). Laisser « Verify JWT » activé (le jeu envoie sa clé publique) : la fonction exige en plus une **session Supabase valide** (invité ou compte) et **refuse** de répondre si `SUPABASE_URL` / la clé de service lui manquent. Prérequis : `supabase/etape15-backend.sql` (limitation en base).
@@ -44,15 +46,64 @@ Sans secret configuré, la fonction répond 501 et le jeu n'insiste pas avant 10
 ## Coupures et reconnexion (0.9.38, protocole `NET_VER` 4)
 
 Une coupure (Wi-Fi qui saute, passage en 4G, onglet rechargé) ne fait plus sortir de la salle (`js/net/resume.js`) :
-- **le joueur coupé** garde sa salle ouverte et sa course continue ; il retente de rejoindre le canal avec le **même identifiant** (après 0,8, 1,5, 2,5, 4 et 6 s) ;
+- **le joueur coupé** garde sa salle ouverte et sa course continue ; il retente de rejoindre le canal avec le **même identifiant** (après 0,8, 1,5, 2,5, 4 et 6 s,
+  puis toutes les 6 s tant qu'une de ses liaisons de jeu est ouverte ; sans aucune, il abandonne au-delà de 20 s) ;
   un onglet rechargé reprend sa place s'il revient dans les 20 s (identifiant et jeton gardés en `sessionStorage`) ;
-- **les autres** lui gardent sa place **20 s** (« ⏳ reconnexion » dans la liste) : il reste sur la grille, la manche ne se clôt pas sans lui (dans la limite
-  des délais habituels), et son arrivée compte s'il finit ; au-delà, sa place est rendue ;
+- **les autres** continuent de jouer avec lui tant que leur liaison WebRTC marche (0.16.14, TECH-046 : une coupure de la seule signalisation ne fige plus rien) ;
+  quand sa liaison tombe aussi, ils lui gardent sa place **20 s** (« ⏳ reconnexion » dans la liste) : il reste sur la grille, la manche ne se clôt pas sans lui (dans la
+  limite des délais habituels), et son arrivée compte s'il finit ; au-delà, sa place est rendue ;
 - **à son retour**, chacun lui envoie `hello`, l'hôte lui renvoie l'état complet (règles, circuit ou championnat **avec les arrivées de la manche en cours**) et
   lui renvoie l'arrivée qu'il aurait annoncée pendant la coupure ;
 - **un départ volontaire** (« Quitter la salle ») envoie `bye` : sa place n'est pas gardée ;
 - **hôte remplacé** : l'hôte coupé plus de 20 s est remplacé par l'identifiant le plus petit, qui se **marque** hôte (`hostover`) ; l'ancien, s'il revient,
   ne reprend pas la main (son état pourrait être périmé).
+
+## Signalisation et liaisons (0.16.14, audit LOT-8b, `TRANS-06`)
+
+Ce qui est fait côté client (`js/net/signaling.js`, `transport.js`, `room.js`, `directory.js`), **sans changer aucun format de message** (`NET_VER` reste 4) :
+
+- **Présence par connexion** (TECH-011) : comme le client Phoenix officiel, une entrée par connexion (`phx_ref`) ; un joueur est présent tant qu'il lui reste une
+  entrée ; un départ (`leaves`) ne retire que son entrée. Reconnexion avant que le serveur ait fermé l'ancienne connexion, ou onglet dupliqué : aucun faux départ.
+  Repli : une entrée sans `phx_ref` vaut pour toute la clé.
+- **Pertes** (TECH-012) : `phx_close`, `phx_error`, un message `system` d'erreur (jeton expiré ou refusé) et un **battement sans réponse au bout de 10 s** ferment la
+  connexion et déclenchent la reconnexion. Le **jeton du canal** est renouvelé par un message `access_token` dans sa dernière minute et demie (lu dans le JWT) ;
+  après l'échéance, le serveur ferme le canal et la reconnexion prend un jeton neuf. Aucun jeton n'est écrit dans un journal.
+- **Tentatives abandonnées** (TECH-044, TECH-082) : délai, refus, fermeture ou départ pendant la jonction : la connexion est fermée (au revoir si le canal était
+  rejoint), une réponse tardive ne publie plus rien. Même règle pour l'annuaire ; décocher « Salon public » pendant l'annonce n'annonce rien et n'affiche aucune erreur.
+- **Signalisation des seuls membres** (TECH-045) : un message d'un identifiant absent de l'annuaire (inventé, ou joueur parti dont un candidat ICE arrive en retard)
+  n'ouvre aucune liaison ; une liaison sans membre est fermée.
+- **Liaisons découplées** (TECH-046) : la signalisation peut tomber, les liaisons WebRTC ouvertes continuent. Une liaison n'est refaite (connexion neuve) que si elle
+  tombe vraiment : canal fermé, ou **silence de 10 s malgré 3 pings** ; au retour de la signalisation, les liaisons qui n'étaient pas ouvertes sont refaites.
+  Les arrivées de course libre qu'un joueur n'a pas reçues (liaison fermée, ou envoyées depuis sa dernière réponse) lui sont **renvoyées** à la réouverture.
+  L'hôte conduit la manche tant qu'il a des liaisons ouvertes, même sans signalisation.
+- **Capacité** (TECH-086) : 8 joueurs **places gardées comprises**. L'arrivant ne voit que l'annuaire (les absents n'y sont pas) : ce sont les membres qui
+  refusent un 9e (aucune liaison, pas de place sur la grille) et l'admettent dès qu'une place est rendue. **Limite** : le 9e n'est pas prévenu par un message
+  (il faudrait un nouveau message, donc `NET_VER` 5) ; il voit les joueurs en « connexion… ».
+
+### À vérifier sur le vrai Realtime (rien de cela n'a été observé : le banc `tools/fake-realtime.mjs` est une modélisation)
+
+Sur un projet de test, deux navigateurs (ou deux profils), la console ouverte. Pour observer les messages **sans jamais afficher de jeton** :
+`const s = copytrack.room.signaling, log = []; const on = s.ws.onmessage; s.ws.onmessage = (e) => { const m = JSON.parse(e.data); if (/presence|phx_|system/.test(m.event)) log.push({ t: Date.now(), e: m.event, p: JSON.stringify(m.payload).replace(/"access_token":"[^"]+"/, '"access_token":"…"') }); on(e); };`
+
+1. **Deux connexions de la même clé** (TECH-011). Dans l'onglet de Bea : `const S = s.constructor, s2 = new S({ code: s.code, selfId: s.selfId, getToken: s.getToken }); await s2.join(s.meta);`
+   Chez Ana : `copytrack.room.signaling._pres.get('<id de Bea>').length` doit valoir 2 ; le `presence_diff` reçu ne contient que la nouvelle entrée (`phx_ref` distinct).
+   Puis `s2.leave()` : chez Ana, une entrée, `peers.has('<id de Bea>')` reste vrai, aucun « ⏳ ». Noter : `phx_ref` toujours présent dans `leaves` ? `phx_ref_prev` sur une mise à
+   jour (`setReady`) ? Si `leaves` arrive sans `phx_ref`, le repli s'applique (comportement d'avant).
+2. **Reconnexion avant la fermeture de l'ancienne** : chez Bea, DevTools › Réseau › « Hors ligne » 5 s (la WebSocket tombe ; le WebRTC n'est en principe pas
+   concerné par ce réglage : à confirmer). Mesurer chez Ana le délai avant le `leaves` de l'ancienne connexion, et si la nouvelle arrive avant. Attendu : Bea reste
+   reliée chez Ana (liste sans « ⏳ »), sa voiture continue d'avancer, `copytrack.room.reconnecting` repasse à faux chez Bea.
+3. **Expiration du jeton** (TECH-012). Réduire la durée des JWT du projet de test (Auth › JWT expiry, par exemple 300 s), jouer 15 min. Compter chez Bea les envois :
+   `const send = s.ws.send.bind(s.ws); let n = 0; s.ws.send = (t) => { if (JSON.parse(t).event === 'access_token') n++; send(t); };` → `n` augmente toutes les ~5 min, aucun
+   `system` d'erreur ni `phx_close` dans `log`, la présence reste. Puis couper le renouvellement (`s.getToken = null; clearTimeout(s._tokTimer)`) et attendre l'échéance :
+   relever le message exact du serveur (`system` avec `status: 'error'` ? suivi de `phx_close` ?) et vérifier que `reconnecting` passe à vrai puis à faux.
+4. **Battements** : relever qu'une réponse `phx_reply` (sujet `phoenix`) suit chaque battement en moins de 10 s, y compris sur mobile en 4G ; sinon, augmenter `HEARTBEAT_TIMEOUT`.
+5. **Réponse tardive** (TECH-044) : difficile à provoquer ; à défaut, vérifier qu'après un échec de jonction (code de salle refusé, réseau coupé) aucune connexion ne
+   reste ouverte (DevTools › Réseau › WS : toutes fermées sauf la connexion active).
+6. **Salon public retiré pendant l'annonce** (TECH-082) : cocher puis décocher « Salon public » aussitôt ; *Salons publics* (autre navigateur) : rien n'apparaît.
+7. **Serveurs ICE** (TECH-050) : fonction `ice` déployée avec `ICE_TTL_S=600` ; salle ouverte plus de 8 min, puis un arrivant derrière un réseau qui exige le relais : liaison
+   ouverte ; `copytrack.room.mesh.links.get('<id>').pc.getConfiguration().iceServers` porte un nom d'utilisateur récent (horodaté).
+8. **Capacité** (TECH-086) : 8 joueurs, l'un passe hors ligne (place « ⏳ ») ; un 9e rejoint : il n'apparaît chez aucun des 7 ; au retour de l'absent, celui-ci retrouve sa place ;
+   s'il ne revient pas, le 9e est admis 20 s plus tard.
 
 **Collisions unifiées** : la voiture de l'autre est affichée avec ~100 ms d'interpolation et une demi-latence de retard. Pour les collisions douces, elle est
 ramenée **au même instant** que la sienne (position + vitesse × retard, plafonné à 0,25 s) : les deux joueurs voient le même contact au même moment, au lieu
@@ -123,7 +174,8 @@ Choisis par l'hôte dans le salon :
 ## Tests
 
 - `npm test` : paquets, interpolation, téléportation, assombrissement, protocole Phoenix (faux WebSocket), négociation WebRTC
-  (faux RTCPeerConnection), salon (`tools/test-net.mjs`) ; championnat, avancement, grille, collisions, annuaire (`tools/test-manche.mjs`) ; serveurs ICE et fonction `ice` (`tools/test-ice.mjs`).
+  (faux RTCPeerConnection), salon, et le **banc simulé** (horloge virtuelle, faux Realtime à présence par connexion et pannes, faux WebRTC : `tools/fake-realtime.mjs`)
+  pour la présence, les pertes, le jeton, les tentatives abandonnées, les liaisons découplées, les serveurs ICE et la capacité (`tools/test-net.mjs`) ; championnat, avancement, grille, collisions, annuaire (`tools/test-manche.mjs`) ; serveurs ICE et fonction `ice` (`tools/test-ice.mjs`).
 - Essai à deux onglets sans serveur : `?net=local` dans l'URL (signalisation par BroadcastChannel ; le WebRTC est réel).
 
 ## Limites de l'architecture actuelle (à lire avant d'attendre plus)
