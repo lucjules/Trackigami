@@ -681,6 +681,15 @@ export class Room extends Emitter {
 
   get cupActive() { return !!(this.cup && !this.cup.finished); }
 
+  // GAME-008 : ce que le salon d'un joueur doit dire quand une manche tourne sans lui (arrivé pendant la course, ou revenu trop tard) :
+  // { running: 'race' (« Course », une seule manche) | 'cup', n, total, track (nom du circuit), next: true (il jouera la suivante) } ; null sinon.
+  lobbyStatus() {
+    const st = this.cupState, cup = this.cup;
+    if (!cup || cup.finished || !st || st.phase !== 'racing' || st.roster.includes(this.selfId)) return null;
+    const t = cup.rounds[st.n];
+    return { running: cup.total === 1 ? 'race' : 'cup', n: st.n, total: cup.total, track: (t && t.name) || '', next: true };
+  }
+
   // L'hôte lance un championnat. rounds : [{ id, name, sig }] (circuits intégrés 'b-…' ou de la communauté 'c:…', chargés par chacun) ; collisions : voitures qui se poussent.
   startCup({ rounds, collisions = true }) {
     if (!this.isHost || !Array.isArray(rounds) || !rounds.length || rounds.length > MAX_ROUNDS) return false;
@@ -826,6 +835,7 @@ export class Room extends Emitter {
   // affichés (cupround) ; si une manche suivante est en cours, je la cours si je suis sur sa grille (départ manqué), sinon je la suis.
   _adoptPhase(s) {
     const cup = this.cup, now = this.now(), prev = this.cupState;
+    if (cup.rounds[s.n]) this.track = { ...cup.rounds[s.n] };       // (GAME-008) le circuit de la manche en cours, affiché au salon de l'arrivant
     const mine = prev && prev.phase === 'racing' ? prev.n : null;
     const lost = mine != null && mine < cup.played;
     if (lost) this._pendingFinish = null;

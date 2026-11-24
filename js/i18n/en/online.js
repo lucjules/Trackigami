@@ -327,6 +327,7 @@ export default {
   'Championnat en cours : manche {n:w} sur {m:w}.': 'Championship in progress: round {n} of {m}.',
   'L\'hôte choisit le circuit…': 'The host is choosing the track…',
   'Tu rejoins à la prochaine manche.': 'You join at the next round.',
+  'Manche en cours : tu joueras la suivante.': 'Round in progress: you will play the next one.',
   'Course en cours : rejoins-la.': 'Race in progress: join it.',
   'Rejoindre la course': 'Join the race',
   'En attente de l\'hôte.': 'Waiting for the host.',

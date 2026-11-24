@@ -2,7 +2,7 @@
 // (départ commun, arrivées, clôture, manche suivante, abandon, hôte parti, arrivant en cours de route), annuaire des salons publics.
 // node tools/test-manche.mjs   (npm test)
 import assert from 'node:assert/strict';
-import { test, finish, bugConnu, precondition } from './harness.mjs';
+import { test, finish, precondition } from './harness.mjs';
 import { POINTS, Championship, buildPlaylist, poolFor, liveOrder, pointsFor, MAX_ROUNDS } from '../js/net/championship.js';
 import { ProgressTracker, checkpointProgress, gridSpawn, GRID_COLS } from '../js/net/progress.js';
 import { softCollide, presentState, CAR_R, MAX_DV_STEP, MAX_LEAD_S } from '../js/net/collide.js';
@@ -800,7 +800,7 @@ test('départage (TECH-085) : moyenne des places, qui n\'avantage pas celui qui 
   assert.deepEqual(new Championship({ rounds: [{ id: 'b-1' }] }).standings(), [], 'aucune manche jouée : classement vide');
 });
 
-await bugConnu('GAME-008', async () => {
+await test('arrivant pendant une « Course » (GAME-008) : circuit visible et « manche en cours, tu joueras la suivante »', async () => {
   const env = lan(); try { const [a, b] = [await env.add('Ana', 'a'), await env.add('Ben', 'b')];
   env.open();
   a.setMode('race'); a.selectTrack(T1); a.startCup({ rounds: [T1] });     // « Course » : un championnat d'une manche
@@ -811,8 +811,17 @@ await bugConnu('GAME-008', async () => {
   assert.deepEqual(c.lobbyStatus(), { running: 'race', n: 0, total: 1, track: T1.name, next: true }, 'manche en cours, il jouera la suivante');
   a.reportFinish(4000); b.reportFinish(4100); lobbyAll([a, b]);
   assert.equal(c.track && c.track.id, T1.id, 'après la course, le circuit reste affiché');
+  assert.equal(c.lobbyStatus(), null, 'plus de manche en cours');
+  // Championnat de plusieurs manches : même chose, avec le numéro de la manche ; à la suivante, il est sur la grille.
+  a.startCup({ rounds: ROUNDS });
+  const d = await env.add('Dan', 'd'); env.open();
+  assert.deepEqual(d.lobbyStatus(), { running: 'cup', n: 0, total: 2, track: 'Un', next: true });
+  assert.equal(d.track && d.track.id, ROUNDS[0].id);
+  a.reportFinish(4000); b.reportFinish(4100); c.reportFinish(4200);
+  env.clock.t += RESULTS_MS; a._cupTick();
+  assert.equal(d.lobbyStatus(), null, 'à la manche suivante, il court'); assert.equal(env.events.d.start.length, 1);
   } finally { env.end(); }
-}, 'arrivant pendant une « Course » : circuit visible et « manche en cours, tu joueras la suivante »');
+});
 
 console.log('Annuaire des salons publics');
 test('fiche : valide, bornée, d\'une version compatible seulement ; jamais de balisage', () => {

@@ -281,11 +281,13 @@ export const multiMethods = {
       const running = room.cupActive;
       if (!host) {
         modeRow.innerHTML = `<span>Mode</span><b>${esc(MODES[mode] || MODES.race)}</b>`;
-        trackRow.textContent = running ? `Championnat en cours : manche ${Math.min(room.cup.total, (room.cupState ? room.cupState.n : room.cup.played) + 1)} sur ${room.cup.total}.`
+        // GAME-008 : une manche tourne sans moi (arrivé pendant la course) : le circuit est visible et je sais que je jouerai la suivante.
+        const ls = room.lobbyStatus();
+        trackRow.textContent = running && !(ls && ls.running === 'race') ? `Championnat en cours : manche ${Math.min(room.cup.total, (room.cupState ? room.cupState.n : room.cup.played) + 1)} sur ${room.cup.total}.`
           : room.track ? `Circuit : ${room.track.name || room.track.id}` : 'L\'hôte choisit le circuit…';
         // « Course en cours » : la course libre que l'hôte court réellement (message live, TECH-008), jamais un souvenir ; on la rejoint d'un clic.
         const live = !running && room.hostLive && room.state === 'lobby';
-        note.textContent = (running ? 'Tu rejoins à la prochaine manche.' : live ? 'Course en cours : rejoins-la.' : 'Clique « Je suis prêt » ; l\'hôte lance la course.') + (room.rules ? ' Règles : ' + describeRules(room.rules).join(' · ') + '.' : '');
+        note.textContent = (ls ? 'Manche en cours : tu joueras la suivante.' : running ? 'Tu rejoins à la prochaine manche.' : live ? 'Course en cours : rejoins-la.' : 'Clique « Je suis prêt » ; l\'hôte lance la course.') + (room.rules ? ' Règles : ' + describeRules(room.rules).join(' · ') + '.' : '');
         if (live) {
           const join = Object.assign(document.createElement('button'), { type: 'button', className: 'btn primary', textContent: 'Rejoindre la course' });
           join.dataset.mp = 'join';
