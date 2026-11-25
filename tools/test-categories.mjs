@@ -3,7 +3,7 @@
 // La fiche de chaque circuit propose des catégories de record (départ en bateau, en deltaplane, en moto, sans obstacles, pluie, profils, véhicules v2) dont la variante « change quelque chose » ; le pilote automatique
 // ne les finit pas toutes. js/categoriesFaisables.js (généré par tools/categories-faisables.mjs, vérifié à jour par tools/check-categories.mjs) le dit ; la fiche marque « Défi extrême » celles qu'il n'a pas finies,
 // SANS en retirer aucune et sans les rendre non sélectionnables. Ce fichier garde :
-//   1. les données : les 72 circuits, l'empreinte de chacun, une catégorie finie OU non finie (jamais les deux, jamais une catégorie que la fiche ne propose pas) ;
+//   1. les données : les 84 circuits, l'empreinte de chacun, une catégorie finie OU non finie (jamais les deux, jamais une catégorie que la fiche ne propose pas) ;
 //   2. hubCategories : le marquage exact, AUCUNE catégorie retirée par rapport à la liste d'avant, toutes encore choisissables (describeVariant) ;
 //   3. l'honnêteté : rien n'est affirmé sur un circuit non mesuré, modifié depuis la mesure, du défi du jour ou d'un joueur ;
 //   4. le texte (traduit) et le module client (hors de la fermeture de la vérification serveur) ;
@@ -32,7 +32,7 @@ const before = (b) => HUB_CATEGORIES.filter((c) => { try { return variantKey(b.k
 const own = (cats) => cats.filter((c) => !c.season && !c.mutation);      // (sans la saison de la semaine ni la mutation du jour : ce ne sont pas des catégories mesurées)
 
 console.log('Données');
-test('les 72 circuits sont mesurés, avec l\'empreinte de leur code d\'aujourd\'hui, dans l\'ordre de la carrière', () => {
+test('les 84 circuits sont mesurés, avec l\'empreinte de leur code d\'aujourd\'hui, dans l\'ordre de la carrière', () => {
   assert.deepEqual(Object.keys(CATEGORY_FINISH.circuits), BUILTIN_TRACKS.map((d) => d.id));
   assert.equal(CATEGORY_FINISH.maxSimSeconds, MAX_SIM_SECONDS);
   for (const b of builtins) assert.equal(`b-${b.def.id}-${CATEGORY_FINISH.circuits[b.def.id].h}`, b.key, b.def.id);
@@ -45,7 +45,9 @@ test('pour chaque circuit : finies + non finies = les catégories que la fiche p
   }
 });
 test('les chiffres réels : moto et pluie presque partout, bateau presque nulle part (le pilote automatique plafonne à la vitesse du bateau), deltaplane entre les deux', () => {
-  const count = (id) => { let ok = 0, n = 0; for (const m of Object.values(CATEGORY_FINISH.circuits)) { if (m.ok.includes(id)) { ok++; n++; } else if (m.ko.includes(id)) n++; } return [ok, n]; };
+  // (les chiffres de la mesure de la 0.16.21, sur les 72 circuits d'avant ; les 12 de la 0.17.0 : test suivant)
+  const old72 = new Set(BUILTIN_TRACKS.slice(0, 72).map((d) => d.id));
+  const count = (id) => { let ok = 0, n = 0; for (const [cid, m] of Object.entries(CATEGORY_FINISH.circuits)) { if (!old72.has(cid)) continue; if (m.ok.includes(id)) { ok++; n++; } else if (m.ko.includes(id)) n++; } return [ok, n]; };
   assert.deepEqual(count('veh-moto'), [71, 71]);
   assert.deepEqual(count('rn-60'), [72, 72]);
   assert.deepEqual(count('pm-sim'), [72, 72]);
@@ -54,8 +56,18 @@ test('les chiffres réels : moto et pluie presque partout, bateau presque nulle 
   assert.ok(boat <= 10, `bateau : ${boat}/72`); assert.ok(glider > boat && glider < 72, `deltaplane : ${glider}/72`);
 });
 
+test('0.17.0 : les 12 circuits ajoutés sont mesurés comme les autres ; moto, pluie et profils Arcade et Simulation finis partout ; le bateau là où la route le permet (relais, finale, balade)', () => {
+  const added = BUILTIN_TRACKS.slice(72).map((d) => d.id);
+  assert.equal(added.length, 12);
+  for (const id of added) {
+    const m = CATEGORY_FINISH.circuits[id];
+    for (const c of ['veh-moto', 'rn-60', 'pm-arcade', 'pm-sim']) assert.ok(m.ok.includes(c), id + ' : ' + c);
+  }
+  assert.deepEqual(added.filter((id) => CATEGORY_FINISH.circuits[id].ok.includes('veh-boat')), ['balade', 'relais', 'finale']);
+});
+
 console.log('La fiche (hubCategories)');
-test('AUCUNE catégorie n\'est retirée : la liste de la fiche est celle d\'avant, circuit par circuit (72 circuits), dans le même ordre', () => {
+test('AUCUNE catégorie n\'est retirée : la liste de la fiche est celle d\'avant, circuit par circuit (84 circuits), dans le même ordre', () => {
   for (const b of builtins) assert.deepEqual(own(hubCategories(desc(b))).map((c) => c.id), before(b), b.def.id);
 });
 test('« Défi extrême » est posé exactement sur les catégories non finies, et sur elles seules ; le libellé, l\'identifiant et la variante ne changent pas', () => {

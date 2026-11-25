@@ -1,7 +1,7 @@
 // Après les essais humains (phase 4 de la 1.0, docs/ESSAIS.md) : médailles des 72 circuits calées sur les temps d'un PETIT groupe de testeurs, et résumé
 // de leurs avis.
 //   node tools/essais.mjs --temps runs.csv [--avis feedback.csv] [--pv N] [--depuis 2026-11-20] [--seuil 0.6] [--md rapport.md] [--pseudos] [--ecrire] [--forcer]
-//   node tools/essais.mjs --verifier-cles       -> les 72 clés b-… sont celles d'avant (tools/compat/corpus.json) : à lancer après tout recalage de médailles
+//   node tools/essais.mjs --verifier-cles       -> les clés b-… sont celles d'avant (tools/compat/corpus.json) : à lancer après tout recalage de médailles
 // Le rapport appelle les testeurs T01, T02… (jamais l'identifiant d'installation) et n'écrit aucun pseudo sans --pseudos : un rapport peut se relire et se garder
 // sans donnée personnelle. Il compare aussi les exports au protocole (docs/ESSAIS.md, tools/essais-protocole.mjs) : testeurs par profil, parcours imposé, niveau par profil.
 //
@@ -268,7 +268,7 @@ export function toMarkdown({ fit, proposals, best, dropped, droppedBy = new Map(
   return L.join('\n');
 }
 
-// Les 72 clés « b-<id>-<empreinte> » des circuits intégrés, comparées à celles d'avant (tools/compat/corpus.json). Les médailles n'entrent pas dans la clé : un recalage
+// Les clés « b-<id>-<empreinte> » des circuits intégrés (84 en 0.17.0), comparées à celles d'avant (tools/compat/corpus.json). Les médailles n'entrent pas dans la clé : un recalage
 // ne doit en changer aucune. → { ok, changed: [{ id, avant, apres }] }
 export function verifierCles(defs = BUILTIN_TRACKS, corpus = JSON.parse(readFileSync(new URL('./compat/corpus.json', import.meta.url), 'utf8')).builtinKeys) {
   const changed = [];

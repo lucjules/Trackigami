@@ -39,6 +39,8 @@ for (;;) {
   chosen.push(best); for (const f of features(all[best])) seen.add(f);
 }
 
+// Le même circuit sans environnement déterministe (pluie, givre, rafales) : sa physique ne dépend plus que des pièces.
+const noEnv = (tr) => { if (!tr.rain && !tr.frost && !tr.gust) return tr; const t = Track.decode(tr.encode()); t.setParams({ rain: 0, frost: 0, gust: 0 }); t.path = tr.path; t.laps = tr.laps; return t; };
 console.log('Rotation d\'un circuit entier, conduite comparée');
 test(`${chosen.length} circuits couvrant ${seen.size} types de pièces / orientations / revêtements / obstacles / mouvements : tournés de 90°, 180° et 270°, ils se conduisent aux mêmes temps`, () => {
   assert.ok(seen.size > 60, 'la couverture est large (' + seen.size + ')');
@@ -46,7 +48,9 @@ test(`${chosen.length} circuits couvrant ${seen.size} types de pièces / orienta
   assert.ok([...seen].some((f) => f.startsWith('o:')) && [...seen].some((f) => f.startsWith('mv:')), 'obstacles ET pièces mobiles couverts');
   const bad = [];
   for (const i of chosen) {
-    const tr = all[i], base = run(tr);
+    // (0.17.0) Pluie, givre, rafales : les flaques et les plaques sont tirées d'après la position des pièces sur la grille (js/sim/env.js), qu'une rotation change :
+    // on compare donc les pièces SANS l'environnement (le test qui suit montre ce qu'il fait). Aucun des 72 circuits d'avant n'en a.
+    const tr = noEnv(all[i]), base = run(tr);
     assert.ok(base, tr.name + ' : le pilote termine l\'original');
     for (const k of [1, 2, 3]) {
       const t2 = rot(tr, k);
@@ -57,5 +61,16 @@ test(`${chosen.length} circuits couvrant ${seen.size} types de pièces / orienta
   }
   assert.deepEqual(bad, []);
 });
+
+test('environnement déterministe et rotation (0.17.0, constaté, non corrigé) : les flaques de la Grande Finale sont tirées d\'après la grille ; tourné de 90°, il pleut toujours mais le pilote ne met plus le même temps ; sans la pluie, si', async () => {
+  const { envOf } = await import('../js/sim/env.js');
+  const d = BUILTIN_TRACKS.find((x) => x.id === 'finale'), tr = buildBuiltin(d), t1 = rot(tr, 1);
+  assert.ok(tr.rain > 0 && t1 && t1.rain === tr.rain);
+  const a = envOf(tr).patches.length, b = envOf(t1).patches.length;
+  assert.ok(a > 0 && b > 0);
+  assert.notEqual(run(t1), run(tr), 'avec la pluie : flaques ailleurs, autre temps (la graine porte sur la position des pièces)');
+  assert.ok(Math.abs(noEnvTime(tr) - noEnvTime(t1)) < 1e-9, 'sans la pluie, le circuit tourné se conduit au même temps');
+});
+const noEnvTime = (tr) => run(noEnv(tr));
 
 await finish('Tous les tests de rotation de circuits passent.');

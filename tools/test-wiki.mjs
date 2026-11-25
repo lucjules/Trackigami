@@ -25,11 +25,15 @@ test('le menu mène au wiki : bouton de la barre du bas (nouvel onglet), entrée
   assert.ok(/class="menu-foot"[\s\S]*?href="wiki\/"/.test(html), 'bouton du wiki dans la barre du bas de l\'accueil');
   assert.ok(/id="menu-sub-create"[\s\S]*?href="wiki\/#pieces"/.test(html), 'entrée du wiki dans le panneau Créer');
 });
-test('les données du wiki se relisent (72 circuits, une carte chacun), ses images existent, aucun script extérieur', () => {
+test('les données du wiki se relisent (84 circuits en 14 chapitres, une carte chacun), ses images existent (celle de chaque chapitre aussi), aucun script extérieur', () => {
   const json = (id) => JSON.parse(page.match(new RegExp(`<script type="application/json" id="${id}">([\\s\\S]*?)</script>`))[1]);
   const data = json('d-data'), maps = json('d-maps');
   const tracks = data.chapters.flatMap((c) => c.tracks);
-  assert.equal(tracks.length, 72);
+  assert.equal(tracks.length, 84);
+  assert.equal(data.chapters.length, 14);
+  // l'image de chaque chapitre (SHOT[décor], choisie dans la page) existe : 0.17.0, les chapitres bonus qui ne sont pas un décor en empruntent une
+  const shot = Object.fromEntries([...page.match(/const SHOT = \{([^}]*)\}/)[1].matchAll(/(\w+): '([a-z0-9-]+)'/g)].map((m) => [m[1], m[2]]));
+  for (const c of data.chapters) { assert.ok(shot[c.decor], c.name + ' : image'); assert.ok(existsSync(new URL('../wiki/img/' + shot[c.decor] + '.jpg', import.meta.url)), c.name); }
   for (const t of tracks) assert.ok(maps[t.id] && maps[t.id].d.startsWith('M'), t.id);
   const imgs = [...new Set([...page.matchAll(/img\/([a-z0-9-]+\.jpg)/g)].map((m) => m[1]))];
   assert.ok(imgs.length >= 10);

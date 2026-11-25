@@ -23,21 +23,29 @@ function staticStats(view) {
   for (const m of view.chunkMeshes) { tris += triangles(m.geometry); m.geometry.computeBoundingBox(); box.union(m.geometry.boundingBox); }
   return { tris, box };
 }
-// Référence : tout dans un seul constructeur, comme avant le découpage.
-function reference(track) {
+// Référence : tout dans un seul constructeur, comme avant le découpage. Ce qui a un GROUPE (logique du circuit : une porte, un pont qui apparaît) a son propre maillage,
+// que la logique montre et cache (trackMesh.js : groupBuild) : il n'est pas dans les tronçons statiques ; `groups` le compte à part. (0.17.0 : les premiers circuits officiels à groupes.)
+function reference(track, { groups = false } = {}) {
   const gb = new GeoBuilder(), glow = new GeoBuilder(), fx = new FxBuilder();
-  for (const t of track.tiles) if (!t.mv && t.s !== 'glass' && t.s2 !== 'glass') buildTileInto(gb, glow, t, track, fx);
-  for (const d of track.decos) if (d.k !== 'plaque' && !isObstacle(d.k)) buildDecoInto(gb, glow, d);
+  for (const t of track.tiles) if (!t.mv && t.s !== 'glass' && t.s2 !== 'glass' && !!t.g === groups) buildTileInto(gb, glow, t, track, fx);
+  for (const d of track.decos) if (d.k !== 'plaque' && !isObstacle(d.k) && !!d.g === groups) buildDecoInto(gb, glow, d);
   return gb.pos.length / 9 + glow.pos.length / 9 + fx.pos.length / 9;
 }
+// Triangles des maillages de groupe de la vue (enfants portant userData.g).
+const groupTris = (view) => { let n = 0; for (const c of view.group.children) if (c.userData.g) c.traverse((o) => { if (o.geometry) n += triangles(o.geometry); }); return n; };
 
 console.log('Même géométrie qu\'un maillage unique');
-test('les 66 circuits intégrés : même nombre de triangles statiques que la référence', () => {
+test('les 84 circuits intégrés : même nombre de triangles statiques que la référence ; ce qui a un groupe de logique est dans les maillages de groupe, triangle pour triangle', () => {
+  let withGroups = 0;
   for (const d of BUILTIN_TRACKS) {
     const t = buildBuiltin(d), v = new TrackView(t, mats);
     assert.equal(staticStats(v).tris, reference(t), d.id);
+    const hasG = t.tiles.some((x) => x.g && !x.mv && x.s !== 'glass') || t.decos.some((x) => x.g && !isObstacle(x.k) && x.k !== 'plaque');
+    assert.equal(groupTris(v), reference(t, { groups: true }), d.id + ' : maillages de groupe');
+    if (hasG) { withGroups++; assert.ok(groupTris(v) > 0, d.id); }
     v.dispose();
   }
+  assert.equal(withGroups, 2, 'Interrupteurs et Grande Finale (0.17.0) ont des portes et des ponts de logique');
 });
 test('un circuit réparti sur plusieurs tronçons est découpé (et les tronçons sont des maillages statiques)', () => {
   const t = buildBuiltin(BUILTIN_TRACKS[10]), v = new TrackView(t, mats);

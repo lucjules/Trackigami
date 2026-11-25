@@ -38,10 +38,23 @@ const golden = loadGolden();
 const REC = (time, extra = {}) => ({ time, splits: [], ghost: null, inputs: 'ab', pv: 39, date: 1000, name: 'T', ...extra });
 const wipe = () => { clearRecords(); disk.m.clear(); reloadProfile(); installBuiltinKeyAliases({}); };
 
-console.log('Fichier doré des 72 clés');
-test('les clés actuelles des circuits officiels sont EXACTEMENT celles de tools/builtin-keys.json (72 circuits, mêmes identifiants, même ordre)', () => {
+// Les 72 circuits officiels d'avant la 0.17.0, dans l'ordre de la carrière (ils ne bougent jamais).
+const OLD_72 = [
+  'eclats', 'canyon', 'tremplins', 'spirale', 'verglas', 'grandtour', 'lianes', 'canopee', 'spores',
+  'serpent', 'racines', 'temple', 'lagon', 'recif', 'phare', 'vrille', 'lunaire', 'archipel',
+  'neons', 'boulevard', 'hyper', 'metro', 'tours', 'viaduc', 'aurore', 'banquise', 'glacier',
+  'helice', 'couronne', 'blizzard', 'braises', 'coulee', 'basalte', 'cheminee', 'caldeira', 'eruption',
+  'quai', 'navette', 'ceinture', 'grandanneau', 'apesanteur', 'zenith', 'courant', 'corail', 'epave',
+  'meduses', 'abysses', 'barriere', 'chaine', 'laminoir', 'engrenages', 'fonderie', 'presse', 'usinefolle',
+  'envol', 'suspendues', 'rafales', 'montgolfieres', 'pontvents', 'cite', 'galerie', 'plafond', 'cristalfele',
+  'miroir', 'vrilles', 'coeur', 'garde', 'cadence', 'pendule', 'rotors', 'montecharge', 'grandatelier',
+];
+console.log('Fichier doré des clés (72 circuits d’avant la 0.17.0, puis les circuits ajoutés)');
+test('les clés actuelles des circuits officiels sont EXACTEMENT celles de tools/builtin-keys.json (84 circuits : les 72 d’avant en tête, mêmes identifiants, même ordre)', () => {
   const now = currentKeys();
-  assert.equal(Object.keys(golden).length, 72);
+  // 0.17.0 : 12 circuits AJOUTÉS (chapitres 13 et 14) ; les 72 d'avant sont toujours les premiers, dans le même ordre (le fichier doré dit leur clé)
+  assert.equal(Object.keys(golden).length, 84);
+  assert.deepEqual(Object.keys(golden).slice(0, 72), OLD_72);
   assert.deepEqual(Object.keys(now), BUILTIN_TRACKS.map((d) => d.id));
   assert.deepEqual(now, golden, problems(diffKeys(golden, now)).join('\n'));
   for (const b of builtins) assert.equal(b.key, golden[b.def.id], 'la clé que calcule le jeu (js/main.js) est celle du fichier : ' + b.def.id);
