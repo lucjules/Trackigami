@@ -1,6 +1,9 @@
 // Après les essais humains (phase 4 de la 1.0, docs/ESSAIS.md) : médailles des 72 circuits calées sur les temps d'un PETIT groupe de testeurs, et résumé
 // de leurs avis.
-//   node tools/essais.mjs --temps runs.csv [--avis feedback.csv] [--pv 38] [--depuis 2026-11-20] [--seuil 0.6] [--md docs/RAPPORT-ESSAIS.md] [--ecrire] [--forcer]
+//   node tools/essais.mjs --temps runs.csv [--avis feedback.csv] [--pv N] [--depuis 2026-11-20] [--seuil 0.6] [--md rapport.md] [--pseudos] [--ecrire] [--forcer]
+//   node tools/essais.mjs --verifier-cles       -> les 72 clés b-… sont celles d'avant (tools/compat/corpus.json) : à lancer après tout recalage de médailles
+// Le rapport appelle les testeurs T01, T02… (jamais l'identifiant d'installation) et n'écrit aucun pseudo sans --pseudos : un rapport peut se relire et se garder
+// sans donnée personnelle. Il compare aussi les exports au protocole (docs/ESSAIS.md, tools/essais-protocole.mjs) : testeurs par profil, parcours imposé, niveau par profil.
 //
 // runs.csv (ou .json) : export de run_stats (colonnes install, track, outcome, time, phys_ver, created_at ; la requête est dans docs/ESSAIS.md).
 // feedback.csv (ou .json) : export de la table feedback (étape SQL 19).
@@ -13,10 +16,14 @@
 // joués) donne les médailles de chaque circuit aux quantiles ESSAI_QUANTILES. Un circuit que personne n'a fini reçoit la difficulté moyenne (« extrapolé »).
 // Le bronze ouvre les chapitres (4 médailles) : il est calé pour que presque tous les testeurs l'atteignent (90 %).
 import { readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { hashString } from '../js/track.js';
+import { buildBuiltin } from '../js/tracks.js';
 import { BUILTIN_TRACKS } from '../js/tracks.js';
 import { PHYS_VER } from '../js/version.js';
 import { SCALES, CHOICES } from '../js/feedback.js';
 import { writeMedals } from './medals.mjs';
+import { statsParTesteur, profils, couverture, parProfil, etiquettes, QUOTAS, MIN_TESTEUR, ROUTE_MIN, DECLARE } from './essais-protocole.mjs';
 
 export const ESSAI_QUANTILES = { cristal: 0.03, or: 0.15, argent: 0.5, bronze: 0.9 };
 export const K_CIRCUIT = 3;              // poids (en nombre de testeurs) du « circuit moyen » dans la difficulté propre d'un circuit
@@ -157,8 +164,9 @@ export function reach(best, medalsOf) {
 }
 
 // Avis : moyenne de chaque note, répartition par expérience et appareil, textes libres.
-export function summariseFeedback(rows, { version = null } = {}) {
-  const list = rows.filter((r) => r && r.install && (!version || r.version === version))
+export function summariseFeedback(rows, { version = null, since = null } = {}) {
+  const t0 = since ? Date.parse(since) : null;
+  const list = rows.filter((r) => r && r.install && (!version || r.version === version) && (!t0 || !r.created_at || Date.parse(r.created_at) >= t0))
     .map((r) => ({ ...r, ...Object.fromEntries(SCALES.map((s) => [s.key, num(r[s.key])])) }));
   // un seul avis par installation : le dernier (on peut renvoyer le formulaire)
   const last = new Map();
@@ -168,6 +176,7 @@ export function summariseFeedback(rows, { version = null } = {}) {
   const groups = { tous: L };
   for (const [v] of CHOICES.experience) groups[v] = L.filter((r) => r.experience === v);
   for (const [v] of CHOICES.device) groups[v] = L.filter((r) => r.device === v);
+  for (const [v] of CHOICES.controls) groups[v] = L.filter((r) => r.controls === v);
   const scales = SCALES.map((s) => {
     const g = Object.fromEntries(Object.entries(groups).map(([k, arr]) => [k, { n: arr.length, mean: mean(arr, s.key) }]));
     const m = g.tous.mean;
@@ -177,7 +186,7 @@ export function summariseFeedback(rows, { version = null } = {}) {
     return { key: s.key, label: s.label, type: s.type, ends: s.ends, groups: g, signal };
   });
   const counts = Object.fromEntries(Object.keys(CHOICES).map((k) => [k, Object.fromEntries(CHOICES[k].map(([v]) => [v, L.filter((r) => r[k] === v).length]))]));
-  const texts = L.filter((r) => r.tracks_note || r.comment).map((r) => ({ experience: r.experience, device: r.device, tracks: r.tracks_note || '', comment: r.comment || '', pseudo: r.pseudo || '' }));
+  const texts = L.filter((r) => r.tracks_note || r.comment).map((r) => ({ experience: r.experience, device: r.device, controls: r.controls, tracks: r.tracks_note || '', comment: r.comment || '', pseudo: r.pseudo || '' }));
   return { n: L.length, sent: list.length, scales, counts, texts, experienceOf: new Map(L.map((r) => [r.install, r.experience])) };
 }
 
@@ -185,12 +194,34 @@ const pct = (a, n) => (n ? Math.round((a / n) * 100) + ' %' : '—');
 const med = (m) => (m ? `${m.cristal} / ${m.or} / ${m.argent} / ${m.bronze}` : '—');
 const sgn = (x) => (x == null ? '—' : (x > 0 ? '+' : '') + x.toFixed(1));
 
-export function toMarkdown({ fit, proposals, best, dropped, droppedBy = new Map(), data, fb, pv, since, tooFast = TOO_FAST }) {
-  const L = [`# Rapport des essais humains (physique ${pv}${since ? `, depuis le ${since}` : ''})`, ''];
+export function toMarkdown({ fit, proposals, best, dropped, droppedBy = new Map(), data, fb, pv, since, tooFast = TOO_FAST, couv = null, profil = null, labels = null, pseudos = false }) {
+  const lab = labels || etiquettes([...best.keys()]);
+  const T = (p) => lab.get(p) || '?';
+  const L = [`# Rapport des essais humains (physique ${pv}${since ? `, depuis le ${since}` : ''})`, '',
+    '_Les testeurs sont nommés T01, T02… (ordre de leur identifiant aléatoire) : aucun identifiant d’installation ni pseudo ne figure ici' + (pseudos ? ' (sauf les pseudos que les testeurs ont choisi de joindre à leur avis : option --pseudos)' : '') + '. Relire les textes libres avant de garder ce rapport dans le dépôt._', ''];
+  if (couv) {
+    L.push('## Le protocole est-il rempli ?', '', `Verdict : **${couv.ok ? 'oui, sur ce que le rapport peut mesurer' : 'non, il manque des testeurs ou des parties'}**. Un testeur « compte » après ${MIN_TESTEUR.circuits} circuits différents finis et ${MIN_TESTEUR.courses} courses.` +
+      (couv.unlinked ? ` ${couv.unlinked} installation(s) ont joué sans envoyer d’avis : leur profil est inconnu, elles ne comptent dans aucune ligne de profil.` : ''), '',
+      '| Exigence | Minimum | Obtenu | |', '| --- | ---: | ---: | --- |');
+    for (const q of couv.quotas) L.push(`| ${q.label} | ${q.need} | ${q.have} | ${q.ok ? 'ok' : 'manque ' + (q.need - q.have)} |`);
+    L.push('', `Parcours imposé : au moins ${ROUTE_MIN} testeurs qui comptent doivent avoir essayé chaque circuit (arrivée ou abandon).`, '', '| Circuit du parcours | Testeurs qui l’ont essayé | Qui l’ont fini | |', '| --- | ---: | ---: | --- |');
+    for (const r of couv.route) L.push(`| ${r.id} | ${r.tried} | ${r.finished} | ${r.ok ? 'ok' : 'manque ' + (ROUTE_MIN - r.tried)} |`);
+    L.push('', `À déclarer à la main (le rapport ne les voit pas) : ${[...Object.entries(DECLARE.navigateurs), ...Object.entries(DECLARE.multijoueur)].map(([k, n]) => `${k} : ${n} au moins`).join(' ; ')}.`, '');
+    L.push('| Testeur | Expérience | Commandes | Appareil | Courses | Circuits finis | ' + couv.route.map((r) => r.id).join(' | ') + ' |', '| --- | --- | --- | --- | ---: | ---: | ' + couv.route.map(() => '---').join(' | ') + ' |');
+    for (const t of couv.testers) L.push(`| ${t.label}${t.qualified ? '' : ' (ne compte pas encore)'} | ${t.profile ? t.profile.experience : '?'} | ${t.profile ? t.profile.controls : '?'} | ${t.profile ? t.profile.device : '?'} | ${t.courses} | ${t.circuits} | ${couv.route.map((r) => t.route[r.id]).join(' | ')} |`);
+    L.push('');
+  }
+  if (profil) {
+    const f = (x, d = 1) => (x == null ? '—' : x.toFixed(d));
+    L.push('## Par profil', '', 'Niveau : temps moyen d’un testeur du groupe rapporté au pilote automatique (modèle commun ci-dessous ; plus petit = plus rapide). Finis / essayés : part des circuits essayés que le testeur a fini au moins une fois. Avec quelques testeurs par groupe, ce sont des ordres de grandeur, pas des mesures.', '',
+      '| Groupe | Testeurs | Courses | Circuits finis / essayés | Réapparitions par arrivée | Abandons par testeur | Niveau (temps / pilote) |', '| --- | ---: | ---: | ---: | ---: | ---: | ---: |');
+    for (const [dim, groups] of Object.entries(profil)) for (const [v, g] of Object.entries(groups).sort()) L.push(`| ${dim} : ${v} | ${g.testers} | ${g.courses} | ${g.completion == null ? '—' : Math.round(g.completion * 100) + ' %'} | ${f(g.respawnsPerFinish)} | ${f(g.quitsPerTester)} | ${g.level == null ? '—' : Math.round(g.level * 100) + ' %'} |`);
+    L.push('');
+  }
   if (fit && !fit.n) L.push('## Temps', '', `Aucun meilleur temps sur un circuit de la carrière en physique ${pv}${since ? ' depuis cette date' : ''} (les circuits de joueurs et le circuit du jour ne règlent pas les médailles de la carrière).`, '');
   if (fit && fit.n) {
-    const byId = new Map(proposals.map((p) => [p.id, p]));
-    const before = reach(best, (t) => byId.get(t) && byId.get(t).current), after = reach(best, (t) => byId.get(t) && byId.get(t).medals);
+    const byId = new Map(proposals.map((p) => [p.id, p])), medalsNow = (t) => byId.get(t) && byId.get(t).current;
+    const before = reach(best, medalsNow), after = reach(best, (t) => byId.get(t) && byId.get(t).medals);
     L.push('## Temps', '',
       `${data.testers} testeurs avec au moins ${MIN_ESSAI.circuits} circuits finis, ${data.temps} meilleurs temps (un par testeur et par circuit)${dropped ? `, ${dropped} temps impossibles écartés` : ''}. ` +
       `Un testeur moyen met **${(Math.exp(fit.mu) * 100).toFixed(0)} %** du temps du pilote automatique ; écart d'un circuit à l'autre pour un même testeur : ±${(fit.sigma * 100).toFixed(0)} %.`, '',
@@ -202,51 +233,78 @@ export function toMarkdown({ fit, proposals, best, dropped, droppedBy = new Map(
     if (droppedBy.size || (fit.outliers && fit.outliers.length)) {
       L.push('### Temps écartés (raccourci possible : à regarder sur le circuit)', '');
       for (const [t, set] of [...droppedBy].sort((x, y) => y[1].size - x[1].size)) L.push(`- **${t}** : ${set.size} testeur(s) à moins de ${Math.round(tooFast * 100)} % du temps du pilote`);
-      for (const o of fit.outliers || []) L.push(`- **${o.t}** : ${o.p.slice(0, 6)}… en ${o.time.toFixed(2)} s (${Math.round(o.ratio * 100)} % du pilote), bien plus vite que ses autres circuits`);
+      for (const o of fit.outliers || []) L.push(`- **${o.t}** : ${T(o.p)} en ${o.time.toFixed(2)} s (${Math.round(o.ratio * 100)} % du pilote), bien plus vite que ses autres circuits`);
       if (dropped > 0.05 * (dropped + data.temps)) L.push('', `**${dropped} temps écartés sur ${dropped + data.temps}** : si ce ne sont pas des raccourcis, le seuil est trop strict pour ces testeurs (essayer \`--seuil 0.5\`).`);
       L.push('');
     }
     L.push('### Testeurs', '', '| Testeur | Expérience | Circuits finis | Niveau (temps / pilote) |', '| --- | --- | ---: | ---: |');
     for (const [p, m] of [...best].sort((x, y) => fit.a.get(x[0]) - fit.a.get(y[0]))) {
       if (!fit.a.has(p)) continue;
-      L.push(`| ${p.slice(0, 6)}… | ${(fb && fb.experienceOf.get(p)) || '?'} | ${m.size} | ${(Math.exp(fit.mu + fit.a.get(p)) * 100).toFixed(0)} % |`);
+      L.push(`| ${T(p)} | ${(fb && fb.experienceOf.get(p)) || '?'} | ${m.size} | ${(Math.exp(fit.mu + fit.a.get(p)) * 100).toFixed(0)} % |`);
     }
-    L.push('', '### Circuits', '', '| Circuit | Testeurs | Pilote (s) | Difficulté propre | Actuelles (C / O / A / B) | Proposées | Objectif |', '| --- | ---: | ---: | ---: | --- | --- | --- |');
+    // meilleurs temps de chaque circuit, pour dire combien de testeurs atteignent chaque médaille ÉCRITE (B / A / O / C)
+    const timesOn = new Map();
+    for (const m of best.values()) for (const [t, time] of m) { if (!timesOn.has(t)) timesOn.set(t, []); timesOn.get(t).push(time); }
+    const atteint = (id, M) => { const ts = timesOn.get(id); return ts && M ? ['bronze', 'argent', 'or', 'cristal'].map((k) => ts.filter((x) => x <= M[k] + 1e-6).length).join(' / ') + ` sur ${ts.length}` : '—'; };
+    L.push('', '### Circuits', '', 'Atteint : nombre de testeurs dont le meilleur temps atteint bronze / argent / or / cristal avec les médailles actuelles, puis proposées.', '',
+      '| Circuit | Testeurs | Pilote (s) | Difficulté propre | Actuelles (C / O / A / B) | Atteint (actuelles) | Proposées | Atteint (proposées) | Objectif |', '| --- | ---: | ---: | ---: | --- | --- | --- | --- | --- |');
     for (const p of proposals) {
       const g = p.goal && p.goal.id === 'under' ? `moins de ${Math.round(((p.medals.or + p.medals.argent) / 2) * 2) / 2} s` : '';
-      L.push(`| ${p.id} | ${p.n || 'extrapolé'} | ${p.bot.toFixed(1)} | ${p.n ? sgn((Math.exp(fit.b.get(p.id) || 0) - 1) * 100) + ' %' : '—'} | ${med(p.current)} | ${med(p.medals)} | ${g} |`);
+      L.push(`| ${p.id} | ${p.n || 'extrapolé'} | ${p.bot.toFixed(1)} | ${p.n ? sgn((Math.exp(fit.b.get(p.id) || 0) - 1) * 100) + ' %' : '—'} | ${med(p.current)} | ${atteint(p.id, p.current)} | ${med(p.medals)} | ${atteint(p.id, p.medals)} | ${g} |`);
     }
     L.push('');
   }
   if (fb) {
     L.push('## Avis', '', `${fb.n} testeurs ont répondu (${fb.sent} envois). ` + Object.entries(fb.counts).map(([k, c]) => `${k} : ${Object.entries(c).map(([v, n]) => `${v} ${n}`).join(', ')}`).join(' · '), '',
-      '| Question | Tous | Débutants | Habitués | Ordinateur | Téléphone | Tablette | À retenir |', '| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |');
+      '| Question | Tous | Débutants | Habitués | Ordinateur | Téléphone | Tablette | Clavier | Manette | Tactile | À retenir |', '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |');
     const cell = (g, s) => (g.n ? (s.type === 'note' ? g.mean.toFixed(1) + ' / 5' : sgn(g.mean)) + ` (${g.n})` : '—');
-    for (const s of fb.scales) L.push(`| ${s.label}${s.type === 'equilibre' ? ` (−2 ${s.ends[0].toLowerCase()} … +2 ${s.ends[1].toLowerCase()})` : ''} | ${['tous', 'debutant', 'habitue', 'ordinateur', 'telephone', 'tablette'].map((k) => cell(s.groups[k], s)).join(' | ')} | ${s.signal || ''} |`);
+    for (const s of fb.scales) L.push(`| ${s.label}${s.type === 'equilibre' ? ` (−2 ${s.ends[0].toLowerCase()} … +2 ${s.ends[1].toLowerCase()})` : ''} | ${['tous', 'debutant', 'habitue', 'ordinateur', 'telephone', 'tablette', 'clavier', 'manette', 'tactile'].map((k) => cell(s.groups[k], s)).join(' | ')} | ${s.signal || ''} |`);
     if (fb.texts.length) {
       L.push('', '### Ce que les testeurs ont écrit', '');
-      for (const t of fb.texts) L.push(`- _${t.experience}, ${t.device}${t.pseudo ? ', ' + t.pseudo : ''}_ — ${[t.tracks && 'Circuits : ' + t.tracks, t.comment].filter(Boolean).join(' · ').replace(/\|/g, '/')}`);
+      for (const t of fb.texts) L.push(`- _${t.experience}, ${t.device}, ${t.controls}${pseudos && t.pseudo ? ', ' + t.pseudo : ''}_ — ${[t.tracks && 'Circuits : ' + t.tracks, t.comment].filter(Boolean).join(' · ').replace(/\|/g, '/')}`);
     }
     L.push('');
   }
   return L.join('\n');
 }
 
+// Les 72 clés « b-<id>-<empreinte> » des circuits intégrés, comparées à celles d'avant (tools/compat/corpus.json). Les médailles n'entrent pas dans la clé : un recalage
+// ne doit en changer aucune. → { ok, changed: [{ id, avant, apres }] }
+export function verifierCles(defs = BUILTIN_TRACKS, corpus = JSON.parse(readFileSync(new URL('./compat/corpus.json', import.meta.url), 'utf8')).builtinKeys) {
+  const changed = [];
+  for (const d of defs) { const apres = `b-${d.id}-${hashString(buildBuiltin(d).encode())}`; if (apres !== corpus[d.id]) changed.push({ id: d.id, avant: corpus[d.id] || null, apres }); }
+  const missing = Object.keys(corpus).filter((id) => !defs.some((d) => d.id === id));
+  return { ok: !changed.length && !missing.length, changed, missing, n: defs.length };
+}
+
+// Des médailles proposées sont-elles utilisables ? cristal ≤ or ≤ argent ≤ bronze (et positives) sur chaque circuit. → liste des circuits fautifs.
+export const medailleDesordre = (proposals) => proposals.filter((p) => { const m = p.medals; return !(m.cristal > 0 && m.cristal <= m.or && m.or <= m.argent && m.argent <= m.bronze); }).map((p) => p.id);
+
 if (process.argv[1] && /(^|[\\/])essais\.mjs$/.test(process.argv[1])) {
   const args = process.argv.slice(2), opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : null);
-  if (!opt('--temps') && !opt('--avis')) { console.log('usage : node tools/essais.mjs --temps runs.csv [--avis feedback.csv] [--pv N] [--depuis AAAA-MM-JJ] [--seuil 0.6] [--md fichier.md] [--ecrire] [--forcer]'); process.exit(1); }
+  if (args.includes('--verifier-cles')) {
+    const v = verifierCles();
+    console.log(v.ok ? `Les ${v.n} clés b-… sont inchangées (tools/compat/corpus.json).` : 'CLÉS MODIFIÉES : ' + v.changed.map((c) => `${c.id} ${c.avant} → ${c.apres}`).concat(v.missing.map((id) => id + ' absent')).join(' ; '));
+    process.exit(v.ok ? 0 : 1);
+  }
+  if (!opt('--temps') && !opt('--avis')) { console.log('usage : node tools/essais.mjs --temps runs.csv [--avis feedback.csv] [--pv N] [--depuis AAAA-MM-JJ] [--seuil 0.6] [--md fichier.md] [--pseudos] [--ecrire] [--forcer]\n        node tools/essais.mjs --verifier-cles'); process.exit(1); }
   const golden = JSON.parse(readFileSync(new URL('./golden-temps.json', import.meta.url), 'utf8'));
   const pv = opt('--pv') ? +opt('--pv') : PHYS_VER, since = opt('--depuis');
-  const fb = opt('--avis') ? summariseFeedback(readRows(opt('--avis'))) : null;
+  const fbRows = opt('--avis') ? readRows(opt('--avis')) : null;
+  const fb = fbRows ? summariseFeedback(fbRows, { since }) : null;
   const tooFast = opt('--seuil') ? +opt('--seuil') : TOO_FAST;
-  let fit = null, proposals = [], best = new Map(), dropped = 0, droppedBy = new Map(), data = null;
+  let fit = null, proposals = [], best = new Map(), dropped = 0, droppedBy = new Map(), data = null, couv = null, profil = null, labels = null;
   if (opt('--temps')) {
-    ({ best, dropped, droppedBy } = bestTimes(readRows(opt('--temps')), { golden, pv, since, tooFast }));
+    const rows = readRows(opt('--temps'));
+    ({ best, dropped, droppedBy } = bestTimes(rows, { golden, pv, since, tooFast }));
     data = enoughData(best);
     fit = fitRobust(best, golden);
     proposals = proposePooled(fit, golden);
+    const stats = statsParTesteur(rows, { golden, pv, since, tooFast }), prof = fbRows ? profils(fbRows, { since }) : new Map();
+    labels = etiquettes([...stats.keys()]);
+    if (fbRows) { couv = couverture(stats, prof); profil = parProfil(stats, prof, fit); }
   }
-  const md = toMarkdown({ fit, proposals, best, dropped, droppedBy, data, fb, pv, since, tooFast });
+  const md = toMarkdown({ fit, proposals, best, dropped, droppedBy, data, fb, pv, since, tooFast, couv, profil, labels, pseudos: args.includes('--pseudos') });
   console.log(md);
   if (opt('--md')) writeFileSync(opt('--md'), md + '\n');
   if (args.includes('--ecrire')) {
@@ -254,10 +312,19 @@ if (process.argv[1] && /(^|[\\/])essais\.mjs$/.test(process.argv[1])) {
     // (après un changement de physique : le niveau humain mesuré en physique pv, appliqué aux temps ACTUELS du pilote, golden-temps.json ; à confirmer)
     if (pv !== PHYS_VER && !args.includes('--forcer')) { console.log(`Temps de la physique ${pv}, le jeu est en ${PHYS_VER} : rien n'est écrit. --forcer pour appliquer le niveau mesuré aux temps actuels du pilote.`); process.exit(1); }
     if (!data.ok && !args.includes('--forcer')) { console.log(`Trop peu de données pour régler 72 circuits (${data.testers} testeurs, ${data.temps} temps ; il faut ${MIN_ESSAI.testeurs} testeurs et ${MIN_ESSAI.temps} temps). --forcer pour écrire quand même.`); process.exit(1); }
+    if (!couv && !args.includes('--forcer')) { console.log('Sans les avis (--avis feedback.csv) le protocole ne peut pas être vérifié (profils des testeurs) : rien n\'est écrit. --forcer pour écrire quand même.'); process.exit(1); }
+    if (couv && !couv.ok && !args.includes('--forcer')) { console.log(`Le protocole n'est pas rempli (voir « Le protocole est-il rempli ? » ci-dessus : il manque ${QUOTAS.testeurs} testeurs qui comptent, leurs profils ou le parcours imposé) : rien n'est écrit. --forcer pour écrire quand même, en le disant dans la décision.`); process.exit(1); }
+    const bad = medailleDesordre(proposals);
+    if (bad.length) { console.log('Médailles proposées non ordonnées (cristal ≤ or ≤ argent ≤ bronze) : ' + bad.join(', ') + ' : rien n\'est écrit.'); process.exit(1); }
     const path = new URL('../js/tracks.js', import.meta.url);
     let src = readFileSync(path, 'utf8');
     for (const p of proposals) src = writeMedals(src, BUILTIN_TRACKS.find((d) => d.id === p.id), p.medals);
     writeFileSync(path, src);
-    console.log(`${proposals.length} circuits recalés sur les essais dans js/tracks.js (medalsBy: 'humain'). Ensuite : node tools/contract.mjs --builtin ; node tools/fiche-essai.mjs ; npm run sw ; npm run build:function ; npm test`);
+    console.log(`${proposals.length} circuits recalés sur les essais dans js/tracks.js (medalsBy: 'humain').`);
+    // Preuve que seules les médailles ont bougé : les 72 clés b-… relues sur le fichier réécrit (autre processus : tracks.js est déjà chargé ici).
+    const chk = spawnSync(process.execPath, [new URL(import.meta.url).pathname, '--verifier-cles'], { encoding: 'utf8' });
+    console.log(chk.stdout.trim());
+    if (chk.status !== 0) { console.log('Les clés ont changé : annuler (git checkout js/tracks.js) et chercher pourquoi ; ne rien livrer.'); process.exit(1); }
+    console.log('Ensuite : node tools/medals.mjs --check ; node tools/golden.mjs ; node tools/contract.mjs --builtin ; node tools/fiche-essai.mjs ; npm run sw ; npm run build:function ; npm test');
   }
 }
