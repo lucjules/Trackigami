@@ -6,6 +6,16 @@ multijoueurs y sont liés. Une version qui change `PHYS_VER` impose de **redépl
 
 *Les nombres des sections anciennes (portées en cases, vitesses de saut…) sont ceux du monde de leur époque ; le monde est passé de cases de 24 m à 32 m en 0.9.11.*
 
+## Bêta 0.16.19 — documentation remise d'accord avec le code (DOC-001 à DOC-010)
+
+**`PHYS_VER` reste 39, `NET_VER` reste 5** : aucun changement de comportement, de physique ni de protocole. Aucune fonction serveur (le fichier généré de `submit-score` est identique) ni étape SQL. Seuls changent des textes : `docs/ARCHITECTURE.md`, `docs/TESTS.md`, `README.md`, `supabase/COMPTES.md`, les commentaires de tête de `js/verify.js` et `js/joins.js` (et donc `docs/MODULES.md`, régénéré).
+
+- **Physique** (`DOC-001`) : plus de « la route guide le cap » sur les rubans (retiré en `PHYS_VER` 37) : il faut braquer.
+- **Empreinte** (`DOC-002`) : 206 scénarios (le document en annonçait 161 et 182 ; `docs/TESTS.md` 193).
+- **Navigateurs et réseau** (`DOC-003`) : Firefox et WebKit sont éprouvés par la tâche CI `moteurs` ; la fonction `ice` fournit STUN + TURN à identifiants limités (aucun relais n'est fourni par le dépôt).
+- **Signature** (`DOC-004`), **stockage** (`DOC-006`), **étapes SQL** (`DOC-005` : 21 étapes), **fonction serveur** (`DOC-007` : elle embarque `verify.js`), **joins.js** (`DOC-008` : importé seulement par des tests et outils), **publication** (`DOC-010` : rejouée par la fonction serveur avant `publish_track`). `DOC-009` (`supabase/MULTI.md`) avait été corrigé en 0.16.17.
+- **Autres documents** : nombre de tests et durée de `npm test`, tâches de la CI, fichiers générés (les trois fonctions, le wiki), étapes 16 et 18 à 21 et fonction `account-recovery` dans le README, multijoueur (trois modes, identité de salle, `NET_VER` 5), cycle de vie des fichiers `bugConnu` (plus aucun défaut connu), Échap sans effet dans un champ de texte.
+
 ## Bêta 0.16.18 — multijoueur : créer et rejoindre un salon refonctionne (politique de sécurité de la page)
 
 **`PHYS_VER` reste 39, `NET_VER` reste 5** : aucun changement de physique ni de protocole. Aucune fonction serveur ni étape SQL.
