@@ -73,6 +73,13 @@ export default {
   'Rotors': 'Rotors',
   'Monte-Charge': 'Freight Lift',
   'Le Grand Atelier': 'The Grand Workshop',
+  // 0.17.0 : chapitres 13 et 14 (bonus)
+  'Clair de Lune': 'Moonlight',
+  'Manège': 'Carousel',
+  'Averse': 'Downpour',
+  'Bourrasques': 'Squalls',
+  'Nuit de Givre': 'Frost Night',
+  'Ressorts': 'Springs',
 
   // ---------------------------------------------------------------- commandes (Paramètres › Commandes)
   'Freiner / marche arrière': 'Brake / reverse',

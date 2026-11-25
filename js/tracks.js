@@ -920,6 +920,81 @@ export const BUILTIN_TRACKS = [
     obst: [{ k: 'hammer', at: 0.0272, side: 0, s: 1, ph: 0.966 }, { k: 'pendulum', at: 0.14637, side: 0, s: 1, ph: 0.7 }, { k: 'slider', at: 0.26813, side: 0, s: 1, ph: 0.396 }, { k: 'board_right', at: 0.415, side: -20, rot: Math.PI }, { k: 'board_left', at: 0.513, side: 20, rot: Math.PI }, { k: 'gantry', at: 0.635, side: 0, s: 2 }, { k: 'beamPost', at: 0.629, side: 36 }, { k: 'beamPost', at: 0.629, side: -36 }, { k: 'board_warn', at: 0.675, side: 18, rot: Math.PI }, { k: 'block', at: 0.96, side: 28 }, { k: 'block', at: 0.96, side: -28 }],
     medals: { cristal: 37.5, or: 39.4, argent: 45.3, bronze: 53.2 },
   },
+  // ---- 0.17.0 (COMPLETE-002, COMPLETE-011) : deux chapitres BONUS, chacun centré sur ce que la carrière n'employait pas ----------------------------------------------
+  // Champ `chapitre` (themes.js : EXTRA_CHAPTERS) : ces circuits sont rangés APRÈS l'Atelier (les 72 d'avant gardent leur rang) mais s'ouvrent au milieu de la carrière
+  // (career.js : BONUS). Chacun déclare dans `meca` la mécanique qu'il enseigne ; tools/contract.mjs vérifie qu'elle y est et que le pilote la vit. Mécanismes à rythme
+  // (pièces mobiles) placés par recherche (tools/lab.mjs) : le pilote passe sans choc de 75 à 115 % de sa vitesse, et repart de chaque checkpoint.
+  // Chapitre 13 · Les Éléments (ouvert par 4 médailles au chapitre 5)
+  {
+    // 13 · 1/6 — RESPIRATION : une AMBIANCE d'auteur (nuit brumeuse, musique du menu) et trois DÉCLENCHEURS (l'aube se lève au checkpoint, la brume se dissipe avant la
+    // descente, un éclat à l'arrivée). Sprint sans difficulté : route large, chicanes rapides, deux virages énormes, grand S.
+    id: 'clairdelune', name: 'Clair de Lune', decor: 'isles', chapitre: 'elements', difficulty: 1, profil: 'sprint',
+    meca: ['ambiance', 'declencheurs'],
+    appris: 'Départ : une route large sous la lune. Au programme : une nuit brumeuse choisie par l’auteur, l’aube qui se lève au checkpoint, la brume qui se dissipe avant la descente, chicanes rapides, grand S.',
+    goal: { id: 'under', t: 39 },
+    opts: { l: 4 }, pilot: { vCap: 66 },
+    params: { ambiance: { sky: 'night', fog: 'misty', music: 'menu' }, scripts: [{ x: -16, z: -15, a: 'sky', v: 'dawn' }, { x: -31, z: -21, a: 'fog', v: 'clear' }, { x: -33, z: -31, a: 'burst', v: '#ffd66b' }] },
+    script: 'start*3 WI W WO B3 HL S B2 ZR4 S ZL4 S C*3 B2 WI W WO S HR S B2 [cdi1] [dn2] [cdo1] S ZZL S B2 finish*3',
+    medals: { cristal: 34, or: 35.8, argent: 41.2, bronze: 48.4 },
+  },
+  {
+    // 13 · 2/6 — RESPIRATION : TROIS TOURS d'une boucle courte (le passage de la ligne est un point de retour à chaque tour). Quatre très grands virages relevés,
+    // chicanes longues dans les deux sens, route large : on apprend la boucle, on la réussit au troisième tour.
+    id: 'manege', name: 'Manège', decor: 'city', chapitre: 'elements', difficulty: 1, profil: 'speedway',
+    meca: ['tours'],
+    appris: 'Départ : deux boosters → un virage relevé. Au programme : trois tours d’une boucle courte, quatre très grands virages relevés, chicanes longues, route large ; la ligne sert de point de retour à chaque tour.',
+    goal: { id: 'nowall' },
+    opts: { l: 4 }, pilot: { vCap: 70 }, laps: 3,
+    script: 'start*2 B2 S2 B BRR B2 ZR3 ZL3 BRR S WI WO BRR C*2 B ZL3 ZR3 BRR finish*2',
+    medals: { cristal: 77.5, or: 81.6, argent: 93.9, bronze: 110.2 },
+  },
+  {
+    // 13 · 3/6 — PLUIE : piste mouillée partout (moins d'adhérence) et FLAQUES qui glissent beaucoup ; la pluie forcit et faiblit pendant la course (envVary).
+    // Mêmes flaques au même endroit pour tout le monde (graine). Ambiance : averse et brume.
+    id: 'averse', name: 'Averse', decor: 'jungle', chapitre: 'elements', difficulty: 2, profil: 'sprint',
+    meca: ['pluie'],
+    appris: 'Départ : trois cases → chicane longue sous l’averse. Au programme : piste mouillée et flaques qui glissent, une pluie qui forcit et faiblit, très grands virages, chicanes, route large, grand S.',
+    goal: { id: 'nowall' },
+    opts: { l: 6 }, pilot: { vCap: 66 },
+    params: { rain: 85, envSeed: 12, envVary: true, ambiance: { sky: 'day', weather: 'rain', fog: 'misty' } },
+    script: 'start*2 S3 ZR3 B2 S ZL3 S B2 HR S2 C*3 B2 S2 [crs1] S2 [cds1] B HL S B2 WI W WO S ZZR S B2 finish*2',
+    medals: { cristal: 32.6, or: 34.4, argent: 39.5, bronze: 46.4 },
+  },
+  {
+    // 13 · 4/6 — VENT et RAFALES : vent de 25 % vers le nord-ouest, rafales de 70 % dans la même direction. Selon le cap, il pousse, freine ou déporte (+5 s pour le
+    // pilote par rapport au même circuit sans vent). Très grands virages relevés, wall-ride sur le mur droit, route large.
+    id: 'bourrasques', name: 'Bourrasques', decor: 'sky', chapitre: 'elements', difficulty: 3, profil: 'speedway',
+    meca: ['vent', 'rafales'],
+    appris: 'Départ : quatre boosters → virage relevé. Au programme : vent constant et rafales qui poussent par à-coups (selon le cap, il aide ou freine), très grands virages relevés, wall-ride, route large, chicanes.',
+    goal: { id: 'norespawn' },
+    opts: { l: 8 }, pilot: { vCap: 70 },
+    params: { wind: 25, windDir: 315, gust: 70, envSeed: 5 },
+    script: 'start*2 B4 BRR S2 B ZR4 S ZL4 B BLL S2 C*2 WI W WO S B BRR S2 B [tr02l] S4> [tr20l] S B BLL S2 C*3 ZR3 S ZL3 S B2 BRR S2 B2 finish*2',
+    medals: { cristal: 49.1, or: 51.6, argent: 59.4, bronze: 69.7 },
+  },
+  {
+    // 13 · 5/6 — GIVRE : plaques de verglas (35 % d'adhérence) sur les lignes droites, de nuit sous la neige. Circuit technique : épingles, route étroite, wall-ride,
+    // croisement traversé deux fois ; les plaques se voient et s'évitent (la graine 28 en met sur la trajectoire du pilote).
+    id: 'givre', name: 'Nuit de Givre', decor: 'polar', chapitre: 'elements', difficulty: 3, profil: 'technique',
+    meca: ['givre'],
+    appris: 'Départ : deux boosters → épingles. Au programme : plaques de givre sur les lignes droites (on les évite ou on les traverse droit), route étroite, wall-ride, croisement traversé deux fois, descente.',
+    goal: { id: 'nowall' },
+    opts: { l: 6 },
+    params: { frost: 100, envSeed: 28, ambiance: { sky: 'night', weather: 'snow' } },
+    script: 'start*2 B2 R L R B S2 C*3 B NI N2 NO S R S L B ZR S ZL B C*3 S [tr01s] S2< [tr10s] S R B S L B S JX R C*3 R R S JX R S NI N NO [cdi1] [dn2] [cdo1] S B finish*1',
+    medals: { cristal: 47.5, or: 50, argent: 57.5, bronze: 67.5 },
+  },
+  {
+    // 13 · 6/6 — RESSORT et GRAVITÉ : trois RESSORTS LATÉRAUX au bout d'une voie qui s'arrête (LJR / LJL, track.js : la route reprend dans la colonne voisine) : à 150 %
+    // ils font sauter d'une voie à l'autre par-dessus la bordure ; une plaque de basse GRAVITÉ (40 %) allonge le premier saut, une autre rend la gravité normale.
+    id: 'ressorts', name: 'Ressorts', decor: 'orbit', chapitre: 'elements', difficulty: 4, profil: 'acrobatique',
+    meca: ['ressort', 'gravite'],
+    appris: 'Départ : basse gravité → grand saut reçu sur une plaque. Au programme : trois ressorts latéraux qui font sauter d’une voie à l’autre (la voie s’arrête : il faut le ressort), sauts reçus sur des plaques, route large.',
+    goal: { id: 'perfect', n: 2 },
+    opts: { l: 12 }, pilot: { vCap: 60 },
+    script: 'start*2 B2 S.g40 [crs1] UU GR2 G5 V-5 [plate3]*10 S3 S.g100 B S.r150 LJR S2 C*3 B2 S [crv1] UU G2 V-2 [plate3]*10 ZR3 S B S.r50 LJL S2 C*3 B2 S [crv2] UX G2 DX DX [cdo2] [plate3]*10 S B S.r150 LJR S2 ZL3 S WI W WO S B2 finish*2',
+    medals: { cristal: 53.1, or: 55.9, argent: 64.3, bronze: 75.5 },
+  },
 ];
 
 // 0.9 : un chapitre de carrière = un thème. Chapitres du plus facile au plus dur, et
