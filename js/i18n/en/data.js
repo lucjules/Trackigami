@@ -80,6 +80,12 @@ export default {
   'Bourrasques': 'Squalls',
   'Nuit de Givre': 'Frost Night',
   'Ressorts': 'Springs',
+  'Balade à Moto': 'Motorbike Ride',
+  'Interrupteurs': 'Switches',
+  'Plateaux Mobiles': 'Moving Platforms',
+  'Relais': 'Relay',
+  'Aiguillage': 'Junction',
+  'Grande Finale': 'Grand Finale',
 
   // ---------------------------------------------------------------- commandes (Paramètres › Commandes)
   'Freiner / marche arrière': 'Brake / reverse',

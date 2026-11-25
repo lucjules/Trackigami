@@ -995,6 +995,80 @@ export const BUILTIN_TRACKS = [
     script: 'start*2 B2 S.g40 [crs1] UU GR2 G5 V-5 [plate3]*10 S3 S.g100 B S.r150 LJR S2 C*3 B2 S [crv1] UU G2 V-2 [plate3]*10 ZR3 S B S.r50 LJL S2 C*3 B2 S [crv2] UX G2 DX DX [cdo2] [plate3]*10 S B S.r150 LJR S2 ZL3 S WI W WO S B2 finish*2',
     medals: { cristal: 53.1, or: 55.9, argent: 64.3, bronze: 75.5 },
   },
+  // Chapitre 14 · Grandes Manœuvres (ouvert par 4 médailles au chapitre 9)
+  {
+    // 14 · 1/6 — RESPIRATION en MOTO : une plaque moto après le grand S, une boucle de virages géants et de chicanes rapides en moto, une seconde plaque rend la voiture.
+    id: 'balade', name: 'Balade à Moto', decor: 'desert', chapitre: 'manoeuvres', difficulty: 1, profil: 'sprint',
+    meca: ['moto'],
+    appris: 'Départ : deux boosters, grand S, puis une plaque moto. Au programme : une boucle en moto (virages énormes, chicanes rapides, bosses), retour en voiture sur une seconde plaque, route large.',
+    goal: { id: 'under', t: 36 },
+    opts: { l: 6 }, pilot: { vCap: 66 },
+    script: 'start*2 B2 ZZR S.o B2 S2 HL S B2 ZR4 S ZL4 S C*3 B2 S [crs1] S2 [cds1] B HR S2 B2 S.o S WI W WO S B2 finish*2',
+    medals: { cristal: 31.5, or: 33.2, argent: 38.1, bronze: 44.8 },
+  },
+  {
+    // 14 · 2/6 — PORTES et INTERRUPTEURS (logique du circuit, js/sim/logic.js) : un mur plein barre la route (porte, groupe 2) ; l'interrupteur (pièce du groupe 1) l'ouvre,
+    // elle se referme derrière au checkpoint. Le second interrupteur (groupe 3) ouvre la dernière porte (groupe 4) et fait apparaître le pont de l'arrivée (groupe 5, caché au
+    // départ). Un retour au checkpoint remet portes et pont dans l'état du checkpoint (on repasse sur l'interrupteur). Sans la logique, le pilote ne finit pas.
+    id: 'interrupteurs', name: 'Interrupteurs', decor: 'factory', chapitre: 'manoeuvres', difficulty: 2, profil: 'atelier',
+    meca: ['logic'],
+    appris: 'Départ : deux boosters, deux cases. Au programme : un interrupteur ouvre la porte devant (elle se referme derrière, au checkpoint), un second ouvre la dernière porte et fait apparaître le pont de l’arrivée.',
+    goal: { id: 'norespawn' },
+    opts: { l: 6 }, pilot: { vCap: 62 },
+    script: 'start*2 B2 S2 [crs1] S B2 S3 HR S2 C*3 S B2 S3 ZR3 S ZL3 S HL S B2 S3 WI W WO S2 B finish*2',
+    medals: { cristal: 30.5, or: 32.1, argent: 36.9, bronze: 43.3 },
+    lgZones: [{ g: 1, at: 0.0903 }, { g: 3, at: 0.6715 }, { g: 5, at: 0.9134 }, { g: 5, at: 0.935 }],
+    obst: [{ k: 'wallS', at: 0.2, side: 0, s: 1.5, g: 2 }, { k: 'wallS', at: 0.8, side: 0, s: 1.5, g: 4 }],
+    lg: { off: [5], rules: [{ on: ['zone', 1], do: [['hide', 2], ['fx', 'sound', 'ding']] }, { on: ['cp', 1], do: [['show', 2]] }, { on: ['zone', 3], do: [['hide', 4], ['show', 5], ['fx', 'burst', '#ffd23e']] }] },
+  },
+  {
+    // 14 · 3/6 — PIÈCES MOBILES : deux ASCENSEURS et deux GLISSIÈRES à des rythmes différents (vitesses 100, 35 et 100, 25 % ; amplitudes 1 niveau, ½ case).
+    id: 'plateaux', name: 'Plateaux Mobiles', decor: 'volcano', chapitre: 'manoeuvres', difficulty: 3, profil: 'atelier',
+    meca: ['lift', 'slide'],
+    appris: 'Départ : trois boosters → vague. Au programme : deux ascenseurs et deux glissières, chacun à son rythme (on lit le mouvement avant d’y entrer), très grands virages, chicanes longues, route large.',
+    goal: { id: 'nowall' },
+    opts: { l: 6 }, pilot: { vCap: 62 },
+    movers: [{ ms: 100, ma: 1 }, { ms: 100, ma: 0.5 }, { ms: 35, ma: 1 }, { ms: 25, ma: 0.5 }],
+    script: 'start*2 B3 S2 [crs1] S2~ B HR S2= C S HL S B2 S2~ B ZR3 S ZL3 S2= C*3 S B2 WI W WO S2 B finish*2',
+    medals: { cristal: 29.5, or: 31.1, argent: 35.8, bronze: 42 },
+  },
+  {
+    // 14 · 4/6 — RELAIS DE VÉHICULES : épingles en MOTO, retour en voiture, lacets en BATEAU sur l'eau, puis une plaque DELTAPLANE et un grand saut jusqu'à l'arrivée.
+    id: 'relais', name: 'Relais', decor: 'isles', chapitre: 'manoeuvres', difficulty: 3, profil: 'technique',
+    meca: ['moto', 'bateau', 'deltaplane'],
+    appris: 'Départ : descente vers la plage. Au programme : épingles en moto, route étroite, retour en voiture, lacets en bateau sur l’eau, puis une plaque deltaplane et un grand saut jusqu’à l’arrivée.',
+    goal: { id: 'under', t: 58 },
+    opts: { l: 6 },
+    script: 'start*2 [cdi1] [dn2] [cdo1] S.o B R L R L B S2 C*3 B NI N2 NO S.o S R B S L B S.n S2.a R.a L.a R.a L.a S.a S.n B2 S C*3 R B S2 ZR S ZL B S.e B2 UU GR4 DD S4 finish*2',
+    medals: { cristal: 51.4, or: 54.2, argent: 62.3, bronze: 73.1 },
+  },
+  {
+    // 14 · 5/6 — AIGUILLAGE : une bifurcation (SPL … MRG) où le VÉHICULE est une décision : à gauche la route en voiture (épingles, boosters), à droite une plaque bateau,
+    // l'eau tout droit, une plaque qui rend la voiture. Le pilote prend l'eau (46,3 s) ; par la route il met 48,0 s (tools/test-extension.mjs). L'objectif demande l'eau.
+    id: 'aiguillage', name: 'Aiguillage', decor: 'reef', chapitre: 'manoeuvres', difficulty: 4, profil: 'technique',
+    meca: ['aiguillage', 'bateau'],
+    appris: 'Départ : route étroite, épingles. Au programme : un aiguillage : à gauche la route en voiture, à droite l’eau en bateau (plus directe, plus rapide si l’on tient la barre), épingles, chicanes.',
+    goal: { id: 'under', t: 47.5 },
+    opts: { l: 6 },
+    script: 'start*2 B2 NI N NO R L B S2 C*3 B R S L B SPL B2 L R B R L B2 ALTP S.n S5.a S.n MRG B S2 R B S L C*3 B ZR S ZL B S2 R L B S2 finish*2',
+    medals: { cristal: 44, or: 46.3, argent: 53.2, bronze: 62.5 },
+  },
+  {
+    // 14 · 6/6 — ÉPREUVE FINALE : sous la PLUIE au coucher du soleil, un tronçon en MOTO, un ASCENSEUR et une GLISSIÈRE, un INTERRUPTEUR qui ouvre la porte (elle se
+    // referme derrière au checkpoint) et un second qui fait apparaître le pont d'après le checkpoint.
+    id: 'finale', name: 'Grande Finale', decor: 'caves', chapitre: 'manoeuvres', difficulty: 5, profil: 'atelier',
+    meca: ['logic', 'lift', 'slide', 'pluie', 'moto'],
+    appris: 'Départ : tube de lancement. Au programme : sous la pluie, une moto, un ascenseur et une glissière, un interrupteur qui ouvre la porte, un autre qui fait apparaître un pont : les deux chapitres d’un coup.',
+    goal: { id: 'norespawn' },
+    opts: { l: 6 }, pilot: { vCap: 60 },
+    params: { rain: 60, envSeed: 33, ambiance: { sky: 'sunset', weather: 'rain' } },
+    movers: [{ ms: 80, ma: 1 }, { ms: 50, ma: 0.5 }],
+    script: 'start*2 TI TM TO B2 S2 S.o S2~ B HR S2= C*3 S B2 S3 ZR3 S ZL3 S.o S HL S B2 S3 C*3 B S2 WI W WO S2 B finish*2',
+    medals: { cristal: 33.5, or: 35.2, argent: 40.5, bronze: 47.6 },
+    lgZones: [{ g: 1, at: 0.4193 }, { g: 3, at: 0.6429 }, { g: 5, at: 0.8323 }, { g: 5, at: 0.8509 }],
+    obst: [{ k: 'wallS', at: 0.7578, side: 0, s: 1.5, g: 2 }],
+    lg: { off: [5], rules: [{ on: ['zone', 1], do: [['hide', 2], ['fx', 'sound', 'ding']] }, { on: ['cp', 2], do: [['show', 2]] }, { on: ['zone', 3], do: [['show', 5], ['fx', 'burst', '#ffb070']] }] },
+  },
 ];
 
 // 0.9 : un chapitre de carrière = un thème. Chapitres du plus facile au plus dur, et
