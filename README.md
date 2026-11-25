@@ -3,7 +3,7 @@
 Jeu de course contre-la-montre **low-poly** dans le navigateur, avec éditeur de circuits.
 C'est un jeu original : décors, véhicules, pièces, musique et circuits ont été conçus pour ce projet.
 
-Version actuelle : **bêta 0.16.18** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
+Version actuelle : **bêta 0.16.19** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
 
 ## Jouer
 
@@ -160,6 +160,16 @@ Le jeu marche entièrement hors ligne ; les fonctions en ligne utilisent un proj
 16. **Backend sûr (phase 2 backend)** : `supabase/etape15-backend.sql` (relançable sans danger, aucune suppression de données ; **à lancer AVANT** de redéployer les fonctions) : limitation de cadence persistante, partagée et atomique ; plafond de 2 000 temps verrouillé ; écriture atomique du meilleur temps ; circuits de joueurs liés à une empreinte forte ; publication avec temps d'auteur rejoué par le serveur. Puis **redéployer `submit-score` et `ice`**, mettre en ligne le jeu, et seulement ensuite `supabase/etape15b-publication-verifiee.sql`. Ordre, preuves à relever et retour arrière : **`supabase/MIGRATIONS.md`**.
 17. **Sécurité (phase 5)** : `supabase/etape17-securite.sql` (relançable, aucune suppression de données, après les étapes 1 à 15 ; compatible avec le jeu et les fonctions actuels) : un circuit masqué par la modération ne se rétablit plus, les signalements d'invités ne masquent plus seuls, compteurs de parties / aimés / signalements exacts, plafonds contre la saturation du stockage (statistiques anonymes, circuits, fantômes). Ordre, vérifications et retour arrière : `supabase/MIGRATIONS.md` ; bilan, risques restants et réglages Supabase : [docs/AUDIT-PHASE5-SECURITE.md](docs/AUDIT-PHASE5-SECURITE.md).
 
+Étapes suivantes (21 étapes numérotées en tout, détail, ordre, preuves et retour arrière : **`supabase/MIGRATIONS.md`** ; chacune se joue à la main dans le SQL Editor, puis `supabase/verify-prod.sql` en prouve l'état) :
+
+- **`etape16-durcissement.sql`** : retire les droits de table accordés par défaut par Supabase (uniquement des `revoke`).
+- **`etape18-maintenance.sql`** : `search_path` fixé, un index par clé étrangère, règles RLS réécrites, clés primaires, tables `client_errors`, `maintenance_log`, `scores_archive`, fonctions `log_errors`, `health_report`, `purge_expired`, `archive_old_scores`.
+- **`etape19-avis.sql`** : table `feedback` et fonction `submit_feedback` (le formulaire « Donner mon avis »).
+- **`etape20-droits-et-regles.sql`** : droit de lecture de la colonne `scores.ghost_veh` (TECH-021) et règles du jeu et de la base alignées (grâce de clôture des saisons…).
+- **`etape21-recuperation.sql`** : code de secours pour récupérer un compte sans courriel (tables `recovery_*`), avec la fonction serveur `account-recovery` (`supabase/COMPTES.md`).
+
+Les fonctions serveur sont `submit-score`, `ice` et `account-recovery` (`supabase/functions/`, générées par `npm run build:function`) ; l'ordre de mise en ligne est base, fonctions, site (`docs/DEPLOIEMENT.md`).
+
 Sans les étapes 9 à 13, le jeu fonctionne : les onglets Secteurs, Amis et Saison des classements, l'écran Compétition, les commentaires, playlists et modes publiés disent qu'une étape SQL manque, sans fausses données.
 
 Les scripts sont relançables et testés sur PostgreSQL (`npm run test:sql`).
@@ -177,7 +187,7 @@ La clé secrète n'est jamais dans le jeu : seule la fonction serveur l'utilise,
 1. `npm test` doit finir sans erreur (il vérifie aussi que `sw.js`, le préchargement des modules de `index.html` et `docs/MODULES.md` sont à jour) ; `npm run lint` aussi.
 2. Après tout changement de circuit, de pièce ou de physique : `npm run sw` (cache hors ligne et préchargement) puis `npm run build:function` (fonction serveur) ; après tout changement de version, de circuit ou de pièce : `npm run wiki` (`tools/test-wiki.mjs` échoue sinon).
    Un changement de physique impose aussi d'incrémenter `PHYS_VER` : la procédure complète est dans [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#changer-la-physique-la-procédure).
-3. **Redéployer la fonction `submit-score`** dans Supabase avec le nouveau `index.ts` : sans cela, les temps des circuits changés sont refusés en ligne.
+3. **Redéployer la fonction `submit-score`** dans Supabase avec le nouveau `index.ts` (depuis la 0.16.3 : le workflow `.github/workflows/deploiement.yml`, ordre base → fonctions → site, `docs/DEPLOIEMENT.md`) : sans cela, les temps des circuits changés sont refusés en ligne.
 4. Les records d'un circuit repartent de zéro dès que son tracé change (la clé de classement contient son empreinte) : rien à nettoyer côté base.
 5. Si le temps d'un circuit change volontairement : `node tools/golden.mjs --update`, puis `node tools/medals.mjs --check` pour revoir ses médailles.
 6. Publier : fusionner sur `main` (déploiement ordonné tests → fonction → barrière → site : [docs/DEPLOIEMENT.md](docs/DEPLOIEMENT.md) ; sinon, GitHub Pages sert le dossier racine de la branche) ; le numéro de version est dans `js/version.js` et `package.json` (les deux doivent concorder, un test le vérifie).
@@ -241,10 +251,10 @@ wiki/                           le wiki du jeu (index.html généré par npm run
 
 Lire d'abord [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Avant de proposer un changement :
 
-- `npm run lint` et `npm test` (≈ 30 s) (toutes les procédures de test : [docs/TESTS.md](docs/TESTS.md)) ; `npm run test:browser` si Playwright et Chromium sont installés ; `npm run test:deno` pour la physique sous Deno (le moteur de la fonction serveur) ;
+- `npm run lint` et `npm test` (environ 2 minutes et demie sur 4 cœurs) (toutes les procédures de test : [docs/TESTS.md](docs/TESTS.md)) ; `npm run test:browser` si Playwright et Chromium sont installés ; `npm run test:deno` pour la physique sous Deno (le moteur de la fonction serveur) ;
 - le **noyau de simulation** (physique, pièces, circuits, pilote automatique…) n'utilise pas `Math.sin`, `Math.atan2`, `Math.pow`, `**`… mais `js/dmath.js` : sinon la vérification serveur et les replays divergent d'un moteur à l'autre ;
 - un changement de physique incrémente `PHYS_VER` (`js/version.js`) ; `tools/phys-fingerprint.mjs` échoue tant que ce n'est pas fait ;
-- les fichiers générés (`sw.js`, `supabase/functions/submit-score/index.ts`, `docs/MODULES.md`, `tools/phys-fingerprint.json`) se régénèrent, ils ne se modifient pas à la main ;
+- les fichiers générés (`sw.js`, les trois `supabase/functions/*/index.ts`, `docs/MODULES.md`, `wiki/index.html`, `tools/phys-fingerprint.json`) se régénèrent, ils ne se modifient pas à la main ;
 - un nouveau module commence par un commentaire de tête (sa première phrase devient sa ligne de l'index) ; `npm run docs` met l'index à jour.
 
 La CI (`.github/workflows/test.yml`) rejoue tout cela : lint et tests, physique sous Deno, navigateur, SQL.
@@ -265,4 +275,4 @@ elles traduisent des caractéristiques (inclinaison, rayon, nombre de boucles…
 Les champs de la Phase 2 sont **optionnels** et rangés à part dans `data.e` (une entrée par pièce concernée, par index) :
 `cp` checkpoint (1 portique, 2 anneau), `th` thème, `ms` / `ma` vitesse et amplitude du mouvement, `col` couleurs personnalisées, `s2` / `p2` 2e revêtement
 d'une bifurcation, `o` orientation (1 mur gauche, 2 mur droit ; le plafond reste le drapeau `v`) ; couleur libre d'une décoration (10e valeur). Le code reste en version 3 tant qu'aucun de ces champs n'est utilisé.
-La signature (clé des classements et de la vérification) ignore le thème et les couleurs, et reste identique pour tout circuit qui n'utilise rien de nouveau.
+La signature (clé des classements et de la vérification) contient le décor du circuit, les pièces, les décorations, les tours, les règles de course et la logique ; elle ignore le nom, la description, l'auteur, le thème de pièce (`th`), le style de portique (`gs`), les couleurs (`col`), les déclencheurs (`scripts`) et l'ambiance, et reste identique pour tout circuit qui n'utilise rien de nouveau (`Track.signatureText` en donne le détail ; depuis la 0.16.6, obstacles et solides y sont comptés à la précision du code, voir docs/ARCHITECTURE.md).
