@@ -3,8 +3,8 @@
 //   <script>window.COPYTRACK_CONFIG = { supabase: { url: 'https://….supabase.co', key: 'sb_publishable_…' }, iceServers: [ … ] };</script>
 // Sans réseau, ou si la section est vide, le jeu marche normalement : seules les fonctions en ligne répondent « hors ligne ».
 // ATTENTION (hébergement personnalisé) : index.html porte une politique de sécurité du contenu (balise Content-Security-Policy) qui n'autorise ni script en ligne ni serveur autre que le
-// Supabase ci-dessous : le « <script>window.COPYTRACK_CONFIG … </script> » décrit plus haut serait BLOQUÉ. Modifie plutôt DEFAULTS ci-dessous ET `connect-src` dans index.html (un test,
-// tools/test-securite-client.mjs, échoue si les deux ne désignent pas le même serveur). Un relais TURN ne passe pas par `connect-src` (WebRTC).
+// Supabase ci-dessous : le « <script>window.COPYTRACK_CONFIG … </script> » décrit plus haut serait BLOQUÉ. Modifie plutôt DEFAULTS ci-dessous ET `connect-src` dans index.html, en https:// ET en wss:// (salons multijoueur :
+// Realtime ; un test, tools/test-securite-client.mjs, échoue si les deux ne désignent pas le même serveur). Un relais TURN ne passe pas par `connect-src` (WebRTC).
 const DEFAULTS = {
   // Projet Supabase. La clé est la clé PUBLIQUE (« publishable » / anon) : elle est faite pour être dans le navigateur ; la sécurité vient des règles
   // de la base (supabase/*.sql) et de la fonction serveur submit-score. La clé SECRÈTE n'apparaît jamais ici.

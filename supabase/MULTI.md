@@ -18,6 +18,14 @@ Menu principal > *Multijoueur* : *Créer une salle* (code de 6 caractères), *Re
 
 Trafic : environ 0,8 Ko/s par liaison, rien sur Supabase pendant la course.
 
+## Politique de sécurité de la page (0.16.18)
+
+La signalisation ouvre un WebSocket `wss://<projet>.supabase.co/realtime/v1/websocket`. La balise `Content-Security-Policy` d'`index.html` doit donc citer le projet
+**en `https://` et en `wss://`** dans `connect-src` : une source `https://` n'autorise pas `wss://` (constaté sous Chrome 158, ordinateur et Android). Jusqu'en 0.16.17 elle ne citait
+que `https://` : « Créer une salle » et « Rejoindre » échouaient **toujours**, sur tous les appareils, avec « Connexion au serveur de salons impossible. » (le WebSocket est refusé
+avant de partir : rien n'apparaît dans les journaux Realtime de Supabase). Les essais à plusieurs onglets (`?net=local`) ne passent pas par Supabase et ne l'avaient pas vu ;
+`tools/test-browser.mjs` vérifie maintenant la vraie signalisation sous la vraie politique, et `tools/test-securite-client.mjs` exige les deux origines.
+
 ## À vérifier dans Supabase (une fois)
 
 - *Realtime > Settings* : laisser **« Allow public access »** activé (les canaux de salle sont publics). Si vous le
