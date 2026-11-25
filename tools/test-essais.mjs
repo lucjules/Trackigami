@@ -316,7 +316,7 @@ test('docs/FICHE-ESSAI.md et docs/temps-humains.json sont la sortie de tools/fic
   for (const p of parcours()) assert.ok(fiche.includes(`**${p.name}** (n° ${p.index + 1}`) && fiche.includes('· **parcours imposé**'), p.id);
   for (const s of SCALES) assert.ok(fiche.includes(`| ${s.label} |`), 'question du formulaire : ' + s.label);
   for (const q of QUESTIONS_RESSENTI) assert.ok(fiche.includes(`| ${q.label} |`), 'question de la fiche : ' + q.key);
-  assert.equal((fiche.match(/^#### \d+\. /gm) || []).length, 72);
+  assert.equal((fiche.match(/^### \d+\. /gm) || []).length, 72); assert.equal((fiche.match(/^## Chapitre /gm) || []).length, 12);
   assert.ok(!/[0-9a-f]{16}/.test(fiche.replace(/[0-9a-f]{16,}(?=\.mjs)/g, '')), 'aucun identifiant d’installation dans la fiche');
   assert.match(fiche, new RegExp(`Physique : \\*\\*${PHYS_VER}\\*\\*`));
 });

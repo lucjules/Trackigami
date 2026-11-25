@@ -65,10 +65,10 @@ export function buildFiche(defs = BUILTIN_TRACKS) {
     '| Fini | rien à changer : tu es satisfait·e de ce circuit |', '');
   const tpl = {};
   defs.forEach((d, i) => {
-    if (i % CHAPTER_SIZE === 0) { const c = CHAPTERS[i / CHAPTER_SIZE]; L.push(`### Chapitre ${i / CHAPTER_SIZE + 1} · ${c.name}`, '', `_${c.desc}_`, ''); }
+    if (i % CHAPTER_SIZE === 0) { const c = CHAPTERS[i / CHAPTER_SIZE]; L.push(`## Chapitre ${i / CHAPTER_SIZE + 1} · ${c.name}`, '', `_${c.desc}_`, ''); }
     const S = runTrack(buildBuiltin(d)), pf = PROFILS[d.profil], route = PARCOURS.some((p) => p.id === d.id);
     tpl[d.id] = [];
-    L.push(`#### ${i + 1}. ${d.name} — ${pf.label}, ${stars(d.difficulty)}${route ? ' · **parcours imposé**' : ''}`, '',
+    L.push(`### ${i + 1}. ${d.name} — ${pf.label}, ${stars(d.difficulty)}${route ? ' · **parcours imposé**' : ''}`, '',
       `- ${d.appris}`,
       `- Pilote automatique : **${S.time.toFixed(1)} s** · médailles : cristal ${d.medals.cristal} · or ${d.medals.or} · argent ${d.medals.argent} · bronze ${d.medals.bronze}`,
       `- Objectif bonus ★ : ${goalLabel(goalFor(d, i))}`,
