@@ -9,20 +9,23 @@
 //     l'ancienne clé (c'était le défaut) ; chacun retrouve ainsi ce qu'il avait, et rien n'est effacé. Idempotent.
 // Ne sont PAS migrés : les classements EN LIGNE (ils restent sous l'ancienne clé, figés : la nouvelle clé en commence un neuf), les fantômes importés (d'avant la physique actuelle :
 // inutilisables), les favoris (références stables b: / m: / c:, jamais des clés) ni les médailles (celles d'un circuit de joueur se déduisent du temps de l'auteur dans son code).
-import { getRecord, saveRecord, listRuns, setRuns, listKeys, cleanRuns } from './storage.js';
+import { getOwnRecord, saveRecord, listRuns, setRuns, listKeys, cleanRuns, medalTime } from './storage.js';
 
 const done = new Set();                      // « ancienne>nouvelle » déjà adoptées pendant cette session (une fois suffit)
 export const resetAliasSession = () => done.clear();
 
 // Copie ce qui est rangé sous oldKey (et ses variantes) vers newKey ; renvoie le nombre d'éléments copiés.
-function adopt(oldKey, newKey) {
+// keepBestMedal (alias des circuits INTÉGRÉS, js/builtinKeys.js) : si la nouvelle clé a déjà un record mais que l'ancien a un meilleur temps de médaille (bt, toutes physiques confondues),
+// le record de la nouvelle clé en reçoit le bt (son temps, son fantôme et ses commandes ne changent pas) : une médaille gagnée ne redescend jamais d'un changement de clé.
+export function adopt(oldKey, newKey, { keepBestMedal = false } = {}) {
   let n = 0;
   const suffixes = new Set(['']);                              // '' : le circuit lui-même ; '~v1.veh-moto'… : ses catégories de record
   for (const k of [...listKeys('rec3.' + oldKey + '~'), ...listKeys('runs.' + oldKey + '~')]) suffixes.add(k.slice(k.indexOf('~')));
   for (const s of suffixes) {
     const from = oldKey + s, to = newKey + s;
-    const rec = getRecord(from);
-    if (rec && !getRecord(to) && saveRecord(to, rec)) n++;
+    const rec = getOwnRecord(from), cur = getOwnRecord(to);
+    if (rec && !cur) { if (saveRecord(to, rec)) n++; }
+    else if (rec && cur && keepBestMedal && medalTime(rec) < medalTime(cur) - 1e-9 && saveRecord(to, { ...cur, bt: medalTime(rec) })) n++;
     const runs = listRuns(from);
     if (runs.length) {
       const cur = listRuns(to), merged = cleanRuns([...cur, ...runs]);

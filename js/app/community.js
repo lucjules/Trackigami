@@ -6,6 +6,7 @@ import { MEDALS, medalFor } from '../medals.js';
 import { Track, lossBlocking } from '../track.js';
 import { lossMessage, lossNote } from '../lossMessage.js';
 import { adoptLegacyKeys } from '../keyAlias.js';
+import { resolveBuiltinKey } from '../builtinKeys.js';
 
 // Un circuit qui porte un temps d'auteur sans être vérifié : il a été modifié depuis sa vérification, OU le jeu a changé la façon de calculer sa clé (0.16.6 : obstacles et solides hachés au
 // pas du code, TECH-039), ce qui rend « non vérifiée » toute vérification faite avant. Une course de vérification suffit.
@@ -50,6 +51,7 @@ export const communityMethods = {
 
   // Un lien « …#g=SHG1… » ouvre ce défi : fantôme importé, puis course contre lui (circuits intégrés et défi du jour ; un circuit de joueur doit déjà être chez toi).
   openGhostLink(ghost) {
+    ghost = { ...ghost, trackKey: resolveBuiltinKey(ghost.trackKey) };      // (un fantôme partagé sous l'ancienne clé d'un circuit officiel : js/builtinKeys.js)
     const b = this.builtins.find((x) => x.key === ghost.trackKey);
     const daily = ghost.trackKey.startsWith('daily-');
     if (ghost.v !== PHYS_VER) { this.ui.flash('Ce fantôme vient d\'une autre version du jeu : recharge la page (ou celle de ton ami).', 5); return; }
@@ -68,6 +70,7 @@ export const communityMethods = {
   importGhostCode(code) {
     try {
       const g = decodeGhost(code);
+      g.trackKey = resolveBuiltinKey(g.trackKey);      // (ancienne clé d'un circuit officiel : js/builtinKeys.js)
       if (g.v !== PHYS_VER) { this.ui.flash('Ce fantôme vient d\'une autre version du jeu.'); return true; }
       setImportedGhost(g.trackKey, g);
       const b = this.builtins.find((x) => x.key === g.trackKey);

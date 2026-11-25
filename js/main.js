@@ -16,6 +16,7 @@ import { BUILTIN_TRACKS, buildBuiltin, authorLabel } from './tracks.js';
 import { Track, hashString, lossBlocking } from './track.js';
 import { lossMessage, lossNote } from './lossMessage.js';
 import { adoptLegacyKeys } from './keyAlias.js';
+import { installBuiltinKeyAliases, migrateBuiltinKeys } from './builtinKeys.js';
 import { VERSION, PHYS_VER, GAME_NAME } from './version.js';
 import { online, versionMismatchText } from './online.js';
 import { account } from './account.js';
@@ -99,6 +100,9 @@ class App {
       const track = buildBuiltin(def);
       return { def, track, index, key: `b-${def.id}-${hashString(track.encode())}` };
     });
+    // Alias de clés des circuits officiels (RISK-001, js/builtinKeys.js ; table vide tant qu'aucun circuit n'a été modifié) : la lecture des records retrouve l'ancienne clé, puis on les copie.
+    installBuiltinKeyAliases();
+    migrateBuiltinKeys();
 
     if ('ontouchstart' in window || navigator.maxTouchPoints > 0) { document.body.classList.add('touch'); this.input.touchActive = true; }
     document.body.classList.toggle('drag-steer', this.settings.touchMode === 'drag');
@@ -582,7 +586,8 @@ const NO_WEBGL = 'Ce navigateur n’a pas pu démarrer la 3D (WebGL 2). Active l
     account.onNotice = (msg) => app.ui.flash(msg, 6);      // l'espace de l'appareil ne suffit pas à la sauvegarde du compte (TECH-007) : le joueur le sait
     online.onNotice = (msg) => app.ui.flash(msg, 6);      // une nouvelle identité d'invité n'est jamais créée en silence (TECH-026)
     onProfileChange(() => app.ui.updateCoins());          // un autre onglet a écrit le profil (TECH-027) : les pièces affichées suivent
-    if (identity.kind === 'account') account.sync().catch(() => { /* hors ligne : reprise plus tard */ });
+    // (une synchronisation peut rapporter les records qu'un autre appareil, d'avant le changement de clé d'un circuit, gardait sous l'ancienne clé : on les copie, puis l'écran se met à jour)
+    if (identity.kind === 'account') account.sync().then(() => { if (migrateBuiltinKeys()) app.refreshProgress(); }).catch(() => { /* hors ligne : reprise plus tard */ });
   } catch (err) {
     console.error(err);
     const l = document.getElementById('loading');
