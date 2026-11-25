@@ -9,7 +9,8 @@ import { spawnSync } from 'node:child_process';
 import { test, finish } from './harness.mjs';
 import { parseCsv, bestTimes, fitPooled, fitRobust, proposePooled, humanFactors, enoughData, reach, summariseFeedback, toMarkdown, weightedQuantile, ESSAI_QUANTILES } from './essais.mjs';
 import { writeMedals } from './medals.mjs';
-import { BUILTIN_TRACKS } from '../js/tracks.js';
+import { BUILTIN_TRACKS, buildBuiltin } from '../js/tracks.js';
+import { hashString } from '../js/track.js';
 import { PHYS_VER, VERSION } from '../js/version.js';
 
 const golden = JSON.parse(readFileSync(new URL('./golden-temps.json', import.meta.url), 'utf8'));
@@ -144,6 +145,25 @@ test('les vrais circuits sont tous réinscriptibles (structure de js/tracks.js r
   for (const d of BUILTIN_TRACKS) src = writeMedals(src, d, d.medals);
   assert.equal((src.match(/medalsBy: 'humain'/g) || []).length, BUILTIN_TRACKS.length);
   assert.ok(src.length > before);
+});
+
+// Recaler les médailles ne doit JAMAIS changer la clé d'un circuit (records, fantômes, classements en ligne y sont rangés) : la clé « b-<id>-<empreinte> » est celle du
+// CODE du circuit (Track.encode), où les médailles, l'objectif bonus et medalsBy n'entrent pas. Ce test le prouve sur les 72 circuits, avant tout recalage.
+const keyOf = (d) => `b-${d.id}-${hashString(buildBuiltin(d).encode())}`;
+const corpus = JSON.parse(readFileSync(new URL('./compat/corpus.json', import.meta.url), 'utf8'));
+test('les médailles ne font pas partie de la clé : 72 clés b- identiques à celles d’avant, quelles que soient les médailles, l’objectif et medalsBy', () => {
+  assert.equal(BUILTIN_TRACKS.length, 72);
+  for (const d of BUILTIN_TRACKS) {
+    const f = (k) => Math.round(d.medals[k] * 1.37 * 10) / 10 + 3;
+    const other = { ...d, medals: { cristal: f('cristal'), or: f('or'), argent: f('argent'), bronze: f('bronze') }, medalsBy: 'humain', ...(d.goal && d.goal.id === 'under' ? { goal: { ...d.goal, t: d.goal.t + 7 } } : {}) };
+    assert.notDeepEqual(other.medals, d.medals);
+    assert.equal(keyOf(other), keyOf(d), d.id + ' : la clé suit les médailles');
+    assert.equal(keyOf(d), corpus.builtinKeys[d.id], d.id + ' : clé différente de celle d’avant');
+  }
+});
+
+test('seuils de médailles actuels : pour chacun des 72 circuits, cristal ≤ or ≤ argent ≤ bronze, tous positifs', () => {
+  for (const d of BUILTIN_TRACKS) { const m = d.medals; assert.ok(m.cristal > 0 && m.cristal <= m.or && m.or <= m.argent && m.argent <= m.bronze, d.id + ' ' + JSON.stringify(m)); }
 });
 
 test('rapport et ligne de commande : rapport écrit, --ecrire refuse avec trop peu de testeurs', () => {
