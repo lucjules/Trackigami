@@ -1468,6 +1468,8 @@ body.hud-editing > section, body.hud-editing #touch { display: none !important; 
 .hub-cats .chip { font: inherit; font-size: 13px; color: var(--muted); background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
 .hub-cats .chip.on { color: #1a1030; background: var(--amber); border-color: transparent; font-weight: 700; }
 .hub-cats .hub-hint { width: 100%; margin: 4px 0 0; }
+.hub-cats .chip.extreme { border-style: dashed; border-radius: 16px; text-align: left; }      /* GAME-006 : catégorie que le pilote automatique n'a pas finie, toujours choisissable */
+.hub-cats .chip .chip-extreme { display: block; font-size: 11px; font-weight: 400; line-height: 1.25; }
 .hub-hint { font-size: 13px; margin: 0 0 8px; }
 .hub-lock { color: var(--amber); margin: 0 0 8px; }
 .hub-play { width: 100%; text-align: center; font-size: 22px; }

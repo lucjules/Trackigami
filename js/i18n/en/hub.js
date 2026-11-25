@@ -56,6 +56,8 @@ export default {
   '⛵ Départ en bateau': '⛵ Boat start',
   '🪂 Départ en deltaplane': '🪂 Hang-glider start',
   '🚫 Sans obstacles': '🚫 No obstacles',
+  'Défi extrême (non finissable par le pilote automatique)': 'Extreme challenge (the autopilot cannot finish it)',
+  'Le pilote automatique n’a pas fini cette catégorie sur ce circuit. Ce n’est pas une preuve qu’elle est impossible à la main, mais elle est très difficile : tu peux la tenter, ou revenir à une autre catégorie.': 'The autopilot did not finish this category on this track. That does not prove it is impossible by hand, but it is very hard: you can try it, or go back to another category.',
   'Classement et record à part, sans médailles ni pièces : le record officiel ne bouge pas.': 'A separate leaderboard and record, with no medals or coins: the official record is untouched.',
   'Catégorie : {c:t} · classement à part': 'Category: {c:t} · separate leaderboard',
   'Catégorie de record inconnue.': 'Unknown record category.',

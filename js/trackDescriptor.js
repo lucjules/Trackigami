@@ -17,6 +17,7 @@ import { goalFor, nextBuiltinIndex, chapterUnlocked, prerequisiteOf, CHAPTER_SIZ
 import { estimateDifficulty } from './difficulty.js';
 import { formatVariant, variantKey, applyVariant, variantFits, MAX_KEY, VARIANT_VER } from './variants.js';
 import { seasonOf, seasonTracks, seasonBounds } from './seasons.js';
+import { CATEGORY_FINISH } from './categoriesFaisables.js';
 
 const plen = (pts) => { let d = 0; for (let i = 1; i < pts.length; i++) d += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1], pts[i][2] - pts[i - 1][2]); return d; };
 
@@ -172,11 +173,21 @@ export const HUB_CATEGORIES = [
   { id: 'pm-sim', v: { pm: 'sim' }, label: '🎛️ Profil Simulation' },
   { id: 'vm-2', v: { vm: '2' }, label: '🧪 Véhicules v2' },
 ];
+// « Défi extrême » (GAME-006) : le pilote automatique n'a fini cette catégorie sur ce circuit officiel à aucune de ses vitesses (js/categoriesFaisables.js, généré par tools/categories-faisables.mjs). Ce n'est PAS une
+// preuve d'impossibilité (un pilote automatique n'est pas un humain) : la catégorie reste proposée et choisissable, la fiche le dit seulement. Faux pour tout circuit non mesuré (défi du jour, circuit de joueur) et
+// pour un circuit officiel modifié depuis la mesure (l'empreinte `h` ne correspond plus : aucune affirmation sans mesure).
+export const EXTREME_LABEL = 'Défi extrême (non finissable par le pilote automatique)';
+export function isExtremeCategory(official, catId, data = CATEGORY_FINISH) {
+  if (!official || official.source !== 'builtin' || !official.builtinId || !official.key) return false;
+  const m = data.circuits[official.builtinId];
+  return !!m && official.key === `b-${official.builtinId}-${m.h}` && m.ko.includes(catId);
+}
 // Celles qui ont un sens sur ce circuit (classé en ligne, et la variante change vraiment la course).
 export function hubCategories(desc) {
   const official = desc.official || desc;
   if (!official.key || !/^(b-|daily-|u-)/.test(official.key)) return [];
-  const cats = HUB_CATEGORIES.filter((c) => { try { return variantKey(official.key, c.v).length <= MAX_KEY && variantFits(official.track, c.v); } catch { return false; } });
+  const cats = HUB_CATEGORIES.filter((c) => { try { return variantKey(official.key, c.v).length <= MAX_KEY && variantFits(official.track, c.v); } catch { return false; } })
+    .map((c) => (isExtremeCategory(official, c.id) ? { ...c, extreme: true } : c));      // (marquée, jamais retirée ni rendue non sélectionnable)
   // Saison de la semaine (E15) : le circuit en fait partie ; catégorie en tête (classement de la semaine, points de saison).
   const sn = official.source === 'builtin' && official.builtinId ? seasonOf() : 0;
   if (sn && seasonTracks(sn).some((dd) => dd.id === official.builtinId)) {
