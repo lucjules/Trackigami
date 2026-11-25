@@ -324,6 +324,25 @@ try {
     await click('#tracks [data-action="back"]');
   });
 
+  await test('GAME-006 : « Défi extrême » sur les catégories que le pilote automatique ne finit pas (bateau sur Premiers Éclats), aucune retirée, et la catégorie reste choisissable', async () => {
+    await app(() => { window.copytrack.showMenu('tracks'); window.copytrack.openBuiltinHub(0, 'tracks'); });
+    await waitApp(() => document.querySelector('#hub-launch [data-cat="veh-boat"]'));
+    const EXT = 'Défi extrême (non finissable par le pilote automatique)';
+    assert.equal(await page.evaluate(() => (document.querySelector('#hub-launch [data-cat="veh-boat"] .chip-extreme') || {}).textContent), EXT, 'la fiche affiche le texte dans la catégorie bateau');
+    assert.equal(await page.evaluate(() => !!document.querySelector('#hub-launch [data-cat="veh-moto"] .chip-extreme')), false, 'la moto, que le pilote finit, n’est pas marquée');
+    const ids = await page.evaluate(() => [...document.querySelectorAll('#hub-launch [data-cat]')].map((b) => b.dataset.cat).filter(Boolean));
+    assert.deepEqual(ids, ['veh-moto', 'veh-boat', 'veh-glider', 'rn-60', 'pm-arcade', 'pm-sim'], 'aucune catégorie retirée (la liste d’avant)');
+    await click('#hub-launch [data-cat="veh-boat"]');
+    assert.equal(await page.evaluate(() => document.querySelector('#hub-launch [data-cat="veh-boat"]').getAttribute('aria-checked')), 'true', 'encore choisissable');
+    assert.equal(await page.evaluate(() => document.querySelector('#hub-launch [data-cat="veh-boat"]').disabled), false);
+    assert.match(await app(() => window.copytrack._hub.desc.key), /~v1\.veh-boat$/);
+    assert.match(await page.evaluate(() => (document.querySelector('#hub-launch .hub-extreme') || {}).textContent || ''), /n’a pas fini cette catégorie/, 'l’indication sous les catégories');
+    assert.equal(await page.evaluate(() => document.getElementById('hub-play').disabled), false, 'et on peut la jouer');
+    await click('#hub-launch [data-cat=""]');
+    await click('#race-hub [data-action="hub-back"]');
+    await click('#tracks [data-action="back"]');
+  });
+
   await test('catégorie de record : départ en moto, classement à part, retour à la fiche dans la même catégorie', async () => {
     await app(() => { window.copytrack.showMenu('tracks'); window.copytrack.openBuiltinHub(0, 'tracks'); });
     await waitApp(() => document.querySelector('#hub-launch [data-cat="veh-moto"]'));

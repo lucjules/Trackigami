@@ -21,7 +21,7 @@ if (args.includes('--list')) { console.log(files.join('\n')); process.exit(0); }
 
 // Contrôles qui ne sont pas des suites de tests : [fichier, muet ?]. « check-generated » réécrit sw.js un instant : il passe seul, avant le reste.
 const SERIAL = [['check-generated.mjs', false]];
-const PARALLEL_CHECKS = [['audit-pieces.mjs', true], ['phys-fingerprint.mjs', false], ['check-docs.mjs', false], ['sim.mjs', 'summary']];
+const PARALLEL_CHECKS = [['audit-pieces.mjs', true], ['phys-fingerprint.mjs', false], ['check-docs.mjs', false], ['check-categories.mjs', false], ['sim.mjs', 'summary']];
 
 function run(file, quiet) {
   return new Promise((resolve) => {

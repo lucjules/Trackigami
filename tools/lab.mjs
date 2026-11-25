@@ -68,7 +68,7 @@ export function runTrack(track, { maxTime = 240, vCap, brakeDecel, rewindAtCp = 
   sim.start();
   const bot = new Autopilot(track.path, { ...(vCap ? { vCap } : {}), ...(brakeDecel ? { brakeDecel } : {}) });
   bot.reset(phys);
-  const S = { contacts: 0, contactsHard: 0, ok: false, vehicle: 'car', jumps: 0, wallVmin: Infinity, shocks: 0, spikes: 0, time: 0, respawns: 0, wallHits: 0, vmax: 0, airMax: 0, airTotal: 0, loops: 0, perfects: 0, turbos: 0, rings: 0, brakeT: 0, wallT: 0, ribT: 0, samples: [], cps: [], yMin: Infinity, yMax: -Infinity, dist: 0, reason: '' };
+  const S = { contacts: 0, contactsHard: 0, ok: false, vehicle: 'car', jumps: 0, wallVmin: Infinity, shocks: 0, spikes: 0, time: 0, respawns: 0, wallHits: 0, vmax: 0, airMax: 0, airTotal: 0, loops: 0, perfects: 0, turbos: 0, rings: 0, brakeT: 0, wallT: 0, ribT: 0, samples: [], cps: [], lapTimes: [], yMin: Infinity, yMax: -Infinity, dist: 0, reason: '' };
   let stuck = 0, lastIdx = 0, last = null, airRun = 0, lastContact = -1000;
   const steps = Math.round(maxTime / DT);
   for (let i = 0; i < steps; i++) {
@@ -102,6 +102,7 @@ export function runTrack(track, { maxTime = 240, vCap, brakeDecel, rewindAtCp = 
         continue;
       }
     }
+    if (ev && ev.type === 'lap') S.lapTimes.push(+logic.time.toFixed(2));      // (le passage de la ligne d'un tour est aussi un point de retour : raceLogic.js)
     if (ev && ev.type === 'finish') { S.ok = true; S.time = logic.time; S.vehicle = phys.vehicle; break; }
     const fell = phys.offTrack || phys.ev.sink;
     if (i % 120 === 0) { if (bot.idx === lastIdx) stuck++; else stuck = 0; lastIdx = bot.idx; }

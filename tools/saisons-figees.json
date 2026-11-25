@@ -1,0 +1,410 @@
+{
+ "note": "Tirage des saisons figé (seasonTracks, js/seasons.js) : voir tools/test-saisons-figees.mjs. Ne pas modifier à la main ; node tools/test-saisons-figees.mjs --etendre ajoute des saisons.",
+ "pool": 66,
+ "poolIds": [
+  "eclats",
+  "canyon",
+  "tremplins",
+  "spirale",
+  "verglas",
+  "grandtour",
+  "lianes",
+  "canopee",
+  "spores",
+  "serpent",
+  "racines",
+  "temple",
+  "lagon",
+  "recif",
+  "phare",
+  "vrille",
+  "lunaire",
+  "archipel",
+  "neons",
+  "boulevard",
+  "hyper",
+  "metro",
+  "tours",
+  "viaduc",
+  "aurore",
+  "banquise",
+  "glacier",
+  "helice",
+  "couronne",
+  "blizzard",
+  "braises",
+  "coulee",
+  "basalte",
+  "cheminee",
+  "caldeira",
+  "eruption",
+  "quai",
+  "navette",
+  "ceinture",
+  "grandanneau",
+  "apesanteur",
+  "zenith",
+  "courant",
+  "corail",
+  "epave",
+  "meduses",
+  "abysses",
+  "barriere",
+  "chaine",
+  "laminoir",
+  "engrenages",
+  "fonderie",
+  "presse",
+  "usinefolle",
+  "envol",
+  "suspendues",
+  "rafales",
+  "montgolfieres",
+  "pontvents",
+  "cite",
+  "galerie",
+  "plafond",
+  "cristalfele",
+  "miroir",
+  "vrilles",
+  "coeur"
+ ],
+ "jusqua": 67,
+ "saisons": {
+  "1": [
+   "barriere",
+   "lianes",
+   "eruption"
+  ],
+  "2": [
+   "vrille",
+   "boulevard",
+   "canyon"
+  ],
+  "3": [
+   "fonderie",
+   "coulee",
+   "grandtour"
+  ],
+  "4": [
+   "helice",
+   "coulee",
+   "vrilles"
+  ],
+  "5": [
+   "eclats",
+   "glacier",
+   "courant"
+  ],
+  "6": [
+   "usinefolle",
+   "plafond",
+   "meduses"
+  ],
+  "7": [
+   "lagon",
+   "coulee",
+   "ceinture"
+  ],
+  "8": [
+   "caldeira",
+   "coeur",
+   "cheminee"
+  ],
+  "9": [
+   "vrilles",
+   "boulevard",
+   "ceinture"
+  ],
+  "10": [
+   "eclats",
+   "canyon",
+   "blizzard"
+  ],
+  "11": [
+   "engrenages",
+   "cheminee",
+   "vrilles"
+  ],
+  "12": [
+   "galerie",
+   "tremplins",
+   "zenith"
+  ],
+  "13": [
+   "braises",
+   "archipel",
+   "presse"
+  ],
+  "14": [
+   "metro",
+   "rafales",
+   "recif"
+  ],
+  "15": [
+   "laminoir",
+   "neons",
+   "phare"
+  ],
+  "16": [
+   "cheminee",
+   "quai",
+   "banquise"
+  ],
+  "17": [
+   "galerie",
+   "cheminee",
+   "helice"
+  ],
+  "18": [
+   "cristalfele",
+   "engrenages",
+   "spores"
+  ],
+  "19": [
+   "lianes",
+   "presse",
+   "envol"
+  ],
+  "20": [
+   "pontvents",
+   "tours",
+   "courant"
+  ],
+  "21": [
+   "rafales",
+   "banquise",
+   "epave"
+  ],
+  "22": [
+   "neons",
+   "viaduc",
+   "pontvents"
+  ],
+  "23": [
+   "quai",
+   "metro",
+   "spirale"
+  ],
+  "24": [
+   "cheminee",
+   "aurore",
+   "serpent"
+  ],
+  "25": [
+   "corail",
+   "engrenages",
+   "plafond"
+  ],
+  "26": [
+   "suspendues",
+   "tours",
+   "temple"
+  ],
+  "27": [
+   "coeur",
+   "suspendues",
+   "galerie"
+  ],
+  "28": [
+   "usinefolle",
+   "boulevard",
+   "vrilles"
+  ],
+  "29": [
+   "ceinture",
+   "recif",
+   "montgolfieres"
+  ],
+  "30": [
+   "envol",
+   "corail",
+   "lunaire"
+  ],
+  "31": [
+   "vrille",
+   "epave",
+   "aurore"
+  ],
+  "32": [
+   "cheminee",
+   "miroir",
+   "canyon"
+  ],
+  "33": [
+   "galerie",
+   "helice",
+   "navette"
+  ],
+  "34": [
+   "lagon",
+   "racines",
+   "epave"
+  ],
+  "35": [
+   "courant",
+   "couronne",
+   "presse"
+  ],
+  "36": [
+   "glacier",
+   "lianes",
+   "vrille"
+  ],
+  "37": [
+   "canopee",
+   "zenith",
+   "coeur"
+  ],
+  "38": [
+   "grandtour",
+   "miroir",
+   "recif"
+  ],
+  "39": [
+   "vrilles",
+   "coulee",
+   "couronne"
+  ],
+  "40": [
+   "cristalfele",
+   "epave",
+   "neons"
+  ],
+  "41": [
+   "montgolfieres",
+   "temple",
+   "tremplins"
+  ],
+  "42": [
+   "serpent",
+   "epave",
+   "quai"
+  ],
+  "43": [
+   "spirale",
+   "lagon",
+   "lianes"
+  ],
+  "44": [
+   "couronne",
+   "corail",
+   "eruption"
+  ],
+  "45": [
+   "phare",
+   "zenith",
+   "presse"
+  ],
+  "46": [
+   "suspendues",
+   "courant",
+   "cite"
+  ],
+  "47": [
+   "plafond",
+   "apesanteur",
+   "montgolfieres"
+  ],
+  "48": [
+   "eruption",
+   "courant",
+   "neons"
+  ],
+  "49": [
+   "courant",
+   "meduses",
+   "archipel"
+  ],
+  "50": [
+   "grandtour",
+   "lianes",
+   "cheminee"
+  ],
+  "51": [
+   "miroir",
+   "caldeira",
+   "braises"
+  ],
+  "52": [
+   "plafond",
+   "neons",
+   "courant"
+  ],
+  "53": [
+   "eruption",
+   "envol",
+   "canopee"
+  ],
+  "54": [
+   "blizzard",
+   "lagon",
+   "coeur"
+  ],
+  "55": [
+   "banquise",
+   "usinefolle",
+   "viaduc"
+  ],
+  "56": [
+   "neons",
+   "suspendues",
+   "canyon"
+  ],
+  "57": [
+   "temple",
+   "chaine",
+   "banquise"
+  ],
+  "58": [
+   "miroir",
+   "hyper",
+   "boulevard"
+  ],
+  "59": [
+   "eclats",
+   "presse",
+   "vrille"
+  ],
+  "60": [
+   "ceinture",
+   "boulevard",
+   "canyon"
+  ],
+  "61": [
+   "corail",
+   "blizzard",
+   "verglas"
+  ],
+  "62": [
+   "montgolfieres",
+   "laminoir",
+   "epave"
+  ],
+  "63": [
+   "miroir",
+   "lagon",
+   "helice"
+  ],
+  "64": [
+   "braises",
+   "courant",
+   "vrille"
+  ],
+  "65": [
+   "aurore",
+   "chaine",
+   "banquise"
+  ],
+  "66": [
+   "neons",
+   "braises",
+   "serpent"
+  ],
+  "67": [
+   "verglas",
+   "laminoir",
+   "phare"
+  ]
+ }
+}

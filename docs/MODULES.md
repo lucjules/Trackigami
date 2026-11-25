@@ -20,11 +20,13 @@ La vue d'ensemble (principes, déterminisme, flux d'une course) est dans [ARCHIT
 | `authorProof.js` | Preuve du temps de l'auteur (Phase 2 backend) : la course de VÉRIFICATION faite dans l'éditeur. Publier un circuit envoie cette course au serveur, qui la REJOUE sur le code publié : le temps de l'auteur est celui du rejeu, jamais une affirmation du client (js/verify.js, verifyPublish). |
 | `autopilot.js` | Pilote automatique simple qui suit la ligne centrale d'un circuit scripté. |
 | `boot-guard.js` | Garde du démarrage (script classique, chargé AVANT js/main.js : il tourne même quand les modules du jeu ne se chargent pas). |
+| `builtinKeys.js` | Alias de clés des circuits intégrés : ancienne clé b-… → nouvelle clé (RISK-001), pour qu'un circuit officiel dont la clé change ne fasse perdre ni records, ni médailles, ni verrous. |
 | `camflip.js` | Retournement de la caméra quand la gravité s'inverse (plaque d'inversion). |
 | `camprefs.js` | Caméras personnalisées (lot 11) : jusqu'à 6 caméras de course en plus des 4 d'origine, réglées par le joueur. |
 | `camrig.js` | Aides de caméra de poursuite (phase 1 après l'audit 0.9.59) : anticipation des virages, compensation du retard de suivi à haute vitesse, visée vers la zone de réception pendant un saut, pente de la route, et transition « voiture quittant un ruban » (mur, looping, vrille). |
 | `career.js` | Mode carrière (v1.5) : les circuits intégrés, rangés du plus facile au plus dur, sont regroupés en chapitres de 6. Un chapitre s'ouvre avec 4 médailles dans le précédent. Chaque circuit a un objectif bonus qui rapporte des pièces une fois. |
 | `carModel.js` | Modèles 3D de la voiture et de la moto (low-poly, originaux), construits par code. |
+| `categoriesFaisables.js` | Catégories de record que le pilote automatique FINIT, par circuit officiel (GAME-006) : données GÉNÉRÉES par tools/categories-faisables.mjs (npm run categories), à ne pas modifier à la main. |
 | `cloudsave.js` | Sauvegarde cloud : quelles données partent dans le cloud, et comment fusionner deux versions. |
 | `config.js` | Réglages propres à un DÉPLOIEMENT du jeu : le serveur en ligne (classements, communauté, comptes, salons) et le relais réseau du multijoueur. |
 | `connect.js` | Raccords entre pièces (phase 1 de l'après-audit 0.9.59) : extrémités d'une pièce, repère de la route à chaque bout, et recherche de la pièce qui se raccorde à une extrémité donnée. Module PUR (aucun rendu, aucun DOM, aucune physique) : il sert au vérificateur (continuity.js), à l'outil « prolonger » de l'éditeur et à la matrice de compatibilité (tools/matrice-pieces.mjs). |

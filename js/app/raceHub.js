@@ -25,7 +25,7 @@ import { starsText, STAR_LABELS } from '../difficulty.js';
 import { getRecord, medalTime, getImportedGhost, listMyTracks, formatTime } from '../storage.js';
 import { profile, saveProfile } from '../profile.js';
 import { isFavorite, toggleFavorite, cleanFavorites } from '../favorites.js';
-import { describeDaily, describeUser, describeCommunity, personalRecord, quickRaceIndex, describeVariant, hubCategories } from '../trackDescriptor.js';
+import { describeDaily, describeUser, describeCommunity, personalRecord, quickRaceIndex, describeVariant, hubCategories, EXTREME_LABEL } from '../trackDescriptor.js';
 import { createTrackMap } from '../ui/trackMap.js';
 import { isTraining } from '../hudProfile.js';
 import { SURFACES } from '../pieces.js';
@@ -206,9 +206,10 @@ export const raceHubMethods = {
       ${rivals.length < MAX_RIVALS && h.board && h.board.boards.some((b) => b.id === 'world') ? '<p class="meta hub-hint">Ajoute jusqu’à 3 rivaux en ligne avec 👻 dans le classement mondial.</p>' : ''}
       ${cats.length ? `<div class="hub-cats" role="radiogroup" aria-label="Catégorie de record"><span class="meta">Catégorie de record</span>
         <button class="chip${d.variant ? '' : ' on'}" role="radio" aria-checked="${!d.variant}" data-cat="">🏁 Officiel</button>
-        ${cats.map((c) => { const on = d.variantStr && d.key.endsWith('~v1.' + c.id); return `<button class="chip${on ? ' on' : ''}" role="radio" aria-checked="${!!on}" data-cat="${c.id}">${esc(c.label)}</button>`; }).join('')}
+        ${cats.map((c) => { const on = d.variantStr && d.key.endsWith('~v1.' + c.id); return `<button class="chip${on ? ' on' : ''}${c.extreme ? ' extreme' : ''}" role="radio" aria-checked="${!!on}" data-cat="${c.id}">${esc(c.label)}${c.extreme ? `<small class="chip-extreme">${esc(EXTREME_LABEL)}</small>` : ''}</button>`; }).join('')}
         ${d.variant && !cats.some((c) => d.key.endsWith('~v1.' + c.id)) ? `<button class="chip on" role="radio" aria-checked="true" data-cat="__cur">${esc(h.modeLabel ? '🌐 ' + h.modeLabel : d.variantStr)}</button>` : ''}
-        ${d.variant ? '<p class="meta hub-hint">Classement et record à part, sans médailles ni pièces : le record officiel ne bouge pas.</p>' : ''}</div>` : ''}
+        ${d.variant ? '<p class="meta hub-hint">Classement et record à part, sans médailles ni pièces : le record officiel ne bouge pas.</p>' : ''}
+        ${cats.some((c) => c.extreme && d.variantStr && d.key.endsWith('~v1.' + c.id)) ? '<p class="meta hub-hint hub-extreme">Le pilote automatique n’a pas fini cette catégorie sur ce circuit. Ce n’est pas une preuve qu’elle est impossible à la main, mais elle est très difficile : tu peux la tenter, ou revenir à une autre catégorie.</p>' : ''}</div>` : ''}
       ${aidsActive(s.aids) ? '<p class="meta hub-hint hub-aids">🦾 Aides à la conduite activées : tes courses vont dans la catégorie « assisté » (Paramètres › Accessibilité).</p>' : ''}
       ${d.locked ? `<p class="hub-lock" role="status">🔒 ${esc(d.locked)}</p>` : ''}
       <button class="btn big primary hub-play" id="hub-play"${d.locked ? ' disabled' : ''}>▶ Jouer <kbd>Entrée</kbd></button>

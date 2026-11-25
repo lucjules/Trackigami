@@ -322,7 +322,13 @@ export function validRecord(rec) {
     && (rec.bt === undefined || rec.bt === null || (Number.isFinite(+rec.bt) && +rec.bt > 0 && +rec.bt <= MAX_RUN_SECONDS));
 }
 
-export function getRecord(trackKey) {
+// Anciennes clés d'une clé de circuit intégré (js/builtinKeys.js : alias, RISK-001) : fournies par le jeu au démarrage (setLegacyKeyProvider), jamais importées ici (ce module
+// n'a pas à connaître les circuits). Sans fournisseur, ou sans alias pour la clé : getRecord se comporte exactement comme avant.
+let legacyKeyProvider = null;
+export function setLegacyKeyProvider(fn) { legacyKeyProvider = typeof fn === 'function' ? fn : null; }
+
+// Le record rangé sous CETTE clé, sans repli sur ses anciennes clés (la migration, js/keyAlias.js, doit savoir s'il y en a déjà un).
+export function getOwnRecord(trackKey) {
   const raw = read(REC + trackKey, null);
   const disk = validRecord(raw) ? raw : null;
   const mem = memRec.get(PREFIX + trackKey);
@@ -332,6 +338,15 @@ export function getRecord(trackKey) {
   if (!mem) return disk;
   const mp = +mem.pv || 0, dp = +disk.pv || 0;
   return mp === dp ? (mem.time < disk.time - 1e-9 ? mem : disk) : (mp > dp ? mem : disk);
+}
+
+// Le record d'un circuit : celui de sa clé, sinon (alias d'un circuit intégré dont la clé a changé) celui de sa plus récente ancienne clé qui en a un. Les médailles, les verrous de
+// chapitre, le fantôme et le meilleur temps (bt) le lisent tous ici : un record rangé sous l'ancienne clé n'est jamais « perdu », même avant la migration (qui le copie, js/builtinKeys.js).
+export function getRecord(trackKey) {
+  const own = getOwnRecord(trackKey);
+  if (own || !legacyKeyProvider) return own;
+  for (const k of legacyKeyProvider(trackKey)) { const r = getOwnRecord(k); if (r) return r; }
+  return null;
 }
 
 // Meilleur temps JAMAIS réalisé sur ce circuit, toutes versions de la physique confondues (rec.bt) : c'est lui qui donne les médailles et les déblocages.
