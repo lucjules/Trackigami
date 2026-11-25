@@ -106,7 +106,11 @@ if (!isMainThread && workerData && workerData.ids) {
   if (argv.includes('--tableau') || argv.includes('--ecrire-tableau')) {
     console.log(renderTable(measure));
     const i = argv.indexOf('--ecrire-tableau');
-    if (i >= 0) { writeFileSync(argv[i + 1], renderTable(measure, { markdown: true }) + '\n'); console.log('\ntableau écrit :', argv[i + 1]); }
+    if (i >= 0) { writeFileSync(argv[i + 1], `# Catégories de record finissables par le pilote automatique (GAME-006)
+
+Généré par \`node tools/categories-faisables.mjs --ecrire-tableau docs/audit/CATEGORIES-FAISABLES.md\` (mesure du jour ; la version vérifiée par \`npm test\` est \`js/categoriesFaisables.js\`). Pour chaque circuit officiel et chaque catégorie de la fiche : le temps du pilote automatique (« @65 » : à 65 % de sa vitesse habituelle ; « r1 » : une réapparition), « ✕ » : non finie à aucune des vitesses essayées (${PILOT_SPEEDS.map((k) => Math.round(k * 100) + ' %').join(', ')}) en ${MAX_SIM_SECONDS} s de simulation et ${MAX_RESPAWNS_OK} réapparitions au plus (« r » : réapparitions de la course à pleine vitesse), « – » : catégorie non proposée sur ce circuit (elle ne change rien). **Un échec n'est pas une preuve d'impossibilité** : un pilote automatique n'est pas un humain ; la fiche du circuit marque ces catégories « Défi extrême » sans les retirer.
+
+` + renderTable(measure, { markdown: true }) + '\n'); console.log('\ntableau écrit :', argv[i + 1]); }
   }
   if (!argv.includes('--tableau')) {
     writeFileSync(OUT, renderModule(measure));
