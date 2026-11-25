@@ -416,6 +416,9 @@ export default {
   'Médaille': 'Medal',
   'Toutes les médailles sont à toi ✦': 'All the medals are yours ✦',
   '+{n:w} ◆ pièces{s}': '+{n} ◆ coins{s}',
+  // (TECH-071) la ligne entière de l'écran d'arrivée (nombre de pièces + mention « 1re fois » en petit) : sans elle, « {s} » avalait la mention telle quelle (français)
+  '+{n:w} ◆ pièces<small>Bonus 1re fois ×2</small>': '+{n} ◆ coins<small>First-time bonus ×2</small>',
+  'Bonus 1re fois ×2': 'First-time bonus ×2',
   'Circuit vérifié ✔': 'Track verified ✔',
   'Ton temps = médaille cristal.': 'Your time = crystal medal.',
   'Circuit non vérifié : pas de médailles ni de pièces.': 'Track not verified: no medals or coins.',

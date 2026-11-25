@@ -5,6 +5,7 @@ import { keyLabel } from './input.js';
 import { profile } from './profile.js';
 import { MessageGate, PRIO } from './hudMessages.js';
 import { $, esc } from './dom.js';
+import { markPlayerText, isPlayerTrackName } from './playerText.js';
 
 export function medalIcon(m) {
   return `<i class="medal ${m ? m.id : 'none'}" title="${m ? m.label : 'Aucune médaille'}"></i>`;
@@ -26,6 +27,7 @@ class Hud {
 
   reset(session) {
     const e = this.el;
+    markPlayerText(e.track, isPlayerTrackName(session.track.name));      // (RISK-002 : le nom d'un circuit de joueur n'est pas traduit)
     e.track.textContent = session.track.name;
     this.checkpoints(0, session.logic.cps.length);
     const rec = session.record;
@@ -40,6 +42,8 @@ class Hud {
     e.split.textContent = '';
     e.center.textContent = '';
     e.msg.classList.remove('on');
+    clearTimeout(this._msgT);
+    this.gate.offer('', 0, 0, 0);      // (TECH-070) le verrou de priorité repart à zéro : un message prioritaire d'avant le redémarrage ne fait pas refuser la consigne de la leçon au GO
     this.time(0);
     const inp = session.app.input;
     session.app.refreshKeyHints();      // (pause, arrivée, barre du replay : les touches citées suivent les liaisons actuelles, TECH-020)

@@ -1,7 +1,7 @@
 // Profil : compte, sauvegardes, import et export de sauvegarde.
 // Ces méthodes s'ajoutent au prototype de App (voir main.js) : `this` est l'instance.
 import { profile, exportCode, parseCode, applySave } from '../profile.js';
-import { $, esc } from '../dom.js';
+import { $, esc, OFF } from '../dom.js';
 import { account } from '../account.js';
 import { openChangePassword, fillRecoveryBlock } from '../accountUi.js';
 import { loadSettings, getRecord, medalTime, formatTime } from '../storage.js';
@@ -180,7 +180,7 @@ export const profileMethods = {
     let list;
     try { list = await online.friends(); } catch (e) { box.innerHTML = `<h3>Amis</h3><p class="prof-note">Amis indisponibles : ${esc(e.message)}</p>`; return; }
     const inc = list.filter((f) => f.incoming), out = list.filter((f) => f.status === 'pending' && !f.incoming), ok = list.filter((f) => f.status === 'accepted');
-    const row = (f, btns) => `<li><span class="lb-name">${esc(f.name)}</span>${btns}</li>`;
+    const row = (f, btns) => `<li><span class="lb-name"${OFF}>${esc(f.name)}</span>${btns}</li>`;
     box.innerHTML = `<h3>Amis</h3>
       <form class="friend-add row"><input type="text" maxlength="24" placeholder="Pseudo d’un compte" aria-label="Pseudo d’un compte" required><button class="btn primary" type="submit">Demander en ami</button></form>
       <p class="mp-err friend-err" role="alert"></p>

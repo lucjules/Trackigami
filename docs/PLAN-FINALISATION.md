@@ -70,7 +70,7 @@ Annuler / rétablir ; pivoter, déplacer, dupliquer une sélection (tout ou rien
 - Le **gel de jeu** signalé n'a pas été reproduit : aucune preuve qu'il soit corrigé.
 - **Supabase réel**, **Deno.serve réel**, **WebRTC réel avec relais TURN**, **appareils tactiles réels** : non testables ici (voir `docs/TESTS.md`).
 - Collisions de manche : douces, non rejouables ; temps de manche annoncés par chaque joueur ; rollback non branché (voir `supabase/MULTI.md`).
-- `author_time` d'un circuit de joueur (donne ses médailles) non rejoué par la base ; limite par pilote contournable par sessions anonymes (le plafond global en base borne le total).
+- `author_time` d'un circuit de joueur (donne ses médailles) rejoué par la fonction serveur avant `publish_track` (`js/verify.js : verifyPublish`) mais pas par la base elle-même ; limite par pilote contournable par sessions anonymes (le plafond global en base borne le total).
 - Écrans de la communauté et de l'éditeur : accessibilité des boutons testée, harmonisation visuelle non poussée.
 - Aperçu du pot de peinture : testé en logique, pas en rendu 3D.
 - Aucun humain n'a rejoué les 72 circuits avec le moteur actuel.

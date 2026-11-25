@@ -61,6 +61,8 @@ Avant l'étape 6, laisser un temps de cohabitation n'est pas possible pour les t
 
 Ne jamais lancer 6 avant 3 et 5. Les étapes 2 et 6 sont **relançables sans danger** (idempotentes) et ne **suppriment aucune donnée**.
 
+Puis, **dans l'ordre**, les étapes **16** (`etape16-durcissement.sql`, droits : voir « Audit 0.9.59 »), **17**, **18**, **19**, **20** et **21** (une section chacune ci-dessous, de la plus récente à la plus ancienne) : chacune est relançable et ne supprime aucune donnée en s'appliquant ; la 17 suppose les étapes 1 à 15 (la 16 recommandée), la 18 les étapes 1 à 17, la 19 la 18, la 20 les étapes 1 à 19 et la 21 les étapes 1 à 20. En tout, `supabase/` contient 23 fichiers `etape*.sql` : les étapes 1 à 21, plus `etape15b-publication-verifiee.sql` et `etape15-retour.sql` (retour arrière de l'étape 15).
+
 ### Étape 21 (code de secours : récupérer un compte sans courriel, 0.16.13, COMPLETE-003) : `etape21-recuperation.sql`
 
 **À appliquer À LA MAIN par le propriétaire du projet** (SQL Editor) : **rien n'a été exécuté sur la production** par l'auteur de ce dépôt ; elle n'est donc **pas** « appliquée » tant que le propriétaire n'a pas lancé `verify-prod.sql` ET lu ses lignes « étape 21 ».

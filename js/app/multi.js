@@ -1,6 +1,6 @@
 // Multijoueur : salons (privés par code, ou publics), circuit commun, lobby, départ en course à plusieurs, classement du salon, championnat (manches).
 // Ces méthodes s'ajoutent au prototype de App (voir main.js) : `this` est l'instance.
-import { esc } from '../dom.js';
+import { esc, OFF } from '../dom.js';
 import { GAME_NAME } from '../version.js';
 import { buildBuiltin } from '../tracks.js';
 import { Track } from '../track.js';
@@ -263,7 +263,7 @@ export const multiMethods = {
       list.innerHTML = room.list.map((m) => {
         const c = m.car || {}, col = /^#[0-9a-f]{6}$/i.test(c.color || '') ? c.color : '#8890a6', col2 = /^#[0-9a-f]{6}$/i.test(c.color2 || '') ? c.color2 : '#23242f';
         return `<li class="mp-card${m.self ? ' me' : ''}${m.ready ? ' ready' : ''}" data-id="${esc(m.id)}"><span class="mp-car" style="background:${col};border-color:${col2}" aria-hidden="true"></span>`
-          + `<span class="mp-who"><b>${m.id === room.hostId ? '★ ' : ''}${esc(m.name)}${m.self ? ' (toi)' : ''}</b><small>${m.ready ? '✔ Prêt' : m.racing ? '🏁 En course' : 'Pas prêt'}</small></span>`
+          + `<span class="mp-who"><b>${m.id === room.hostId ? '★ ' : ''}<span${OFF}>${esc(m.name)}</span>${m.self ? ' (toi)' : ''}</b><small>${m.ready ? '✔ Prêt' : m.racing ? '🏁 En course' : 'Pas prêt'}</small></span>`
           + `<i>${LINK[m.link] || ''}${m.link === 'open' && m.rtt ? ` · ${Math.round(m.rtt)} ms` : ''}</i></li>`;
       }).join('');
       const rc = room.readyCount();
@@ -474,7 +474,7 @@ export const multiMethods = {
     const rows = b.room.ranking();
     const lt = (b.room.launch && b.room.launch.track) || b.room.track;          // le circuit du lancement couru (pas le choix du salon)
     b.el.innerHTML = `<div class="mp-board-h">Salle ${esc(b.room.code)} · ${esc((lt && lt.name) || '')}</div>`
-      + rows.map((r, i) => `<div class="mp-board-r${r.self ? ' me' : ''}"><b>${r.best != null ? i + 1 : '–'}</b><span>${esc(r.name)}</span><i>${r.best != null ? formatTime(r.best / 120) : '--:--.---'}</i><em>${r.n ? '×' + r.n : ''}</em></div>`).join('')
+      + rows.map((r, i) => `<div class="mp-board-r${r.self ? ' me' : ''}"><b>${r.best != null ? i + 1 : '–'}</b><span${OFF}>${esc(r.name)}</span><i>${r.best != null ? formatTime(r.best / 120) : '--:--.---'}</i><em>${r.n ? '×' + r.n : ''}</em></div>`).join('')
       + '<div class="mp-board-f">R : nouvel essai · Échap : quitter</div>';
   },
 
@@ -485,7 +485,7 @@ export const multiMethods = {
     const total = (cup.rounds[n] && cup.rounds[n].name) || '';
     return `<div class="mp-board-h">Manche ${n + 1}/${cup.total} · ${esc(total)}</div>`
       + `<div class="mp-board-pos"><b>${me || '–'}</b><small>/${order.length}</small></div>`
-      + order.map((e, i) => `<div class="mp-board-r${e.self ? ' me' : ''}${e.gone ? ' gone' : ''}"><b>${i + 1}</b><span>${esc(e.name)}</span><i>${e.finished != null ? '🏁 ' + fmtSteps(e.finished) : e.gone ? '✕' : Math.round(Math.min(1, e.prog) * 100) + ' %'}</i></div>`).join('')
+      + order.map((e, i) => `<div class="mp-board-r${e.self ? ' me' : ''}${e.gone ? ' gone' : ''}"><b>${i + 1}</b><span${OFF}>${esc(e.name)}</span><i>${e.finished != null ? '🏁 ' + fmtSteps(e.finished) : e.gone ? '✕' : Math.round(Math.min(1, e.prog) * 100) + ' %'}</i></div>`).join('')
       + '<div class="mp-board-f">R : retour au checkpoint (le chrono court) · Échap : quitter</div>';
   },
 
@@ -518,7 +518,7 @@ export const multiMethods = {
         + `<h3>${single ? 'Arrivée' : 'Résultats de la manche'}</h3><div class="mp-tab">`
         + result.order.map((id, i) => `<div class="mp-row${id === room.selfId ? ' me' : ''}"><b>${result.times[id] != null ? medal(i) : '✕'}</b><span>${nameOf(id)}</span><i>${result.times[id] != null ? fmtSteps(result.times[id]) : 'sans temps'}</i><em>${result.points[id] ? '+' + result.points[id] : ''}</em></div>`).join('')
         + (single ? '</div><div hidden>' : `</div><h3>${final ? 'Classement final' : 'Classement général'}</h3><div class="mp-tab">`)
-        + standings.map((r, i) => `<div class="mp-row${r.id === room.selfId ? ' me' : ''}"><b>${final ? medal(i) : i + 1}</b><span>${esc(r.name)}</span><i>${r.points} pt${r.points > 1 ? 's' : ''}</i><em>${r.wins ? r.wins + ' 🏁' : ''}</em></div>`).join('')
+        + standings.map((r, i) => `<div class="mp-row${r.id === room.selfId ? ' me' : ''}"><b>${final ? medal(i) : i + 1}</b><span${OFF}>${esc(r.name)}</span><i>${r.points} pt${r.points > 1 ? 's' : ''}</i><em>${r.wins ? r.wins + ' 🏁' : ''}</em></div>`).join('')
         + '</div>'
         + (final ? `<p class="mp-want meta" data-want></p><div class="mp-cup-act">${room.isHost ? '<button class="btn primary" data-act="rematch">🔁 Revanche</button>' : '<button class="btn primary" data-act="want">🔁 Je veux une revanche</button>'}<button class="btn" data-act="lobby">Retour au salon</button></div>`
           : '<p class="mp-next" data-next></p><div class="mp-cup-act"><button class="btn danger" data-act="leave">Quitter le championnat</button></div>');

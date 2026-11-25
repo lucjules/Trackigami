@@ -173,6 +173,7 @@ const FILES = [
   "js/pieceFacts.js",
   "js/pieces.js",
   "js/placement.js",
+  "js/playerText.js",
   "js/prefabs.js",
   "js/profile.js",
   "js/progression.js",
