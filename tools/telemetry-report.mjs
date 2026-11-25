@@ -6,6 +6,8 @@
 // Pour chaque circuit : joueurs, taux d'arrivée, essais avant la première arrivée, temps (centiles des MEILLEURS temps, un par joueur), endroit où l'on abandonne,
 // médailles proposées (centiles 3 / 12 / 40 / 75 %, voir proposeFromSample dans medals.mjs) et alertes (trop dur, trop facile, Or hors de portée, mur).
 // Les temps impossibles (plus de 40 % plus rapides que le pilote automatique) sont écartés : un client truqué ne règle pas les médailles.
+// Pour les essais humains (docs/ESSAIS.md) il donne aussi, par circuit : le nombre d'abandons et leur part des parties, les réapparitions (retours au
+// checkpoint) par arrivée et par abandon, et la part des finisseurs qui atteignent chaque médaille ÉCRITE (temps de leur meilleure arrivée).
 // Pour recaler : --ecrire-humains écrit le fichier des meilleurs temps, puis  node tools/medals.mjs --humain docs/temps-humains.json --ecrire
 import { readFileSync, writeFileSync } from 'node:fs';
 import { BUILTIN_TRACKS } from '../js/tracks.js';
@@ -40,6 +42,10 @@ export function analyse(rows, { defs = BUILTIN_TRACKS, golden = {}, pv = null, m
       if (!firstFinish.has(r.install) || r.attempt < firstFinish.get(r.install)) firstFinish.set(r.install, r.attempt);
     }
     const times = [...best.values()].sort((a, b) => a - b);
+    // parties comptées (hors temps impossibles) : abandons, réapparitions
+    const counted = list.filter((r) => !(r.outcome === 'finish' && bot && r.time < bot * 0.6));
+    const fin = counted.filter((r) => r.outcome === 'finish'), qui = counted.filter((r) => r.outcome === 'quit');
+    const mean = (a, k) => (a.length ? a.reduce((s, r) => s + r[k], 0) / a.length : null);
     const quits = list.filter((r) => r.outcome === 'quit' && r.progress != null);
     const hist = [0, 0, 0, 0, 0];
     for (const q of quits) hist[Math.min(4, Math.floor(q.progress * 5))]++;
@@ -49,6 +55,9 @@ export function analyse(rows, { defs = BUILTIN_TRACKS, golden = {}, pv = null, m
       attemptsMedian: attempts.length ? quantile(attempts, 0.5) : null,
       p: times.length ? { p3: quantile(times, 0.03), p12: quantile(times, 0.12), p40: quantile(times, 0.4), p50: quantile(times, 0.5), p75: quantile(times, 0.75) } : null,
       quitHist: hist, quits: quits.length, bot, current: def ? def.medals : null,
+      runs: counted.length, finishRuns: fin.length, quitRuns: qui.length, quitShare: counted.length ? qui.length / counted.length : null,
+      respawnsPerFinish: mean(fin, 'respawns'), respawnsPerQuit: mean(qui, 'respawns'), respawnRuns: counted.length ? counted.filter((r) => r.respawns > 0).length / counted.length : null,
+      reached: def && def.medals && times.length ? Object.fromEntries(['bronze', 'argent', 'or', 'cristal'].map((k) => [k, times.filter((t) => t <= def.medals[k] + 1e-6).length / times.length])) : null,
       proposed: times.length >= minSample ? proposeFromSample(times) : null, times, alerts: [],
     };
     if (installs.size >= 10 && row.completion < 0.35) row.alerts.push(`trop dur : ${(row.completion * 100).toFixed(0)} % des joueurs finissent`);
@@ -65,11 +74,13 @@ export function analyse(rows, { defs = BUILTIN_TRACKS, golden = {}, pv = null, m
 }
 
 const f1 = (x) => (x == null ? '—' : x.toFixed(1));
+const pc = (x) => (x == null ? '—' : Math.round(x * 100) + ' %');
 export function toMarkdown(rep) {
   const L = [`# Rapport des statistiques de jeu (physique ${rep.version})`, '',
-    '| Circuit | Joueurs | Finissent | Essais (méd.) | p3 | p12 | p40 | p75 | Médailles écrites (C/O/A/B) | Proposées | Alertes |', '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |'];
+    '| Circuit | Joueurs | Finissent | Essais (méd.) | Abandons (part des parties) | Réapparitions par arrivée / par abandon | B / A / O / C atteints (% des finisseurs) | p3 | p12 | p40 | p75 | Médailles écrites (C/O/A/B) | Proposées | Alertes |', '| --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | --- | --- |'];
   const med = (m) => (m ? `${m.cristal}/${m.or}/${m.argent}/${m.bronze}` : '—');
-  for (const t of rep.tracks) L.push(`| ${t.track} | ${t.installs} | ${(t.completion * 100).toFixed(0)} % | ${t.attemptsMedian ?? '—'} | ${f1(t.p && t.p.p3)} | ${f1(t.p && t.p.p12)} | ${f1(t.p && t.p.p40)} | ${f1(t.p && t.p.p75)} | ${med(t.current)} | ${med(t.proposed)} | ${t.alerts.join(' ; ') || '—'} |`);
+  const reached = (r) => (r ? `${pc(r.bronze)} / ${pc(r.argent)} / ${pc(r.or)} / ${pc(r.cristal)}` : '—');
+  for (const t of rep.tracks) L.push(`| ${t.track} | ${t.installs} | ${(t.completion * 100).toFixed(0)} % | ${t.attemptsMedian ?? '—'} | ${t.quitRuns} (${pc(t.quitShare)}) | ${f1(t.respawnsPerFinish)} / ${f1(t.respawnsPerQuit)} | ${reached(t.reached)} | ${f1(t.p && t.p.p3)} | ${f1(t.p && t.p.p12)} | ${f1(t.p && t.p.p40)} | ${f1(t.p && t.p.p75)} | ${med(t.current)} | ${med(t.proposed)} | ${t.alerts.join(' ; ') || '—'} |`);
   return L.join('\n') + '\n';
 }
 
