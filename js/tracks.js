@@ -4,12 +4,13 @@
 // Chaque circuit a un `profil` (sprint, speedway, technique, rollercoaster, acrobatique), une ouverture qui n'est celle d'aucun autre, et respecte le contrat
 // de tools/contract.mjs (mesuré sur la course du pilote automatique). Le commentaire au-dessus de chaque circuit décrit son ouverture et ce qu'il enseigne ;
 // goal = objectif bonus ; pilot.vCap = vitesse visée du pilote qui sert à calibrer les médailles (or = son temps).
-// ATTENTION : l'ordre de ce fichier n'est PAS celui de la carrière. La liste est triée en bas de fichier (thème selon CAREER_ORDER, puis difficulté) :
+// ATTENTION : l'ordre de ce fichier n'est PAS celui de la carrière. La liste est triée en bas de fichier (chapitre selon CHAPTER_KEYS : le décor, ou le champ `chapitre` des chapitres bonus
+// de la 0.17.0, puis difficulté) :
 // pour retrouver le numéro d'un circuit, utiliser BUILTIN_TRACKS.findIndex() après import, jamais la position dans le texte.
 import { scriptTrack } from './track.js';
-import { CAREER_ORDER } from './themes.js';
+import { CHAPTER_KEYS, chapterKeyOf } from './themes.js';
 import { datan2, hypot2 } from './dmath.js';
-import { CELL } from './constants.js';
+import { CELL, LEVEL_H } from './constants.js';
 import { PIECES } from './pieces.js';
 import { isObstacle } from './obstacles.js';
 import { GAME_NAME } from './version.js';
@@ -924,7 +925,9 @@ export const BUILTIN_TRACKS = [
 // 0.9 : un chapitre de carrière = un thème. Chapitres du plus facile au plus dur, et
 // dans chaque chapitre du plus facile au plus dur (tri stable : l'ordre d'écriture
 // départage les circuits de même difficulté).
-BUILTIN_TRACKS.sort((a, b) => CAREER_ORDER.indexOf(a.decor) - CAREER_ORDER.indexOf(b.decor) || a.difficulty - b.difficulty);
+// 0.17.0 : la clé du chapitre est `chapitre` s'il existe (chapitres bonus qui ne sont pas un décor : EXTRA_CHAPTERS, rangés après l'Atelier), sinon le décor : l'ordre des
+// 72 circuits d'avant est inchangé (aucun n'a de champ `chapitre`).
+BUILTIN_TRACKS.sort((a, b) => CHAPTER_KEYS.indexOf(chapterKeyOf(a)) - CHAPTER_KEYS.indexOf(chapterKeyOf(b)) || a.difficulty - b.difficulty);
 
 // 0.11.3 (wall-ride) : solide posé SUR un mur (obst { k, at, wall: 'bas' | 'haut', s }) : collé à la paroi, sur le bas du mur (il faut passer AU-DESSUS) ou sur le haut (il faut
 // passer DESSOUS), et la ligne du pilote automatique monte ou descend de 6 m sur les 110 m qui précèdent et le long du bloc (t.path.wallLine, hauteur visée en m, + = vers le
@@ -978,12 +981,26 @@ export function buildBuiltin(def) {
       // Obstacles : calcul d'avant, inchangé au bit près.
       if (o.rot || !isObstacle(o.k)) { let k = Math.round((ry + (o.rot || 0)) / (Math.PI / 8)); while (k > 8) k -= 16; while (k <= -8) k += 16; ry = (k * Math.PI) / 8; } else ry = +ry.toFixed(4);
       // (circuit généré : valeurs exactes, jouées depuis la mémoire ; voir track/edit.js, normalizeDeco)
-      t.addDeco({ k: o.k, x: q(a[0] + (-dz / l) * (o.side || 0), 0.5), y: q(a[1] + (o.dy || 0), 0.1), z: q(a[2] + (dx / l) * (o.side || 0), 0.5), ry, s: o.s || 1, c: o.c || 0, ph: o.ph || 0 }, { exact: true });
+      // 0.17.0 : g = groupe de la logique du circuit (une porte qu'une règle cache ou montre) ; absent sur les 72 circuits d'avant, dont le code ne change pas.
+      t.addDeco({ k: o.k, x: q(a[0] + (-dz / l) * (o.side || 0), 0.5), y: q(a[1] + (o.dy || 0), 0.1), z: q(a[2] + (dx / l) * (o.side || 0), 0.5), ry, s: o.s || 1, c: o.c || 0, ph: o.ph || 0, ...(o.g ? { g: o.g } : {}) }, { exact: true });
     }
     for (const o of def.obst.filter((x) => x.wall).sort((x, y) => x.at - y.at)) {
       const i = Math.min(n - 2, Math.floor(n * o.at)), a = P[i], b = P[i + 1], dx = b[0] - a[0], dz = b[2] - a[2], l = hypot2(dx, dz) || 1;
       wallSolid(t, def, o, i, a, dx / l, dz / l);
     }
   }
+  // 0.17.0 (COMPLETE-002) : logique du circuit (js/sim/logic.js), pour les circuits à portes et interrupteurs. def.lgZones = [{ g, at }] : la pièce du chemin du
+  // pilote au point `at` (fraction du chemin, comme les obstacles) rejoint le groupe g (un interrupteur : la règle ['zone', g] se déclenche quand la voiture y entre) ;
+  // def.lg = les règles. Les 72 circuits d'avant n'ont ni l'un ni l'autre : leur code (et donc leur clé) ne change pas.
+  if (def.lgZones && t.path) {
+    const P = t.path, n = def.laps > 1 ? Math.floor(P.length / def.laps) : P.length;
+    for (const z of def.lgZones) {
+      const a = P[Math.min(n - 1, Math.floor(n * z.at))];
+      const near = t.tilesAt(Math.floor(a[0] / CELL), Math.floor(a[2] / CELL)).filter((x) => !PIECES[x.t].checkpoint).sort((u, v) => Math.abs(u.l * LEVEL_H - a[1]) - Math.abs(v.l * LEVEL_H - a[1]));
+      if (!near.length) throw new Error(`${def.id} : zone du groupe ${z.g} (at ${z.at}) : aucune pièce sous le chemin`);
+      near[0].g = z.g;
+    }
+  }
+  if (def.lg) t.setLogic(def.lg);
   return t;
 }

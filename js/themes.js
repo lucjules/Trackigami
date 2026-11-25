@@ -28,6 +28,14 @@ export const DEFAULT_DECOR = 'desert';
 // Un chapitre de carrière par décor, du plus facile au plus dur. L'Atelier est un chapitre BONUS : il vient en dernier dans la liste mais s'ouvre dès le premier chapitre (voir career.js).
 export const CAREER_ORDER = ['desert', 'jungle', 'isles', 'city', 'polar', 'volcano', 'orbit', 'reef', 'factory', 'sky', 'caves', 'atelier'];
 
+// 0.17.0 (COMPLETE-002, COMPLETE-011) : chapitres BONUS qui ne sont pas un décor. Leurs circuits portent `chapitre: '<clé>'` et gardent chacun leur décor (pour la vue) ;
+// ils sont rangés APRÈS ceux de CAREER_ORDER (tracks.js), jamais avant ni entre : les 72 circuits d'avant gardent leur rang, donc leur chapitre et leurs verrous.
+// Ajouter un chapitre : à la FIN de cette liste.
+export const EXTRA_CHAPTERS = ['elements', 'manoeuvres'];
+// Tous les chapitres, dans l'ordre de la carrière ; le chapitre d'un circuit intégré est son champ `chapitre`, sinon son décor.
+export const CHAPTER_KEYS = [...CAREER_ORDER, ...EXTRA_CHAPTERS];
+export const chapterKeyOf = (def) => def.chapitre || def.decor;
+
 // Décors que le DÉFI DU JOUR peut tirer : les onze d'origine, dans l'ordre d'origine. Le tirage dépend du nombre de décors : le faire porter sur tous aurait changé le circuit de chaque jour
 // (un record envoyé par un client resté sur l'ancienne version ne se rejouerait plus sur le même circuit que celui du serveur).
 export const DAILY_DECORS = Object.keys(DECORS).slice(0, 11);

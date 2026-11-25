@@ -2,7 +2,7 @@
 // sont regroupés en chapitres de 6. Un chapitre s'ouvre avec 4 médailles dans le
 // précédent. Chaque circuit a un objectif bonus qui rapporte des pièces une fois.
 import { profile, saveProfile, addCoins } from './profile.js';
-import { CAREER_ORDER, DECORS } from './themes.js';
+import { CAREER_ORDER, CHAPTER_KEYS, DECORS } from './themes.js';
 
 export const CHAPTER_SIZE = 6;
 export const UNLOCK_MEDALS = 4;
@@ -19,7 +19,7 @@ export const PROFILS = {
   atelier: { cls: 'p-atelier', label: 'Mécanisme', tip: 'Un mécanisme à apprivoiser : obstacles et pièces mobiles, un par un. Le même vocabulaire que dans l’éditeur.' },
 };
 
-// Un chapitre par décor, dans l'ordre de CAREER_ORDER (themes.js) ; le nom du chapitre est celui du décor.
+// Un chapitre par décor, dans l'ordre de CAREER_ORDER (themes.js) ; le nom du chapitre est celui du décor. 0.17.0 : puis les chapitres bonus EXTRA_CHAPTERS (leur propre nom).
 const CHAPTER_DESC = {
   desert: 'Sprint, speedway, tremplins, épingles et grand huit : tous les profils de circuits, avec un wall-ride dès le premier.',
   jungle: 'Rampe de lancement, tube, rebonds de champignons et slalom en moto : la jungle au grand complet.',
@@ -33,13 +33,20 @@ const CHAPTER_DESC = {
   sky: 'Vent de travers, îles sans bordures, gravité réduite, pont des vents et départ en deltaplane.',
   caves: 'Volant inversé, vrilles, inversions de gravité, plafonds et verre fragile.',
   atelier: 'Piques, balancier, marteau, balayeur, ascenseur, glissière : chaque mécanisme, un par un. Les mêmes outils que dans l’éditeur.',
+  elements: 'Nuit d’auteur, trois tours, pluie, rafales, givre, ressorts : le temps qu’il fait change la conduite.',
+  manoeuvres: 'Moto, portes et interrupteurs, plateaux mobiles, relais de véhicules, aiguillage par l’eau, épreuve finale.',
 };
+// 0.17.0 : noms des chapitres bonus qui ne sont pas un décor (EXTRA_CHAPTERS, themes.js).
+const EXTRA_NAMES = { elements: 'Les Éléments', manoeuvres: 'Grandes Manœuvres' };
 // Chapitre BONUS : il vient en dernier de la liste mais s'ouvre avec 4 médailles dans un chapitre précis (ici le premier), pas dans le précédent ; il ne fait pas partie de l'enchaînement
 // « circuit suivant » de la carrière. (Rien ne bouge pour qui a déjà progressé : les circuits sont repérés par leur clé, et l'enchaînement des onze chapitres d'origine est intact.)
-const BONUS = { atelier: 'desert' };
-export const CHAPTERS = CAREER_ORDER.map((decor) => ({
-  name: DECORS[decor].label, decor, desc: CHAPTER_DESC[decor],
-  ...(BONUS[decor] ? { bonus: true, after: CAREER_ORDER.indexOf(BONUS[decor]) } : {}),
+// 0.17.0 (COMPLETE-011) : deux chapitres bonus de plus, rangés après l'Atelier mais ouverts au milieu de la carrière, là où elle n'apportait plus de nouveauté :
+// « Les Éléments » avec 4 médailles au chapitre 5 (Nuit polaire : il se joue avec les chapitres 6 et 7), « Grandes Manœuvres » avec 4 médailles au chapitre 9 (Usine :
+// il se joue avec le chapitre 10). Leurs médailles n'ouvrent aucun autre chapitre.
+const BONUS = { atelier: 'desert', elements: 'polar', manoeuvres: 'factory' };
+export const CHAPTERS = CHAPTER_KEYS.map((key) => ({
+  key, name: DECORS[key] && CAREER_ORDER.includes(key) ? DECORS[key].label : EXTRA_NAMES[key], ...(CAREER_ORDER.includes(key) ? { decor: key } : {}), desc: CHAPTER_DESC[key],
+  ...(BONUS[key] ? { bonus: true, after: CAREER_ORDER.indexOf(BONUS[key]) } : {}),
 }));
 // Chapitre à réussir (4 médailles) pour ouvrir le chapitre ch : le précédent, sauf chapitre bonus.
 export const prerequisiteOf = (ch) => (CHAPTERS[ch] && CHAPTERS[ch].after != null ? CHAPTERS[ch].after : ch - 1);

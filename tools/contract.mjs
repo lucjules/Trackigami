@@ -7,12 +7,13 @@
 // l'applique aux candidats avant qu'ils entrent dans js/tracks.js. Chaque défaut renvoyé est une phrase lisible.
 import { buildBuiltin, BUILTIN_TRACKS } from '../js/tracks.js';
 import { PROFILS } from '../js/career.js';
-import { GEN_IDS, PIECE_ORDER } from '../js/pieces.js';
+import { GEN_IDS, PIECE_ORDER, PIECES } from '../js/pieces.js';
 import { checkTrack } from '../js/editorTools.js';
 import { orientationIssues } from '../js/joins.js';
 import { RaceLogic } from '../js/raceLogic.js';
 import { SIDE_MIN_SPEED } from '../js/physics/specs.js';
 import { Track } from '../js/track.js';
+import { isDefaultAmbiance } from '../js/ambiance.js';
 import { runTrack, profile, asciiMap } from './lab.mjs';
 import { proposeFrom } from './medals.mjs';
 import { spacingFails } from './checkpoints-espacement.mjs';
@@ -69,10 +70,7 @@ export const PROFILE_CONTRACT = {
     if (S.time < 14 || S.time > 45) f.push(`atelier : ${S.time.toFixed(1)} s (14 à 45 s)`);      // 0.10.11 : refaits avec les nouvelles pièces (la leçon d'abord, puis une vitrine) : 32 -> 45 s
     const meca = def.meca || [];
     if (!meca.length) f.push('atelier : aucun mécanisme déclaré (champ meca)');
-    for (const m of meca) {
-      const has = m === 'lift' ? tr.tiles.some((t) => t.mv === 1) : m === 'slide' ? tr.tiles.some((t) => t.mv === 2) : tr.decos.some((d) => d.k === m);
-      if (!has) f.push(`atelier : le mécanisme « ${m} » n'est pas dans le circuit`);
-    }
+    for (const m of meca) if (!mecaPresent(m, tr, S)) f.push(`atelier : le mécanisme « ${m} » n'est pas dans le circuit`);
     return f;
   },
   acrobatique: (P, S) => {
@@ -83,6 +81,32 @@ export const PROFILE_CONTRACT = {
     return f;
   },
 };
+
+// 0.17.0 (COMPLETE-002) : ce qu'un circuit déclare enseigner (champ `meca`) doit y être, et le pilote doit le vivre. Clés d'obstacles (js/obstacles.js), pièces mobiles,
+// et les mécaniques que la carrière n'employait pas : logique, environnements, tours, revêtements rares, véhicules, ambiance d'auteur, déclencheurs, aiguillage par l'eau.
+const surf = (tr, s) => tr.tiles.some((t) => t.s === s || t.s2 === s);
+export const MECA = {
+  lift: (tr) => tr.tiles.some((t) => t.mv === 1),
+  slide: (tr) => tr.tiles.some((t) => t.mv === 2),
+  rotation: (tr) => tr.tiles.some((t) => t.mv === 3),
+  // portes et interrupteurs : des règles, au moins un groupe de décorations (porte) et une zone (pièce d'un groupe nommé par une règle « zone »), et la logique change la course
+  logic: (tr) => !!tr.lg && tr.lg.rules.length > 0 && tr.decos.some((d) => d.g) && tr.lg.rules.some((r) => r.on[0] === 'zone' && tr.tiles.some((t) => t.g === r.on[1])),
+  pluie: (tr) => tr.rain > 0,
+  vent: (tr) => tr.wind > 0,
+  rafales: (tr) => tr.gust > 0 && tr.wind > 0,
+  givre: (tr) => tr.frost > 0,
+  tours: (tr, S) => tr.laps > 1 && S.lapTimes.length === tr.laps - 1,
+  ressort: (tr) => surf(tr, 'spring'),
+  gravite: (tr) => surf(tr, 'gravity'),
+  moto: (tr) => surf(tr, 'moto'),
+  bateau: (tr) => surf(tr, 'boat') && surf(tr, 'water'),
+  deltaplane: (tr) => surf(tr, 'glider'),
+  ambiance: (tr) => !isDefaultAmbiance(tr.ambiance),
+  declencheurs: (tr) => (tr.scripts || []).length > 0,
+  // bifurcation dont une voie passe sur l'eau (plaque bateau à l'entrée) et l'autre reste une route
+  aiguillage: (tr) => tr.tiles.some((t) => PIECES[t.t].kind === 'fork') && surf(tr, 'boat') && surf(tr, 'water'),
+};
+export const mecaPresent = (m, tr, S) => (MECA[m] ? MECA[m](tr, S) : tr.decos.some((d) => d.k === m));
 
 export const openingOf = (d) => d.script.trim().split(/\s+/).slice(1, 4).join(' ');
 
@@ -105,6 +129,7 @@ export function checkDef(def) {
   if (S.spikes) f.push(`pilote : ${S.spikes} piques touchées`);
   if (S.shocks) f.push(`pilote : ${S.shocks} chocs contre un obstacle`);
   if (PROFILE_CONTRACT[def.profil]) f.push(...PROFILE_CONTRACT[def.profil](P, S, tr, def)); else f.push('pas de contrat pour le profil ' + def.profil);
+  if (def.profil !== 'atelier') for (const m of def.meca || []) if (!mecaPresent(m, tr, S)) f.push(`la mécanique « ${m} » (champ meca) n'est pas dans le circuit`);
   if (S.wallVmin < Infinity && !(S.wallVmin * 3.6 >= 130 && S.wallVmin > SIDE_MIN_SPEED)) f.push(`wall-ride pris à ${(S.wallVmin * 3.6).toFixed(0)} km/h (130 au moins)`);
   const chk = checkTrack(tr).map((i) => i.msg).concat(orientationIssues(tr).map((i) => i.msg));
   if (chk.length) f.push('vérificateur de l\'éditeur : ' + [...new Set(chk)].join(' / '));

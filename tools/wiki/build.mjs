@@ -7,6 +7,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BUILTIN_TRACKS, buildBuiltin } from '../../js/tracks.js';
 import { CHAPTERS, PROFILS, GOALS, goalLabel } from '../../js/career.js';
+import { chapterKeyOf } from '../../js/themes.js';
 import * as pieces from '../../js/pieces.js';
 import * as constants from '../../js/constants.js';
 import { FAMILIES, FAMILY_ORDER } from '../../js/families.js';
@@ -26,8 +27,9 @@ export function buildWikiPage() {
   const golden = JSON.parse(read('tools/golden-temps.json'));
   const timeOf = (id) => (typeof golden[id] === 'number' ? golden[id] : golden.tracks && golden.tracks[id]);
   const chapters = CHAPTERS.map((c) => ({
-    name: c.name, decor: c.decor, desc: c.desc, bonus: !!c.bonus,
-    tracks: BUILTIN_TRACKS.filter((d) => d.decor === c.decor).map((d) => {
+    // (0.17.0 : un chapitre bonus qui n'est pas un décor prend l'image d'un décor de ses circuits : Bourrasques pour Les Éléments, Interrupteurs pour Grandes Manœuvres)
+    name: c.name, decor: c.decor || { elements: 'sky', manoeuvres: 'factory' }[c.key], desc: c.desc, bonus: !!c.bonus,
+    tracks: BUILTIN_TRACKS.filter((d) => chapterKeyOf(d) === c.key).map((d) => {      // (0.17.0 : le chapitre d'un circuit est son champ `chapitre`, sinon son décor)
       const tr = buildBuiltin(d), N = newElements(tr);
       return { id: d.id, name: d.name, profil: d.profil, diff: d.difficulty, time: timeOf(d.id), medals: d.medals, goal: goalLabel(d.goal), appris: d.appris, laps: d.laps || 1,
         stars: estimateDifficulty(tr).stars, nouveautes: N.length, familles: [...new Set(N.map((e) => e.family))], tiles: tr.tiles.length };

@@ -11,7 +11,7 @@ import { PACK_IDS } from '../js/decoPackData.js';
 import { GeoBuilder } from '../js/geo.js';
 import { buildDecoInto } from '../js/decos.js';
 import { isObstacle } from '../js/obstacles.js';
-import { DECORS, CAREER_ORDER, DEFAULT_DECOR, DAILY_DECORS } from '../js/themes.js';
+import { DECORS, CAREER_ORDER, DEFAULT_DECOR, DAILY_DECORS, EXTRA_CHAPTERS } from '../js/themes.js';
 import { THEMES } from '../js/scenery.js';
 import { CHAPTERS } from '../js/career.js';
 
@@ -83,7 +83,10 @@ test('themes.js, le rendu (scenery.js) et la carrière portent les mêmes 12 ide
   assert.equal(ids.length, 12);
   assert.deepEqual(Object.keys(THEMES).sort(), ids);
   assert.deepEqual([...CAREER_ORDER].sort(), ids);
-  assert.deepEqual(CHAPTERS.map((c) => c.decor), CAREER_ORDER);
+  // 0.17.0 : un chapitre par décor, dans l'ordre de CAREER_ORDER, PUIS les chapitres bonus qui ne sont pas un décor (EXTRA_CHAPTERS : aucun champ decor)
+  assert.deepEqual(CHAPTERS.slice(0, CAREER_ORDER.length).map((c) => c.decor), CAREER_ORDER);
+  assert.deepEqual(CHAPTERS.slice(CAREER_ORDER.length).map((c) => [c.key, 'decor' in c]), EXTRA_CHAPTERS.map((k) => [k, false]));
+  for (const k of EXTRA_CHAPTERS) assert.ok(!DECORS[k], k + ' n’est pas un décor');
   assert.ok(DECORS[DEFAULT_DECOR]);
 });
 test('l\'ordre historique de DECORS est figé (le défi du jour tire le décor par son rang)', () => {
@@ -93,7 +96,8 @@ test('l\'ordre historique de DECORS est figé (le défi du jour tire le décor p
 });
 test('chaque décor a un nom, une couleur de pastille et un chapitre de carrière nommé comme lui', () => {
   for (const [id, d] of Object.entries(DECORS)) { assert.ok(d.label && /^#[0-9a-f]{6}$/i.test(d.chip), id); }
-  for (const c of CHAPTERS) assert.equal(c.name, DECORS[c.decor].label);
+  for (const c of CHAPTERS.filter((x) => x.decor)) assert.equal(c.name, DECORS[c.decor].label);
+  assert.equal(CHAPTERS.filter((x) => x.decor).length, 12);
 });
 
 await finish('Tous les tests des registres passent.');
