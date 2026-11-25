@@ -24,7 +24,7 @@ async function racing() {
 const btn = (sel) => R.press(sel);
 const tapGround = async (fx, fy) => { const vp = R.page.viewportSize(); const x = Math.round(vp.width * fx), y = Math.round(vp.height * fy); if (R.touch) await R.page.touchscreen.tap(x, y); else { await R.page.mouse.move(x, y); await sleep(120); await R.page.mouse.click(x, y); } await sleep(400); };
 // Sur un petit écran la bibliothèque est repliée : un novice touche d'abord l'outil « Pistes » (rail de gauche) pour l'ouvrir.
-const ensurePalette = async () => { const vis = await R.$(() => { const r = document.getElementById('ed-palette').getBoundingClientRect(); return r.right > 20 && r.left < window.innerWidth - 20 && r.height > 20; }); if (!vis) { await R.press('#ed-tools .tool-btn'); await sleep(600); X.paletteOpenedByTool = true; } };
+const ensurePalette = async () => { await sleep(700); const vis = await R.$(() => { const r = document.getElementById('ed-palette').getBoundingClientRect(); return r.right > 20 && r.left < window.innerWidth - 20 && r.height > 20; }); if (!vis) { await R.press('#ed-tools .tool-btn'); await sleep(600); X.paletteOpenedByTool = true; } };
 const pickTile = async (sel) => { await ensurePalette(); await R.press(`#ed-palette ${sel}`); await sleep(300); };
 const extend = async () => { await ensurePalette(); await R.press('[data-pact="extend"]'); await sleep(300); };
 const pauseNow = async () => { if (R.touch) { await R.page.locator('#touch [data-t="pause"]').dispatchEvent('pointerdown'); await R.page.locator('#touch [data-t="pause"]').dispatchEvent('pointerup'); } else await R.key('Escape'); await R.until(() => window.copytrack.session.state === 'paused', null, 15000); await sleep(300); };

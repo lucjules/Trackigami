@@ -9,11 +9,14 @@ Les captures et les JSON restent **hors du dépôt** : `RECETTE_OUT` (par défau
 | `journey.mjs <fr\|en> <kb\|land\|port>` | parcours d'un nouveau joueur : accueil, tutoriel, première course guidée, chaque entrée de menu, onglets du profil / de la progression / des réglages, carrière, fiche de circuit, course, pause (toutes les entrées), arrivée, replay, Theater, garage (chaque famille) |
 | `journey2.mjs <langue> <entrée>` | joueur installé : réassigner une touche puis courir, modes, Académie, défi du jour, communauté (réseau coupé puis serveur simulé), changement de langue en cours de route, erreur de course, compte invité |
 | `editeur.mjs <langue> <entrée>` | l'éditeur par un joueur novice : poser un circuit complet, annuler / rétablir, tester, vérifier, modifier, enregistrer, quitter, revenir par « Mes circuits », publier sans réseau |
-| `salons.mjs <fr\|en>` | salons multijoueur à deux onglets (`?net=local`) |
-| `horsligne.mjs <fr\|en>` | vrai service worker puis réseau coupé, navigateur sans WebGL 2, module du jeu injoignable |
+| `salons.mjs <fr\|en> [kb\|land\|port]` | salons multijoueur à deux onglets (`?net=local`), au clavier ou en téléphone simulé |
+| `horsligne.mjs <fr\|en> [kb\|land\|port]` | vrai service worker puis réseau coupé, navigateur sans WebGL 2, module du jeu injoignable |
 | `longue.mjs circuits\|echant\|gele\|masque\|tout` | sessions longues : 12 circuits × 2 courses avec retours au menu et au garage ; course échantillonnée ; onglet « masqué » puis page gelée 10 minutes |
 | `interactions.mjs d1\|d2\|d3\|tout` | course en direct avec retours au checkpoint puis chemin du serveur (3 circuits) ; circuit publié → modifié → vérifié ; deux onglets sur le même profil |
 | `quota.mjs` | sauvegarde cloud simulée (faux Supabase en Node) sous quota de stockage serré |
+| `rec001.mjs <langue> <kb\|land>` | sonde : annuler / rétablir de l'éditeur autour d'un essai et d'une vérification (REC-001) |
+| `defilement.mjs <langue> <land\|port>` | sonde : défilement sur téléphone (accueil, fiche de circuit, arrivée : REC-002, 003, 005) |
+| `academie.mjs <langue> <kb\|land>` | les 6 leçons et les exercices évalués de l'Académie jusqu'au bilan |
 | `synthese.mjs [dossier]` | regroupe les JSON des parcours |
 
 `lib.mjs` : audit d'un écran dans la page (boutons recouverts ou hors écran, texte brut `NaN` / `undefined`, texte français en anglais, cibles tactiles), gestes (clic souris réel ou toucher réel après vérification du point visé), fin de course par le pilote automatique.

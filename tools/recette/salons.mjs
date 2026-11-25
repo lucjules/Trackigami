@@ -1,15 +1,16 @@
 // Recette : salons multijoueur à deux onglets d'un même navigateur (signalisation locale ?net=local, vrai WebRTC sur la machine). Pas de Supabase Realtime, pas de réseau réel.
-//   node tools/recette/salons.mjs <fr|en>
+//   node tools/recette/salons.mjs <fr|en> [kb|land|port]
 // Création du salon, invitation par lien, arrivée de la 2e joueuse, cartes, prêt, lancement, course à départ commun, une joueuse ferme son onglet en pleine course, retour au salon.
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { chromium, OUT, OFFLINE, sleep, startServer, auditPage } from './lib.mjs';
+import { chromium, OUT, OFFLINE, sleep, startServer, auditPage, VIEWPORTS } from './lib.mjs';
 
-const lang = process.argv[2] || 'fr';
+const lang = process.argv[2] || 'fr', input = process.argv[3] || 'kb';       // kb (défaut) | land | port : téléphones simulés
+const tag = input === 'kb' ? '' : '-' + input;
 const port = 9800 + Math.floor(Math.random() * 90);
 const server = startServer(port);
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--mute-audio', '--disable-features=WebRtcHideLocalIpsWithMdns'] });
-const ctx = await browser.newContext({ locale: lang === 'en' ? 'en-US' : 'fr-FR', viewport: { width: 1100, height: 650 }, deviceScaleFactor: 1, serviceWorkers: 'block' });
+const ctx = await browser.newContext({ locale: lang === 'en' ? 'en-US' : 'fr-FR', viewport: input === 'kb' ? { width: 1100, height: 650 } : VIEWPORTS[input], hasTouch: input !== 'kb', isMobile: input !== 'kb', deviceScaleFactor: 1, serviceWorkers: 'block' });
 const errors = [], res = [];
 const hook = async (p, tag) => {
   p.on('pageerror', (e) => errors.push(`${tag} pageerror: ` + e.message));
@@ -17,7 +18,7 @@ const hook = async (p, tag) => {
   await p.route(/fonts\.(googleapis|gstatic)\.com|supabase\.co/, (r) => r.abort());
   return p;
 };
-const note = (id, ok, detail) => { res.push({ id, ok, detail }); console.log(`${ok ? 'ok     ' : 'CONSTAT '} ${id} — ${detail}`); writeFileSync(join(OUT, `salons-${lang}.json`), JSON.stringify({ res, errors }, null, 1)); };
+const note = (id, ok, detail) => { res.push({ id, ok, detail }); console.log(`${ok ? 'ok     ' : 'CONSTAT '} ${id} — ${detail}`); writeFileSync(join(OUT, `salons-${lang}${tag}.json`), JSON.stringify({ res, errors }, null, 1)); };
 const A = await hook(await ctx.newPage(), 'A');
 let B = null;
 async function enter(p, name, url) {
@@ -32,7 +33,7 @@ const audit = async (p, label) => {
   const a = await auditPage(p, { lang, touch: false });
   const bad = [['recouvert', a.covered], ['hors écran', a.offscreen], ['non traduit', a.french], ['texte brut', a.bad]].filter(([, v]) => v.length);
   note('audit ' + label, bad.length === 0, bad.length ? bad.map(([k, v]) => `${k} : ${v.slice(0, 6).join(' ; ')}`).join(' | ') : `${a.controls} contrôles, rien de recouvert`);
-  await p.screenshot({ path: join(OUT, `salons-${lang}-${label.replace(/\W+/g, '_')}.png`) });
+  await p.screenshot({ path: join(OUT, `salons-${lang}${tag}-${label.replace(/\W+/g, '_')}.png`) });
 };
 try {
   await enter(A, 'Ana', `http://127.0.0.1:${port}/?net=local`);
@@ -86,7 +87,7 @@ try {
   console.log('INTERROMPU :', e.stack || e.message);
   note('INTERROMPU', false, String(e.message).slice(0, 300));
 } finally {
-  writeFileSync(join(OUT, `salons-${lang}.json`), JSON.stringify({ res, errors }, null, 1));
+  writeFileSync(join(OUT, `salons-${lang}${tag}.json`), JSON.stringify({ res, errors }, null, 1));
   console.log('erreurs de la page :', errors.length, errors.slice(0, 5).join(' | '));
   await browser.close(); server.kill();
 }
