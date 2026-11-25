@@ -3,7 +3,7 @@
 Jeu de course contre-la-montre **low-poly** dans le navigateur, avec éditeur de circuits.
 C'est un jeu original : décors, véhicules, pièces, musique et circuits ont été conçus pour ce projet.
 
-Version actuelle : **bêta 0.16.21** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
+Version actuelle : **bêta 0.17.0** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
 
 ## Jouer
 
@@ -15,14 +15,14 @@ npm start
 
 Puis ouvrir <http://localhost:8080>. N'importe quel serveur statique fonctionne aussi, par exemple `python3 -m http.server`.
 
-Le **wiki du jeu** (`wiki/index.html`, en français) explique tout : pilotage, carrière, les 72 circuits avec leur carte, pièces, revêtements, éditeur, modes en ligne et architecture. On l'ouvre depuis le jeu (bouton **📖 Wiki du jeu** de la barre du bas de l'accueil, ou *Créer › Wiki du jeu*). Il se régénère à partir du code avec `npm run wiki` (ses captures d'écran : `node tools/wiki/shots.mjs`, le jeu étant servi).
+Le **wiki du jeu** (`wiki/index.html`, en français) explique tout : pilotage, carrière, les 84 circuits avec leur carte, pièces, revêtements, éditeur, modes en ligne et architecture. On l'ouvre depuis le jeu (bouton **📖 Wiki du jeu** de la barre du bas de l'accueil, ou *Créer › Wiki du jeu*). Il se régénère à partir du code avec `npm run wiki` (ses captures d'écran : `node tools/wiki/shots.mjs`, le jeu étant servi).
 
 Pour le publier avec **GitHub Pages** : *Settings → Pages → Deploy from a branch*, puis choisir la branche et le dossier `/ (root)`.
 Le jeu s'**installe comme une application** (bouton d'installation du navigateur) et se joue **hors ligne** une fois chargé.
 
 ## Contenu
 
-- **72 circuits** dans 12 décors (*Désert crépuscule*, *Jungle néon*, *Archipel tropical*, *Ville futuriste*, *Nuit polaire*, *Volcan*, *Station orbitale*, *Fonds marins*, *Usine mécanique*, *Ville dans les nuages*, *Canyon de cristal* et l'*Atelier des mécanismes*),
+- **84 circuits** dans 12 décors (*Désert crépuscule*, *Jungle néon*, *Archipel tropical*, *Ville futuriste*, *Nuit polaire*, *Volcan*, *Station orbitale*, *Fonds marins*, *Usine mécanique*, *Ville dans les nuages*, *Canyon de cristal* et l'*Atelier des mécanismes*), en 14 chapitres dont trois bonus (l'Atelier, *Les Éléments* et *Grandes Manœuvres* : pluie, vent, givre, ressorts, portes et interrupteurs, pièces mobiles, relais de véhicules, aiguillage par l'eau),
   rangés **du plus facile au plus dur** en 11 chapitres de carrière (un par décor, 6 circuits chacun), plus un **chapitre bonus, l'Atelier** (6 circuits qui montrent chaque obstacle et chaque pièce mobile, un par un ; il s'ouvre avec 4 médailles dans le premier chapitre). Chaque circuit a un **profil** (Sprint, Speedway, Technique, Rollercoaster, Acrobatique) et une ouverture qui lui est propre ; 2 circuits se courent en plusieurs tours (Caldeira, Grand Anneau).
 - **Fiche du circuit (Race Hub)** : choisir un circuit (carrière, défi du jour, mes circuits, communauté, favoris) ouvre sa fiche : **grande carte** zoomable (départ, arrivée, checkpoints, zones, pièces mobiles, obstacles), difficulté, distance, médailles, objectif bonus, **classement** Mondial et Personnel (record, temps intermédiaires, 10 dernières courses), **rivaux en ligne** 👻 à choisir, **replay** de ton record et **★ favoris**. Le bouton **Course rapide** du menu lance en un clic le prochain circuit sans médaille.
 - **HUD d'entraînement** (profil de HUD *Entraînement*, Options › Personnalisation ou la puce 🎯 de la fiche) : **écart en direct** contre ton record, le fantôme or ou le record mondial, **mini-secteurs**, vitesse maxi, forces g, courbes gaz / frein / vitesse, **ligne de la référence** et ses **repères de freinage** sur la piste. Profils *Classique*, *Compétitif*, *Entraînement*, *Minimaliste*.
