@@ -1,6 +1,7 @@
 // Contrat complet d'un circuit refait : node tools/contract.mjs <fichier.mjs|json> [--map]   (un fichier qui exporte un tableau de définitions)
 //   node tools/contract.mjs --builtin            -> tous les circuits intégrés qui ont un `profil`
 //   node tools/contract.mjs --builtin eclats     -> un circuit intégré
+// Espacement des points de retour (GAME-007) : 30 s au plus, sauf les exceptions figées d'avant la règle (tools/checkpoints-espacement.mjs).
 //
 // `checkDef(def)` est LA définition de « circuit bien fait » : tools/test-niveaux.mjs l'applique à tous les circuits à profil, et l'atelier
 // l'applique aux candidats avant qu'ils entrent dans js/tracks.js. Chaque défaut renvoyé est une phrase lisible.
@@ -14,6 +15,7 @@ import { SIDE_MIN_SPEED } from '../js/physics/specs.js';
 import { Track } from '../js/track.js';
 import { runTrack, profile, asciiMap } from './lab.mjs';
 import { proposeFrom } from './medals.mjs';
+import { spacingFails } from './checkpoints-espacement.mjs';
 
 // (0.9.74 : et les pièces des étapes 1 à 5 : chicanes, plaques, largeurs, carrefours, looping modulaire, tube en virage)
 const NEW = new Set([...GEN_IDS, 'hugecurve', 'steep4', 'bankBig', 'giantcurve', ...PIECE_ORDER.slice(PIECE_ORDER.indexOf('sbend'))]);
@@ -118,6 +120,8 @@ export function checkDef(def) {
   // repartir de chaque checkpoint, à l'arrêt
   const n = new RaceLogic(tr).cps.length;
   if (n < 1) f.push('aucun checkpoint');
+  // GAME-007 : au plus 30 s entre deux points de retour (départ, checkpoints, passages de ligne, arrivée) ; les circuits d'avant la règle sont des exceptions figées (tools/checkpoints-exceptions.json).
+  f.push(...spacingFails(def.id, S));
   for (let k = 1; k <= n; k++) {
     const R = runTrack(buildBuiltin(def), { rewindAtCp: k });
     if (!R.ok || R.respawns) f.push(`repartir du checkpoint ${k} à l'arrêt ${R.ok ? 'coûte ' + R.respawns + ' réapparitions' : 'échoue (' + R.reason + ')'}`);
