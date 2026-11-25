@@ -90,9 +90,8 @@ publié (`author_time`, `author_verified = true`) est celui du REJEU et doit ég
 Les circuits publiés avant l'étape 15 gardent un temps `author_verified = false` : le jeu l'affiche « non vérifié » et n'en déduit aucune médaille, jusqu'à ce que leur auteur les republie.
 
 **Limites connues** : une session anonyme est gratuite, donc la limite par pilote se contourne en changeant de session (le plafond global en base borne le total de
-rejeux) ; `ALLOWED_ORIGIN` est `*` tant qu'il n'est pas réglé (la session Supabase est exigée de toute façon) ; le temps de l'auteur d'un circuit de joueur
-(`author_time`, qui donne les médailles de ce circuit) est REJOUÉ par la fonction serveur avant l'écriture (`js/verify.js : verifyPublish`, appelé par `supabase/functions/submit-score/handler.js : publish`, puis `publish_track`) ;
-la base, elle, ne rejoue rien : elle fait confiance à la fonction, seule autorisée à appeler `publish_track` (`service_role` : `supabase/etape15-backend.sql`), et une publication directe est refusée une fois l'étape 15b appliquée (`verify-prod.sql`). Restent hors de cette preuve les circuits publiés avant l'étape 15 (`author_verified` faux).
+rejeux) ; `ALLOWED_ORIGIN` est `*` tant qu'il n'est pas réglé (la session Supabase est exigée de toute façon) ; la base ne rejoue rien elle-même : le temps de l'auteur d'un circuit de joueur
+(`author_time`, qui donne les médailles de ce circuit) est REJOUÉ par la fonction serveur avant l'appel à `publish_track` (`verify.js : verifyPublish`, appelée par `handler.js`) ; la base (`publish_track`, étape 15) l'enregistre telle que la fonction le lui donne, et l'étape 15b ferme la voie de l'insertion directe.
 
 ## Modèle d'identité (0.16.11 : TECH-024, TECH-025, TECH-026 ; schéma aussi en tête de `js/online.js`)
 
