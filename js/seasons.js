@@ -37,8 +37,17 @@ export const SEASON_POOL_1 = Object.freeze([
   'envol', 'suspendues', 'rafales', 'montgolfieres', 'pontvents', 'cite',
   'galerie', 'plafond', 'cristalfele', 'miroir', 'vrilles', 'coeur',
 ]);
+// Liste 2 (0.17.0, décidée le 25 novembre 2026, saison 3) : la liste 1 puis les 12 circuits des chapitres bonus 13 et 14, à partir de la saison 16 (lundi 22 février 2027) :
+// la première saison après les douze qui suivent la saison en cours au jour de la décision. Elle suppose un déploiement (site ET fonction serveur) au plus tard le
+// 8 février 2027 (deux semaines avant) ; déployée plus tard, il faut REPOUSSER cette bascule (une liste qui n'a pas encore servi peut changer de saison de départ).
+export const SEASON_POOL_2 = Object.freeze([
+  ...SEASON_POOL_1,
+  'clairdelune', 'manege', 'averse', 'bourrasques', 'givre', 'ressorts',
+  'balade', 'interrupteurs', 'plateaux', 'relais', 'aiguillage', 'finale',
+]);
 export const SEASON_POOLS = Object.freeze([
   Object.freeze({ from: 1, ids: SEASON_POOL_1 }),
+  Object.freeze({ from: 16, decided: '2026-11-25', ids: SEASON_POOL_2 }),
 ]);
 
 // Identifiants dans lesquels tire la saison n.
