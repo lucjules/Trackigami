@@ -23,7 +23,7 @@ Fusionner sur `main` → le workflow démarre → **approuver** l'environnement 
 
 ## À lire au premier vrai déploiement
 
-- Tâche `serveur` : « jeton accepté » (liste des fonctions) ; les deux `functions deploy` terminent sans erreur ; la CLI peut exiger un `supabase/config.toml` : si elle échoue pour cette raison, rien n'est publié, ajouter un fichier minimal (`project_id`).
+- Tâche `serveur` : « jeton accepté » (liste des fonctions) ; les trois `functions deploy` (`ice`, `submit-score`, `account-recovery`) terminent sans erreur ; la CLI peut exiger un `supabase/config.toml` : si elle échoue pour cette raison, rien n'est publié, ajouter un fichier minimal (`project_id`).
 - **Barrière** : « Barrière franchie » avec l'empreinte du résumé du travail. Contrôle indépendant : `node tools/check-deployed.mjs` en local (« empreinte de build identique »).
 - Tableau de bord Supabase › Edge Functions : `submit-score`, `ice` et `account-recovery` ont une nouvelle version, **Verify JWT toujours activé** (le workflow ne passe jamais `--no-verify-jwt`). `account-recovery` est appelée SANS session (avec la clé publique du jeu) : si la passerelle la refuse (`401 Invalid JWT`), désactiver « Verify JWT » pour cette seule fonction dans le tableau de bord (voir `supabase/COMPTES.md`, « À vérifier sur un VRAI projet »). Elle exige l'**étape SQL 21**, à lancer à la main AVANT.
 - `ice` n'a pas d'empreinte : seule la réussite du déploiement (et sa version dans le tableau de bord) le prouve. `submit-score` et `account-recovery` publient la leur (la barrière compare les deux).
