@@ -93,7 +93,7 @@ Aucune erreur console du jeu pendant tous les parcours (hors erreurs réseau att
 | 29. États de synchronisation du compte (invité seulement ; Node : §4, D4) | ✔ (invité) | ✔ (invité) | ○ | ○ | ○ | ○ |
 | 30. Académie leçons 2 à 6, exercices évalués, duels, tournois, export vidéo, fantôme rival | ○ | ○ | ○ | ○ | ○ | ○ |
 
-« ⚠ 006 » (lignes 4 et 20) ne concerne que le clavier : sur téléphone il n'y a pas de touche Échap (le parcours en a tapé une et a refermé la fenêtre par son bouton). « Tous les boutons répondent » : chaque entrée de menu, chaque onglet, chaque bouton de la pause, de l'arrivée, du garage (4 familles, 14 onglets) et de l'éditeur listé en §2.1 a été activé par un clic ou un toucher réel et a ouvert ce qu'il annonce. **Non manipulés un par un** : les cases à cocher et curseurs des réglages (hors langue, commandes et curseurs de la pause), les boutons de la fenêtre Sauvegardes (export, import), les 14 onglets du garage au-delà du simple affichage (un seul achat n'a pas été tenté : le joueur neuf a 0 ◆).
+« ⚠ 006 » (lignes 4 et 20) ne concerne que le clavier : sur téléphone il n'y a pas de touche Échap (le parcours en a tapé une et a refermé la fenêtre par son bouton). « Tous les boutons répondent » : chaque entrée de menu, chaque onglet, chaque bouton de la pause, de l'arrivée, du garage (4 familles, 14 onglets) et de l'éditeur (§2.3) a été activé par un clic ou un toucher réel et a ouvert ce qu'il annonce. **Non manipulés un par un** : les cases à cocher et curseurs des réglages (hors langue, commandes et curseurs de la pause), les boutons d'export et d'import de la fenêtre Sauvegardes, les achats du garage (le joueur neuf a 0 ◆).
 
 ### 2.3 Fonctions des phases récentes et écrans particuliers
 
