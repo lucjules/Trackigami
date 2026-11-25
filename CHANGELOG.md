@@ -6,6 +6,23 @@ multijoueurs y sont liés. Une version qui change `PHYS_VER` impose de **redépl
 
 *Les nombres des sections anciennes (portées en cases, vitesses de saut…) sont ceux du monde de leur époque ; le monde est passé de cases de 24 m à 32 m en 0.9.11.*
 
+## Bêta 0.16.19 — documentation remise d'équerre avec le code (DOC-001 à DOC-010 et ce que les phases 1 à 19 ont rendu faux)
+
+**`PHYS_VER` reste 39, `NET_VER` reste 5.** Aucun comportement ne change : seuls des textes (documents, deux commentaires d'en-tête de module). `supabase/functions/*/index.ts` est identique (le regroupement ne garde pas les commentaires : `npm run build:function` ne produit aucune différence, empreintes de build inchangées).
+
+- **DOC-001** `docs/ARCHITECTURE.md` : la route ne guide plus le cap sur les routes roulées et les loopings (retiré en `PHYS_VER` 37 : il faut braquer) ; deux endroits corrigés.
+- **DOC-002** : 206 scénarios d'empreinte (`tools/phys-fingerprint.json`) ; l'ancien « 161 » des limites connues, et le « 193 » de `docs/TESTS.md`.
+- **DOC-003** : Firefox et WebKit ont un parcours dans la tâche CI `moteurs` ; le TURN est fourni par la fonction `ice` quand un compte TURN lui est donné (STUN seul sinon).
+- **DOC-004** : la signature commence par le décor ; seuls le nom, la description, l'auteur, le thème de pièce, les couleurs, le style de portique, l'ambiance et les scripts sont ignorés (aussi dans le README).
+- **DOC-005** : `supabase/etape1…21-*.sql` (23 fichiers) et non plus `etape1…5` ; `supabase/MIGRATIONS.md` dit l'ordre des étapes 16 à 21 ; le README liste les étapes 16, 18, 19, 20 et 21.
+- **DOC-006** : records sous `shardway.rec3.*` pour l'invité, `shardwayacct.<id>.rec3.*` pour un compte.
+- **DOC-007** : l'en-tête de `js/verify.js` (donc `docs/MODULES.md`, régénéré) dit que la fonction serveur l'EMBARQUE (`tools/build-function.mjs`).
+- **DOC-008** : l'en-tête de `js/joins.js` dit qu'il n'est importé que par des tests et des outils ; l'éditeur utilise `js/continuity.js`.
+- **DOC-009** : déjà corrigé en 0.16.17 dans `supabase/MULTI.md` (trois modes ; poussée de séparation seule à ≈ 4 g, variation totale ≤ 2,5 m/s par pas), relu contre `js/net/collide.js` et `js/net/room.js` : exact.
+- **DOC-010** : `supabase/COMPTES.md` : le temps de l'auteur est rejoué par la fonction serveur avant `publish_track` (`verifyPublish`) ; la base ne rejoue rien. Même phrase corrigée dans `docs/PLAN-FINALISATION.md`.
+- **Autres textes devenus faux** : `NET_VER` 5 et identité de salle (ARCHITECTURE) ; « ~17 s » de `npm test` ; tâches de la CI (`moteurs`, `gate`) et autres workflows ; « redéployée à la main, aucun déploiement automatique » (le workflow `deploiement.yml` existe) ; fonctions `ice` et `account-recovery` (ARCHITECTURE, EXPLOITATION, DEPLOIEMENT : trois déploiements) ; fichiers générés (trois fonctions, wiki) ; `docs/TESTS.md` (136 fichiers de test, scripts `test:sql` des étapes 16 à 21, suites navigateur, plus aucun `bugConnu` actif, défauts de l'éditeur corrigés en 0.16.7).
+- **Vérification** : chaque affirmation réécrite a été relue contre le fichier cité dans le texte ; `npm run docs` sans différence résiduelle.
+
 ## Bêta 0.16.18 — petits défauts visibles : dalles de verre, miniatures, garage, aides, vibrations, caméras et scripts du Theater, messages, traduction des contenus de joueurs (TECH-019, 061, 063, 064, 067, 068, 069, 070, 071, 072, RISK-002 ; TECH-073 non reproduit)
 
 **`PHYS_VER` reste 39** (la consigne disait 38 : le dépôt est à 39 ; non modifié : aucun correctif ne touche la physique, les replays ni le déterminisme). **`NET_VER` reste 5.** Aucune fonction serveur ni étape SQL ; aucune clé de circuit ne change ; le maillage n'est pas reconstruit plus souvent qu'avant.
