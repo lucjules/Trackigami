@@ -39,9 +39,12 @@ test('la politique existe : scripts du site seulement, ni script en ligne, ni ev
   for (const [name, values] of csp) assert.ok(!values.includes('*') && !values.includes("'unsafe-eval'"), name + ' ne doit contenir ni « * » ni unsafe-eval');
   assert.ok(!(csp.get('script-src') || []).some((v) => /unsafe|https?:|data:|blob:/.test(v)));
 });
-test('connect-src : le site lui-même et le projet Supabase de js/config.js, rien d\'autre (un jeton ne part que vers eux)', () => {
+test('connect-src : le site lui-même et le projet Supabase de js/config.js, en https ET en wss (salons multijoueur), rien d\'autre (un jeton ne part que vers eux)', () => {
   const origin = new URL(CONFIG.supabase.url).origin;
-  assert.deepEqual(csp.get('connect-src'), ["'self'", origin], 'js/config.js et la politique ne désignent pas le même serveur');
+  // 0.16.18 : la signalisation des salons (js/net/signaling.js) ouvre un WebSocket wss:// vers ce projet. Une source https:// ne l'autorise PAS (Chrome 158, constaté) :
+  // sans l'origine wss://, « Créer une salle » et « Rejoindre » échouaient toujours (« Connexion au serveur de salons impossible. »).
+  const ws = origin.replace(/^https:/, 'wss:');
+  assert.deepEqual(csp.get('connect-src'), ["'self'", origin, ws], 'js/config.js et la politique ne désignent pas le même serveur (https:// et wss://)');
   assert.match(CONFIG.iceUrl, new RegExp('^' + origin.replace(/[.]/g, '\\.')), 'la fonction « ice » est sur le même projet');
 });
 test('index.html : aucun <script> en ligne, aucun gestionnaire en ligne (onload, onclick…), aucun javascript:, aucun <style> ni <iframe>', () => {

@@ -172,7 +172,7 @@ Les scripts sont relançables et testés sur PostgreSQL (`npm run test:sql`).
 ### Héberger ta propre version
 
 L'URL du projet Supabase, sa clé **publique** et les serveurs réseau du multijoueur (STUN, et un relais TURN pour les réseaux qui bloquent le pair à pair) sont dans `js/config.js`.
-Modifie `DEFAULTS` dans `js/config.js` **et** l'adresse de `connect-src` dans la balise `Content-Security-Policy` d'`index.html` (la politique de sécurité du contenu, ajoutée en 0.9.64, n'autorise que le site lui-même, Supabase et Google Fonts ; `tools/test-securite-client.mjs` échoue si les deux adresses diffèrent).
+Modifie `DEFAULTS` dans `js/config.js` **et** les deux adresses de `connect-src` dans la balise `Content-Security-Policy` d'`index.html` : `https://<projet>.supabase.co` **et** `wss://<projet>.supabase.co` (salons multijoueur ; sans elle, « Créer une salle » échoue toujours). La politique de sécurité du contenu, ajoutée en 0.9.64, n'autorise que le site lui-même et ce projet Supabase ; `tools/test-securite-client.mjs` échoue si les adresses diffèrent.
 L'ancien moyen, un `<script>window.COPYTRACK_CONFIG = { … }</script>` placé dans `index.html`, est **bloqué** par cette politique (pas de script en ligne) : n'y recours que si tu retires volontairement la politique.
 
 La clé secrète n'est jamais dans le jeu : seule la fonction serveur l'utilise, côté Supabase. Les identifiants d'un relais TURN, eux, sont lisibles par les joueurs : utilise des identifiants à durée limitée.
