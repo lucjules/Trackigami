@@ -9,6 +9,12 @@ export function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// Contenu de joueur (nom de circuit, pseudo, commentaire, nom de mode ou de playlist) : le traducteur anglais (i18n/dom.js) ne le touche jamais (RISK-002).
+// Sans cela, un circuit nommé « Jouer » s'afficherait « Play ». OFF s'écrit dans la balise qui contient le texte de joueur : `<h3${OFF}>${esc(nom)}</h3>` ; un nom placé
+// à côté d'autres mots s'enveloppe : `par <span${OFF}>${esc(nom)}</span>` (le reste de la phrase reste traduit, le nom non). L'échappement esc() reste écrit à
+// l'endroit de l'insertion (tools/test-securite-client.mjs le vérifie sur le texte du gabarit).
+export const OFF = ' data-i18n="off"';
+
 // h('button', { class: 'btn', onclick: fn, disabled: true }, 'Texte', autreElement) : élément DOM sans passer par innerHTML.
 export function h(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);

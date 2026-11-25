@@ -74,8 +74,8 @@ export const modesMethods = {
       body.appendChild(tabs);
       body.appendChild(h('p', { class: 'meta' }, 'Un mode = des règles + un objectif, à jouer sur le circuit de ton choix (sans records ni classements). Pas de pièces à gagner : tout est pour le plaisir. Publié (🌐), un mode a son classement sur chaque circuit de la carrière.'));
       const card = (m, own) => h('div', { class: 'mode-card mode-row', 'data-mode': m.id },
-        h('div', { class: 'mode-card-head' }, h('span', { class: 'mode-ico', 'aria-hidden': 'true' }, icon(m)), h('b', {}, m.name)),
-        m.desc ? h('p', { class: 'mode-desc' }, m.desc) : null,
+        h('div', { class: 'mode-card-head' }, h('span', { class: 'mode-ico', 'aria-hidden': 'true' }, icon(m)), h('b', own ? { 'data-i18n': 'off' } : {}, m.name)),
+        m.desc ? h('p', own ? { class: 'mode-desc', 'data-i18n': 'off' } : { class: 'mode-desc' }, m.desc) : null,
         h('div', { class: 'mode-chips' }, ...describeRules(m.rules).map((x) => h('span', { class: 'chip' }, x))),
         m.goal ? h('p', { class: 'mode-goal' }, '🎯 ' + goalLabel(m.goal)) : null,
         h('div', { class: 'mode-acts' },

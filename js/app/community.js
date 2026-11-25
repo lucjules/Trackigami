@@ -1,7 +1,7 @@
 // Communauté : partage, classements en ligne, publication, import de circuits et de fantômes, aide.
 // Ces méthodes s'ajoutent au prototype de App (voir main.js) : `this` est l'instance.
 import { medalIcon } from '../ui.js';
-import { $, esc } from '../dom.js';
+import { $, esc, OFF } from '../dom.js';
 import { MEDALS, medalFor } from '../medals.js';
 import { Track, lossBlocking } from '../track.js';
 import { lossMessage, lossNote } from '../lossMessage.js';
@@ -282,9 +282,9 @@ export const communityMethods = {
     const card = document.createElement('div');
     card.className = 'card ' + (row.decor || '');
     card.innerHTML = `${track ? `<img class="thumb" alt="" src="${thumbnail(track, 'c-' + row.id)}">` : ''}
-      <h3>${esc(row.name)}</h3>
-      ${row.description ? `<p class="desc">${esc(row.description)}</p>` : ''}
-      <div class="meta">par <b>${esc((row.players && row.players.name) || '—')}</b>${row.laps > 1 ? ` · ${row.laps} tours` : ''}</div>
+      <h3${OFF}>${esc(row.name)}</h3>
+      ${row.description ? `<p class="desc"${OFF}>${esc(row.description)}</p>` : ''}
+      <div class="meta">par <b${OFF}>${esc((row.players && row.players.name) || '—')}</b>${row.laps > 1 ? ` · ${row.laps} tours` : ''}</div>
       <div class="meta" title="${row.author_verified === true ? 'Temps de l’auteur, rejoué et confirmé par le serveur' : 'Temps annoncé par l’auteur, non vérifié par le serveur : aucune médaille n’en est déduite'}">${row.author_verified === true ? medalIcon(MEDALS[0]) : '◌'} <b>${formatTime(row.author_time)}</b>${row.author_verified === true ? '' : ' <i>non vérifié</i>'} · ▶ ${row.plays}${row.week_players ? ` · 🔥 ${row.week_players} pilote${row.week_players > 1 ? 's' : ''} cette semaine` : ''}</div>
       ${est ? `<div class="meta diff" title="Difficulté estimée d’après la géométrie du circuit (virages serrés, murs, loopings, obstacles, pièces mobiles, longueur) : une indication, pas une mesure.">${starsText(est.stars)} ${STAR_LABELS[est.stars]}</div>` : ''}
       <div class="best">${medals ? medalIcon(medal) : ''}${rec ? formatTime(rec.time) : '<span class="meta">Pas encore de temps</span>'}</div>
@@ -386,7 +386,7 @@ export const communityMethods = {
       const c = document.createElement('div');
       c.className = 'card playlist-card';
       c.dataset.pl = pl.id;
-      c.innerHTML = `<h3>🎵 ${esc(pl.name)}</h3><div class="meta"><span>${own ? (pl.public ? 'publique' : 'privée') : `par ${esc(pl.owner_name || '—')}`}</span> · <span>${pl.n} circuit${pl.n > 1 ? 's' : ''}</span></div>
+      c.innerHTML = `<h3>🎵 <span${OFF}>${esc(pl.name)}</span></h3><div class="meta"><span>${own ? (pl.public ? 'publique' : 'privée') : `par <span${OFF}>${esc(pl.owner_name || '—')}</span>`}</span> · <span>${pl.n} circuit${pl.n > 1 ? 's' : ''}</span></div>
         <div class="actions main"><button class="btn primary" data-pa="open">Ouvrir</button>${own ? '<button class="btn danger" data-pa="del" title="Supprimer la playlist">✕</button>' : ''}</div>`;
       c.addEventListener('click', (e) => {
         const a = e.target.closest('[data-pa]');
@@ -415,7 +415,7 @@ export const communityMethods = {
     if (!document.body.contains(body)) return;
     if (!rows.length) { body.innerHTML = '<p class="meta">Cette playlist est vide (ses circuits ont peut-être été retirés).</p>'; return; }
     const draw = () => {
-      body.innerHTML = `<ol class="playlist-list">${rows.map((r, i) => `<li><b>${esc(r.name)}</b> <small class="meta">par ${esc((r.players && r.players.name) || '—')}</small>
+      body.innerHTML = `<ol class="playlist-list">${rows.map((r, i) => `<li><b${OFF}>${esc(r.name)}</b> <small class="meta">par <span${OFF}>${esc((r.players && r.players.name) || '—')}</span></small>
         <button class="btn small" data-pi="${i}" data-pk="hub">Fiche</button>${own ? `<button class="btn small danger" data-pi="${i}" data-pk="rm" title="Retirer de la playlist">✕</button>` : ''}</li>`).join('')}</ol>
         <button class="btn primary" data-pk="run">▶ Jouer dans l’ordre</button>`;
     };
@@ -447,7 +447,7 @@ export const communityMethods = {
     let mine;
     try { mine = await playlists({ mine: true }); } catch (e) { body.innerHTML = `<p class="lb-off">${esc(e.message)}</p>`; return; }
     if (!document.body.contains(body)) return;
-    body.innerHTML = `${mine.length ? `<div class="playlist-pick">${mine.map((pl) => `<button class="btn" data-pl="${pl.id}"${pl.tracks.includes(d.communityId) ? ' disabled' : ''}>${esc(pl.name)} <small>(${pl.n})</small></button>`).join('')}</div>` : ''}
+    body.innerHTML = `${mine.length ? `<div class="playlist-pick">${mine.map((pl) => `<button class="btn" data-pl="${pl.id}"${pl.tracks.includes(d.communityId) ? ' disabled' : ''}><span${OFF}>${esc(pl.name)}</span> <small>(${pl.n})</small></button>`).join('')}</div>` : ''}
       <label>Nouvelle playlist<input id="pl-new" maxlength="40" placeholder="Nom de la playlist"></label>
       <label title="Une playlist publique est visible de tous dans Communauté › Playlists">Publique<input type="checkbox" id="pl-pub" checked></label>
       <button class="btn primary" id="pl-create">Créer avec ce circuit</button>`;
@@ -480,8 +480,8 @@ export const communityMethods = {
       let rows;
       try { rows = await comments(d.communityId); } catch (e) { listEl.innerHTML = `<li class="lb-off">Commentaires indisponibles : ${esc(e.message)}</li>`; return; }
       if (!this._hub || this._hub.desc.communityId !== d.communityId) return;
-      listEl.innerHTML = rows.length ? rows.map((c) => `<li data-c="${c.id}"><b>${esc(c.name)}</b> <small class="meta">${esc(when(c.created_at))}</small>
-        ${c.can_delete ? '<button class="btn small subtle" data-ca="del" title="Supprimer">✕</button>' : ''}${c.mine ? '' : '<button class="btn small subtle" data-ca="report" title="Signaler">⚑</button>'}<p>${esc(c.body)}</p></li>`).join('')
+      listEl.innerHTML = rows.length ? rows.map((c) => `<li data-c="${c.id}"><b${OFF}>${esc(c.name)}</b> <small class="meta">${esc(when(c.created_at))}</small>
+        ${c.can_delete ? '<button class="btn small subtle" data-ca="del" title="Supprimer">✕</button>' : ''}${c.mine ? '' : '<button class="btn small subtle" data-ca="report" title="Signaler">⚑</button>'}<p${OFF}>${esc(c.body)}</p></li>`).join('')
         : '<li class="meta">Pas encore de commentaire.</li>';
     };
     listEl.addEventListener('click', async (e) => {
@@ -526,7 +526,7 @@ export const communityMethods = {
     if (i < 0) return null;
     const bar = document.createElement('span');
     bar.className = 'hub-playlist';
-    bar.innerHTML = `<span>🎵 ${esc(P.name)} · ${i + 1} / ${P.rows.length}</span>${i + 1 < P.rows.length ? ' <button class="btn small" type="button" data-pl-next>⏭ Suivant</button>' : ''}`;
+    bar.innerHTML = `<span>🎵 <span${OFF}>${esc(P.name)}</span> · ${i + 1} / ${P.rows.length}</span>${i + 1 < P.rows.length ? ' <button class="btn small" type="button" data-pl-next>⏭ Suivant</button>' : ''}`;
     const nb = bar.querySelector('[data-pl-next]');
     if (nb) nb.onclick = () => { this.audio.click(); this.openCommunityHub(P.rows[i + 1], 'community'); };
     return bar;

@@ -104,8 +104,16 @@ export const theaterMethods = {
     if (target === this.tick) return;
     const app = this.app, saved = { audio: app.audio, particles: app.particles, input: app.input, hud: app.ui.hud };
     app.audio = NOOP; app.particles = NOOP; app.input = NOOP; app.ui.hud = NOOP;
-    try { while (this.tick < target && this.state !== 'finished') this._stepOnce(); }
-    finally { app.audio = saved.audio; app.particles = saved.particles; app.input = saved.input; app.ui.hud = saved.hud; }
+    // (TECH-069) Les scripts de circuit (ciel, brume, météo…) et les effets de la logique se jouent à chaque pas du saut, comme en lecture continue (sans son, sans
+    // particules, sans message : les remplaçants ci-dessus) ; la file des effets est vidée au fur et à mesure, rien n'est joué en rafale à l'image suivante.
+    const L = this.sim.lgc;
+    try {
+      while (this.tick < target && this.state !== 'finished') {
+        this._stepOnce();
+        this._scriptsUpdate();
+        if (L) while (L.fx.length) this._runScript(L.fx.shift());
+      }
+    } finally { app.audio = saved.audio; app.particles = saved.particles; app.input = saved.input; app.ui.hud = saved.hud; }
     this.acc = 0;
     this._camCut();
     this._theaterUi(true);

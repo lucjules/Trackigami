@@ -1,7 +1,7 @@
 // Vérification d'une course (classements en ligne). Module sans rendu ni navigateur :
 // il est utilisé par la fonction serveur Supabase (supabase/functions/submit-score),
-// qui le charge depuis le site du jeu. La physique étant déterministe, rejouer les
-// commandes enregistrées redonne exactement la même course et le même temps.
+// qui l'EMBARQUE (tools/build-function.mjs en fait un fichier autonome avec ses dépendances : Supabase refuse d'importer du code depuis un site).
+// La physique étant déterministe, rejouer les commandes enregistrées redonne exactement la même course et le même temps.
 import { Track, hashString } from './track.js';
 import { BUILTIN_TRACKS, buildBuiltin } from './tracks.js';
 import { dailyChallenge } from './daily.js';

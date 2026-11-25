@@ -1,7 +1,7 @@
 // Écrans de liste : carrière, circuits du joueur, défi du jour, circuit suivant, menu, tutoriel.
 // Ces méthodes s'ajoutent au prototype de App (voir main.js) : `this` est l'instance.
 import { medalIcon } from '../ui.js';
-import { $, esc } from '../dom.js';
+import { $, esc, OFF } from '../dom.js';
 import { RaceSession } from '../race.js';
 import { medalFor } from '../medals.js';
 import { Track, hashString } from '../track.js';
@@ -323,7 +323,7 @@ export const screenMethods = {
       const card = document.createElement('div');
       card.className = 'card';
       card.innerHTML = `${track ? `<img class="thumb" alt="" src="${thumbnail(track, 'u-' + entry.code.length + '-' + hashString(entry.code))}">` : ''}
-        <h3>${esc(entry.name)}</h3>
+        <h3${OFF}>${esc(entry.name)}</h3>
         <div class="meta">${track ? track.tiles.length : '?'} pièces${track && track.laps > 1 ? ` · ${track.laps} tours` : ''} · modifié le ${new Date(entry.updated || Date.now()).toLocaleDateString(locale())}</div>
         <div class="best">${rec ? formatTime(rec.time) : '<span class="meta">Pas encore de temps</span>'}</div>
         <div class="actions">

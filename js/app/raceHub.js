@@ -5,9 +5,10 @@
 // Hiérarchie : en-tête (nom, décor, source, favori), grande mini-carte (ui/trackMap.js), puis à côté : lancement (record, fantômes, Jouer),
 // classement à onglets (ui/leaderboardPanel.js : seuls les onglets dont les données existent), records à regarder.
 // Tout ce qui est local s'affiche tout de suite ; le classement en ligne arrive ensuite, dans son panneau. Rien n'attend le réseau pour jouer.
-import { $, esc } from '../dom.js';
+import { $, esc, OFF } from '../dom.js';
 import { RaceSession } from '../race.js';
-import { Track } from '../track.js';
+import { Track, hashString } from '../track.js';
+import { markPlayerText, isPlayerTrackName } from '../playerText.js';
 import { DECORS } from '../themes.js';
 import { PHYS_VER } from '../version.js';
 import { decodeInputs } from '../replay.js';
@@ -84,6 +85,7 @@ export const raceHubMethods = {
     if (!h) return;
     const d = h.desc;
     const dec = DECORS[d.decor] || {};
+    markPlayerText($('hub-name'), d.source === 'user' || d.source === 'community' || (d.source !== 'builtin' && d.source !== 'daily' && isPlayerTrackName(d.name)));      // (RISK-002)
     $('hub-name').textContent = d.name;
     const src = d.source === 'builtin' ? `${SOURCE_LABEL.builtin} · Circuit ${d.index + 1}` : d.source === 'daily' ? `${SOURCE_LABEL.daily} · ${String(d.day || '').split('-').reverse().join('/')}`
       : d.source === 'community' && d.author ? `${SOURCE_LABEL.community} · par ${d.author}` : SOURCE_LABEL[d.source] || '';
@@ -198,7 +200,7 @@ export const raceHubMethods = {
     $('hub-launch').innerHTML = `${d.source === 'daily' ? this._hubDailyBox(d) : ''}<div class="hub-pb">${rec ? `<span class="meta">Mon record</span><b>${medal ? medalIcon(medal) + ' ' : ''}${formatTime(rec.time)}</b>` : '<span class="meta">Pas encore de temps : à toi d’ouvrir la voie.</span>'}</div>
       <div class="hub-ghosts" role="group" aria-label="Fantômes"><span class="meta">Fantômes</span>
         ${chips.map(([k, l, on, ok]) => `<button class="chip${on ? ' on' : ''}" data-ghost="${k}" aria-pressed="${on}"${ok ? '' : ' disabled title="Pas encore de record sur ce circuit"'}>${esc(l)}</button>`).join('')}
-        ${rivals.map(([rank, g]) => `<button class="chip on rival" data-rival="${rank}" aria-pressed="true" title="Retirer ce rival">👻 ${rank}. ${esc(g.name)} · ${formatTime(g.time)} ✕</button>`).join('')}
+        ${rivals.map(([rank, g]) => `<button class="chip on rival" data-rival="${rank}" aria-pressed="true" title="Retirer ce rival">👻 ${rank}. <span${OFF}>${esc(g.name)}</span> · ${formatTime(g.time)} ✕</button>`).join('')}
         <button class="chip${train ? ' on' : ''}" data-hudtrain aria-pressed="${train}" title="Écart en direct, secteurs, courbes, ligne et freinages de la référence (Paramètres › Interface)">🎯 HUD d’entraînement</button>
       </div>
       ${rivals.length < MAX_RIVALS && h.board && h.board.boards.some((b) => b.id === 'world') ? '<p class="meta hub-hint">Ajoute jusqu’à 3 rivaux en ligne avec 👻 dans le classement mondial.</p>' : ''}
@@ -248,7 +250,7 @@ export const raceHubMethods = {
   _hubModeOptions() {
     const own = listModes();
     return `<optgroup label="Modes fournis">${BUILTIN_MODES.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('')}</optgroup>`
-      + (own.length ? `<optgroup label="Mes modes">${own.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('')}</optgroup>` : '');
+      + (own.length ? `<optgroup label="Mes modes">${own.map((m) => `<option value="${esc(m.id)}"${OFF}>${esc(m.name)}</option>`).join('')}</optgroup>` : '');
   },
 
   // Défi du jour 2 (E13) : la série de jours et la mutation du jour (une catégorie de record, proposée en tête des catégories).
@@ -420,12 +422,12 @@ export const raceHubMethods = {
       const kind = f.ref.slice(0, 1), id = f.ref.slice(2);
       let img = '', sub = '';
       if (kind === 'b') { const b = this.builtins.find((x) => x.def.id === id); if (!b) continue; img = thumbnail(b.track, 'b-' + b.key); sub = 'Carrière'; }
-      else if (kind === 'm') { const e = mine.find((t) => t.id === id); if (!e) continue; try { img = thumbnail(Track.decode(e.code), 'm-' + e.id + '-' + e.code.length); } catch { img = ''; } sub = 'Mes circuits'; }
+      else if (kind === 'm') { const e = mine.find((t) => t.id === id); if (!e) continue; try { img = thumbnail(Track.decode(e.code), 'm-' + e.id + '-' + e.code.length + '-' + hashString(e.code)); } catch { img = ''; } sub = 'Mes circuits'; }
       else sub = 'Communauté · en ligne';
       const card = document.createElement('div');
       card.className = 'card fav-card';
       card.tabIndex = 0;
-      card.innerHTML = `${img ? `<img class="thumb" alt="" src="${img}">` : '<div class="thumb fav-online">🌐</div>'}<h3>${esc(f.name || '—')}</h3><div class="meta">${esc(sub)}</div>`;
+      card.innerHTML = `${img ? `<img class="thumb" alt="" src="${img}">` : '<div class="thumb fav-online">🌐</div>'}<h3${kind === 'b' ? '' : OFF}>${esc(f.name || '—')}</h3><div class="meta">${esc(sub)}</div>`;
       const go = () => { this.audio.click(); this.openFavorite(f); };
       card.addEventListener('click', go);
       card.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
