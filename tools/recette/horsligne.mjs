@@ -1,26 +1,27 @@
-// Recette : écrans d'erreur et hors ligne. node tools/recette/horsligne.mjs <fr|en>
+// Recette : écrans d'erreur et hors ligne. node tools/recette/horsligne.mjs <fr|en> [kb|land|port]
 //  1. service worker réel : une première visite, puis le réseau est coupé (setOffline) et la page rechargée : le jeu démarre-t-il, mène-t-il à une course ?
 //  2. navigateur sans WebGL 2 : message de l'écran de chargement (langue comprise) ;
 //  3. un module du jeu qui ne se charge pas : que voit le joueur ?
 //  4. réseau coupé en cours de jeu (setOffline) : communauté, classement d'une fiche.
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { chromium, OUT, OFFLINE, sleep, startServer, auditPage } from './lib.mjs';
+import { chromium, OUT, OFFLINE, sleep, startServer, auditPage, VIEWPORTS } from './lib.mjs';
 
-const lang = process.argv[2] || 'fr';
+const lang = process.argv[2] || 'fr', input = process.argv[3] || 'kb';       // kb (défaut) | land | port : téléphone simulé, écran et événements tactiles
+const tag = input === 'kb' ? '' : '-' + input;
 const port = 9500 + Math.floor(Math.random() * 90);
 const server = startServer(port);
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--mute-audio'] });
 const base = `http://127.0.0.1:${port}/`;
 const res = [], errors = [];
-const note = (id, ok, detail) => { res.push({ id, ok, detail }); console.log(`${ok ? 'ok     ' : 'CONSTAT '} ${id} — ${detail}`); writeFileSync(join(OUT, `horsligne-${lang}.json`), JSON.stringify({ res, errors }, null, 1)); };
-const newCtx = (extra = {}) => browser.newContext({ locale: lang === 'en' ? 'en-US' : 'fr-FR', viewport: { width: 1100, height: 650 }, deviceScaleFactor: 1, ...extra });
+const note = (id, ok, detail) => { res.push({ id, ok, detail }); console.log(`${ok ? 'ok     ' : 'CONSTAT '} ${id} — ${detail}`); writeFileSync(join(OUT, `horsligne-${lang}${tag}.json`), JSON.stringify({ res, errors }, null, 1)); };
+const newCtx = (extra = {}) => browser.newContext({ locale: lang === 'en' ? 'en-US' : 'fr-FR', viewport: input === 'kb' ? { width: 1100, height: 650 } : VIEWPORTS[input], hasTouch: input !== 'kb', isMobile: input !== 'kb', deviceScaleFactor: 1, ...extra });
 const hook = (p, tag) => {
   p.on('pageerror', (e) => errors.push(`${tag} pageerror: ` + e.message));
   p.on('console', (m) => { if (m.type() === 'error' && !OFFLINE.test(m.text() + (m.location().url || ''))) errors.push(`${tag} console: ` + m.text()); });
   return p;
 };
-const shot = (p, n) => p.screenshot({ path: join(OUT, `horsligne-${lang}-${n}.png`) });
+const shot = (p, n) => p.screenshot({ path: join(OUT, `horsligne-${lang}${tag}-${n}.png`) });
 const fonts = (p) => p.route(/fonts\.(googleapis|gstatic)\.com|supabase\.co/, (r) => r.abort());
 
 try {
@@ -110,7 +111,7 @@ try {
   console.log('INTERROMPU :', e.stack || e.message);
   note('INTERROMPU', false, String(e.message).slice(0, 300));
 } finally {
-  writeFileSync(join(OUT, `horsligne-${lang}.json`), JSON.stringify({ res, errors }, null, 1));
+  writeFileSync(join(OUT, `horsligne-${lang}${tag}.json`), JSON.stringify({ res, errors }, null, 1));
   console.log('erreurs de la page :', errors.length, errors.slice(0, 5).join(' | '));
   await browser.close(); server.kill();
 }
