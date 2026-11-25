@@ -24,12 +24,12 @@ export const ROUTE_MIN = 6;       // au moins 6 testeurs ont essayé (arrivée o
 // Six circuits de la carrière, de ◆ à ◆◆◆◆◆, qui couvrent les cinq profils ; deux d'entre eux servent aussi de circuit « à gravité » et « à plaques ».
 // tools/test-essais.mjs vérifie ces rôles sur le code des circuits (si un circuit change, le test dit lequel remplacer).
 export const PARCOURS = [
-  { id: 'eclats', role: 'Premières minutes : le tout premier circuit de la carrière.' },
-  { id: 'tremplins', role: 'Circuit à plaques : plateformes carrées (plaques 2×2 et 3×3) à viser en vol et à quitter en vitesse.' },
-  { id: 'verglas', role: 'Dérapage sur la glace, virages serrés : le ressenti de la glisse.' },
-  { id: 'racines', role: 'Circuit à gravité : départ au plafond, la route suit la gravité retournée (tube, loopings).' },
-  { id: 'temple', role: 'Technique ◆4 : freinages, chicanes, tubes.' },
-  { id: 'archipel', role: 'Vitesse ◆5 : le plus dur du parcours (chapitre 3 : s’ouvre avec 4 médailles au chapitre 2).' },
+  { id: 'eclats', role: 'Premières minutes : le tout premier circuit de la carrière (sprint : boosters, chicanes rapides, premier wall-ride).' },
+  { id: 'tremplins', role: 'Circuit à plaques : cinq sauts reçus sur des plaques, départ en chute libre, rampe à 38°.' },
+  { id: 'verglas', role: 'Glace et virages serrés : épingles, glace avant les épingles, deux routes étroites : le ressenti de la glisse.' },
+  { id: 'racines', role: 'Circuit à gravité : départ au plafond, slalom plafond-murs, loopings et tube (la route suit la gravité retournée).' },
+  { id: 'temple', role: 'Technique ◆4 : départ en tunnel avec deux virages serrés, tube, lacets en spirale, chicanes serrées.' },
+  { id: 'archipel', role: 'Vitesse ◆5, le plus dur du parcours : très grands virages relevés, wall-ride, croisement ; s’ouvre avec 4 médailles au chapitre 2.' },
 ];
 export const MULTIJOUEUR = 'Menu principal › Multijoueur, deux personnes sur deux appareils : l’une choisit « Créer une salle » (mode « Course »), l’autre « Rejoindre » avec le code à 6 caractères. ' +
   'Courir Premiers Éclats ensemble (départ commun), puis la revanche ; ensuite un « Championnat » de deux circuits. Chacun note si le départ commun, les autres voitures et les éventuelles saccades se sentent.';
@@ -122,3 +122,34 @@ export function parProfil(stats, prof, fit = null) {
   }
   return out;
 }
+
+// ---- Les questions de ressenti qui NE sont PAS dans le formulaire du jeu ---------------------------------------------------------------------------
+// Le formulaire « Donner mon avis » (js/feedback.js : SCALES, CHOICES) couvre : plaisir, dérapage, murs, contrôle en l'air, difficulté, caméra, et le profil du testeur.
+// Tout le reste du ressenti de conduite se pose ici, à voix haute par l'observateur ou sur la fiche : même échelle que le formulaire (de −2 à +2 : 0 = juste ; ou de 1 à 5).
+// Aucune n'est mesurée par la télémétrie : ce sont des réponses de testeurs, rapportées comme telles dans la décision écrite.
+export const QUESTIONS_RESSENTI = [
+  { key: 'accel', label: 'Accélération et vitesse de pointe', type: 'equilibre', ends: ['Trop molles', 'Trop violentes'] },
+  { key: 'frein', label: 'Freinage', type: 'equilibre', ends: ['Trop faible', 'Trop brutal'] },
+  { key: 'volant', label: 'Précision du volant (braquage, rattrapage d’une glisse)', type: 'equilibre', ends: ['Trop mou ou flou', 'Trop nerveux'] },
+  { key: 'vitesse', label: 'Tenue de route à grande vitesse', type: 'equilibre', ends: ['On la perd tout de suite', 'Trop stable'] },
+  { key: 'commandes', label: 'Mes commandes (clavier, manette ou écran tactile) me donnent la précision dont j’ai besoin', type: 'note', ends: ['Pas du tout', 'Tout à fait'] },
+  { key: 'comprendre', label: 'Quand je rate un passage, je comprends pourquoi', type: 'note', ends: ['Jamais', 'Toujours'] },
+  { key: 'checkpoint', label: 'Repartir du dernier checkpoint (touche R) ne me piège jamais', type: 'note', ends: ['Souvent piégé', 'Jamais'] },
+  { key: 'gravite', label: 'Gravité retournée (circuit Racines) : je sais où est le haut et où je vais', type: 'note', ends: ['Perdu', 'À l’aise'] },
+  { key: 'plaques', label: 'Plaques (circuit Tremplins) : je vois où atterrir et ce que la plaque me demande', type: 'note', ends: ['Illisible', 'Clair'] },
+  { key: 'multi', label: 'Multijoueur : le départ commun, les autres voitures et la fluidité', type: 'note', ends: ['Gênant', 'Très bien'] },
+  { key: 'medailles', label: 'Les médailles : le bronze est à ma portée, l’argent demande de s’appliquer, l’or est un vrai défi', type: 'equilibre', ends: ['Trop dures', 'Trop faciles'] },
+];
+export const QUESTIONS_LIBRES = [
+  'Le moment où j’ai failli arrêter (circuit, endroit, pourquoi).',
+  'Le meilleur moment.',
+  'La première chose que je changerais.',
+];
+// Ce que l'observateur note sans rien dire pendant les premières minutes (de l'ouverture du jeu à la première arrivée).
+export const OBSERVATION_DEBUT = [
+  'Minutes écoulées entre l’ouverture du jeu et la première arrivée (chronomètre de l’observateur).',
+  'Hésitation ou erreur sur : choix du pseudo · fenêtre « Aider à équilibrer les circuits ? » · tutoriel · affichage des commandes · relance (R).',
+  'A-t-il compris sans aide : accélérer, freiner, tourner, glisser, repartir du checkpoint ?',
+  'Soupirs, rires, « c’est injuste », « je n’ai rien compris » (mot pour mot, sans nom).',
+  'Abandon : à quel circuit, à quel endroit, après combien d’essais.',
+];

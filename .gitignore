@@ -3,3 +3,4 @@ node_modules/
 *.log
 *-recon-*/
 tools/audit-rendu/sortie/
+essais-donnees/

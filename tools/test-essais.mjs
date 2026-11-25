@@ -8,7 +8,9 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test, finish } from './harness.mjs';
 import { parseCsv, bestTimes, fitPooled, fitRobust, proposePooled, humanFactors, enoughData, reach, summariseFeedback, toMarkdown, weightedQuantile, verifierCles, medailleDesordre, ESSAI_QUANTILES } from './essais.mjs';
-import { statsParTesteur, profils, couverture, parProfil, etiquettes, parcours, PARCOURS, QUOTAS, MIN_TESTEUR, ROUTE_MIN } from './essais-protocole.mjs';
+import { buildFiche } from './fiche-essai.mjs';
+import { statsParTesteur, profils, couverture, parProfil, etiquettes, parcours, PARCOURS, QUOTAS, MIN_TESTEUR, ROUTE_MIN, QUESTIONS_RESSENTI } from './essais-protocole.mjs';
+import { SCALES } from '../js/feedback.js';
 import { writeMedals } from './medals.mjs';
 import { BUILTIN_TRACKS, buildBuiltin } from '../js/tracks.js';
 import { hashString } from '../js/track.js';
@@ -300,6 +302,52 @@ test('--ecrire ne touche pas à js/tracks.js sans avis (profils inconnus) ni pro
   assert.equal(incomplet.status, 1); assert.match(incomplet.stdout, /protocole n'est pas rempli/);
   assert.match(readFileSync(join(dir, 'r.md'), 'utf8'), /Verdict : \*\*non/);
   assert.equal(readFileSync(new URL('../js/tracks.js', import.meta.url), 'utf8'), before, 'js/tracks.js intact');
+});
+
+
+// ---- Le document, la fiche générée et le code disent la même chose ---------------------------------------------------------------------------------------------
+const read = (f) => readFileSync(new URL('../' + f, import.meta.url), 'utf8');
+
+test('docs/FICHE-ESSAI.md et docs/temps-humains.json sont la sortie de tools/fiche-essai.mjs (sinon : node tools/fiche-essai.mjs), avec le parcours, les questions et les 72 circuits', () => {
+  const { fiche, temps, n } = buildFiche();
+  assert.equal(n, 72);
+  assert.equal(read('docs/FICHE-ESSAI.md'), fiche, 'FICHE-ESSAI.md n’est pas à jour : node tools/fiche-essai.mjs (ne pas la modifier à la main)');
+  assert.equal(read('docs/temps-humains.json'), temps, 'temps-humains.json n’est pas à jour : node tools/fiche-essai.mjs');
+  for (const p of parcours()) assert.ok(fiche.includes(`**${p.name}** (n° ${p.index + 1}`) && fiche.includes('· **parcours imposé**'), p.id);
+  for (const s of SCALES) assert.ok(fiche.includes(`| ${s.label} |`), 'question du formulaire : ' + s.label);
+  for (const q of QUESTIONS_RESSENTI) assert.ok(fiche.includes(`| ${q.label} |`), 'question de la fiche : ' + q.key);
+  assert.equal((fiche.match(/^#### \d+\. /gm) || []).length, 72);
+  assert.ok(!/[0-9a-f]{16}/.test(fiche.replace(/[0-9a-f]{16,}(?=\.mjs)/g, '')), 'aucun identifiant d’installation dans la fiche');
+  assert.match(fiche, new RegExp(`Physique : \\*\\*${PHYS_VER}\\*\\*`));
+});
+
+test('docs/ESSAIS.md : mêmes nombres que le code (testeurs, profils, courses, parcours), options de l’outil et requêtes qui existent, consentement et vie privée', () => {
+  const md = read('docs/ESSAIS.md'), sql6 = read('supabase/etape6-telemetrie.sql'), sql19 = read('supabase/etape19-avis.sql'), tool = read('tools/essais.mjs');
+  const row = (label, n) => assert.ok(new RegExp('\\| ' + label + '[^|]*\\| ' + n + ' \\|').test(md), `tableau des profils : « ${label} » doit valoir ${n}`);
+  row('Testeurs qui comptent', QUOTAS.testeurs); row('Joueurs qui jouent \\*\\*rarement\\*\\*', QUOTAS.experience.debutant); row('Joueurs qui jouent \\*\\*souvent\\*\\*', QUOTAS.experience.habitue);
+  row('Commandes : \\*\\*clavier\\*\\*', QUOTAS.controls.clavier); row('Commandes : \\*\\*écran tactile\\*\\*[^|]*', QUOTAS.controls.tactile); row('Commandes : \\*\\*manette\\*\\*', QUOTAS.controls.manette);
+  assert.ok(md.includes(`**fini ${MIN_TESTEUR.circuits} circuits différents**`) && md.includes(`**${MIN_TESTEUR.courses} courses au moins**`), 'minimum de circuits et de courses par testeur');
+  assert.ok(md.includes(`essayés par ${ROUTE_MIN} testeurs qui comptent au moins`), 'minimum de testeurs par circuit du parcours');
+  for (const p of parcours()) assert.ok(md.includes(`| ${p.name} (n° ${p.index + 1}, ◆${p.difficulty})`), 'parcours : ' + p.id);
+  assert.ok(md.includes('| 7 | Multijoueur |'));
+  // options citées → elles existent dans l'un des outils cités
+  const known = new Set(['essais', 'telemetry-report', 'medals', 'golden', 'contract'].flatMap((t) => [...read(`tools/${t}.mjs`).matchAll(/--[a-z][a-z-]*/g)].map((m) => m[0])));
+  assert.deepEqual([...new Set(md.match(/ --[a-z][a-z-]*/g).map((x) => x.trim()))].filter((o) => !known.has(o)), [], 'options citées par ESSAIS.md et inconnues des outils');
+  for (const o of ['--pseudos', '--verifier-cles', '--ecrire', '--forcer', '--depuis', '--pv', '--md', '--avis', '--temps']) assert.ok(md.includes(o) && tool.includes(`'${o}'`), 'option du protocole : ' + o);
+  // requêtes SQL : colonnes qui existent ; l'export des avis n'a PAS la colonne pseudo
+  const q = [...md.matchAll(/```sql\n([\s\S]*?)```/g)].map((m) => m[1]);
+  assert.equal(q.length, 1);
+  const [runs, avis] = q[0].split(';').map((x) => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const cols = (sql) => /^select (.*?) from/.exec(sql)[1].split(',').map((c) => c.trim());
+  for (const c of cols(runs)) assert.match(sql6, new RegExp(`\\b${c} `), 'run_stats : ' + c);
+  for (const c of cols(avis)) assert.match(sql19, new RegExp(`\\b${c} `), 'feedback : ' + c);
+  assert.ok(!cols(avis).includes('pseudo') && !/\*/.test(avis), 'l’export des avis ne prend pas le pseudo');
+  for (const c of ['install', 'track', 'outcome', 'time', 'progress', 'respawns', 'attempt', 'phys_ver', 'medal', 'created_at']) assert.ok(cols(runs).includes(c), 'le rapport de télémétrie lit « ' + c + ' »');
+  // la vie privée
+  for (const t of ['Consentement et vie privée', 'ignoré par git', 'essais-donnees/', 'T01, T02', 'Aucune donnée personnelle dans le dépôt', '12 mois', 'ne voit pas son identifiant', 'décoche', 'Paramètres › Jeu', 'phase séparée', 'PHYS_VER']) assert.ok(md.includes(t), 'ESSAIS.md ne dit pas : ' + t);
+  assert.match(read('.gitignore'), /^essais-donnees\/$/m, 'les exports bruts sont ignorés par git');
+  // aucun identifiant d'installation (16 caractères hexadécimaux) ni adresse électronique dans le protocole
+  assert.ok(!/\b[0-9a-f]{16}\b/.test(md) && !/[\w.-]+@[\w-]+\.\w+/.test(md), 'aucune donnée personnelle dans le protocole');
 });
 
 await finish('Les médailles se calent sur un petit groupe de testeurs, circuit par circuit, et leurs avis se résument en un rapport.');
