@@ -32,7 +32,7 @@ Une ligne par partie terminée ou abandonnée (après au moins 3 s de course), u
 ## Exploitation
 
 1. Exporter `run_stats` depuis le tableau de bord Supabase (la table n'est lisible qu'avec la clé de service) en `runs.json` ou `.csv`.
-2. `node tools/telemetry-report.mjs runs.json [--pv 26] [--md rapport.md]` : par circuit, nombre de joueurs, taux d'arrivée, essais avant la première arrivée, abandons (et où), temps réels (centiles
+2. `node tools/telemetry-report.mjs runs.json [--pv 26] [--md rapport.md]` : par circuit, nombre de joueurs, taux d'arrivée, essais avant la première arrivée, abandons (leur part et où), réapparitions par arrivée et par abandon, part des finisseurs qui atteignent chaque médaille écrite, temps réels (centiles
    des meilleurs temps, un par joueur) comparés aux médailles, alertes « trop dur », « trop facile », « Or hors de portée ». Les temps impossibles (plus de 40 % plus rapides que le pilote automatique)
    sont écartés : un client truqué ne règle pas les médailles.
 3. Pour recaler : `--ecrire-humains docs/temps-humains.json`, puis `node tools/medals.mjs --humain docs/temps-humains.json --ecrire` (cristal 3 %, or 12 %, argent 40 %, bronze 75 % des meilleurs

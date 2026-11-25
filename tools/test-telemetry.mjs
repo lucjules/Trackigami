@@ -173,6 +173,25 @@ test('rapport Markdown et lecture CSV', () => {
   assert.equal(analyse(rows, { defs: [], golden: {} }).tracks[0].finishers, 1);
 });
 
+test('essais humains : abandons, réapparitions par arrivée et par abandon, part des finisseurs qui atteignent chaque médaille écrite (temps impossibles exclus)', () => {
+  const rows = [];
+  for (let i = 0; i < 10; i++) {
+    const install = i.toString(16).padStart(16, '0');
+    rows.push({ install, track: 'eclats', outcome: 'finish', time: 21 + i, respawns: i % 3, attempt: 1, phys_ver: 39 });       // 21 … 30 s ; réapparitions 0,1,2,0,1,2,0,1,2,0
+    if (i < 3) rows.push({ install, track: 'eclats', outcome: 'quit', time: 9, progress: 0.3, respawns: 2, attempt: 2, phys_ver: 39 });
+  }
+  rows.push({ install: 'f'.repeat(16), track: 'eclats', outcome: 'finish', time: 3, respawns: 40, attempt: 1, phys_ver: 39 });      // impossible : ni arrivée ni réapparitions comptées
+  const t = analyse(rows, { defs: [{ id: 'eclats', medals: { cristal: 21, or: 22, argent: 25, bronze: 28 } }], golden: { eclats: 20 } }).tracks[0];
+  assert.equal(t.finishRuns, 10); assert.equal(t.quitRuns, 3); assert.equal(t.runs, 13);
+  assert.ok(Math.abs(t.quitShare - 3 / 13) < 1e-9);
+  assert.equal(t.respawnsPerFinish, 0.9); assert.equal(t.respawnsPerQuit, 2);
+  assert.ok(Math.abs(t.respawnRuns - 9 / 13) < 1e-9, 'parties avec au moins une réapparition : 6 arrivées sur 10 et 3 abandons');
+  assert.deepEqual(t.reached, { bronze: 0.8, argent: 0.5, or: 0.2, cristal: 0.1 });
+  const md = toMarkdown({ version: 39, tracks: [t] });
+  for (const h of ['Abandons (part des parties)', 'Réapparitions par arrivée / par abandon', 'B / A / O / C atteints']) assert.ok(md.includes(h), h);
+  assert.match(md, /\| 3 \(23 %\) \| 0\.9 \/ 2\.0 \| 80 % \/ 50 % \/ 20 % \/ 10 % \|/);
+  assert.equal(analyse(rows, { defs: [], golden: {} }).tracks[0].reached, null, 'sans médailles écrites : pas de part atteinte');
+});
 
 console.log('Table des essais bornée (TECH-080 e)');
 test('une entrée par circuit de la communauté ne fait plus grossir la table des essais sans fin : au plus MAX_TRACKED, les plus récemment joués', () => {

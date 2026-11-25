@@ -1,7 +1,91 @@
-# Fiche d'essai — les 72 circuits
+# Fiche d'essai — protocole et 72 circuits
 
-À remplir en jouant, **un circuit après l'autre, dans l'ordre de la carrière** (un chapitre s'ouvre avec 4 médailles dans le précédent). Pour essayer un circuit précis sans progresser : ouvrir la console du navigateur (F12) et taper `copytrack.playBuiltin(N)`, où N = numéro du circuit − 1.
-Pour chaque circuit, coche ce qui est vrai et note le meilleur temps. Le temps du pilote automatique sert de repère : **Or = son temps**.
+_Ce fichier est généré (`node tools/fiche-essai.mjs`) : ne pas le modifier à la main. Le protocole complet, le consentement et le calendrier sont dans [ESSAIS.md](ESSAIS.md)._
+
+Physique : **39**. Les médailles sont calées sur le pilote automatique (**Or = son temps**), pas encore sur des testeurs : c’est ce que les essais vérifient.
+
+## 1. Le testeur (une fiche par testeur et par appareil)
+
+**Aucun nom, aucune adresse, aucun pseudo sur cette fiche.** Le testeur est désigné par un code que l'organisateur choisit (A, B, C…) ; la fiche reste hors du dépôt.
+
+- Code du testeur : ______ · Date : ______ · Observateur présent : oui / non
+- Expérience : [ ] Je joue rarement aux jeux de course  ·  [ ] Je joue souvent aux jeux de course
+- Commandes : [ ] Clavier  ·  [ ] Manette  ·  [ ] Écran tactile
+- Appareil : [ ] Ordinateur  ·  [ ] Téléphone  ·  [ ] Tablette
+- Navigateur : [ ] Chrome ou Edge  ·  [ ] Firefox  ·  [ ] Safari  ·  [ ] autre : ______
+- Consentement lu et compris (voir ESSAIS.md, « Consentement et vie privée ») : [ ] a accepté les statistiques anonymes  ·  [ ] les a refusées (ses temps ne seront pas dans le rapport ; son avis oui s'il l'envoie)  ·  [ ] peut tout retirer à tout moment
+
+## 2. Parcours imposé
+
+Ordre à suivre. Il faut avoir **fini 12 circuits différents** (les deux premiers chapitres) et couru **au moins 30 fois** en tout ; le rapport vérifie que chaque circuit du parcours a été essayé par au moins 6 testeurs. Un testeur qui ne finit pas un circuit difficile n'a pas « échoué » : l'abandon est une mesure.
+
+| Étape | Circuit | Pourquoi celui-là | À noter |
+| --- | --- | --- | --- |
+| 0 | Premières minutes | Ouverture du jeu jusqu'à la première arrivée, sans aide, **l'observateur ne parle pas** | voir « Premières minutes » ci-dessous |
+| 1 | **Premiers Éclats** (n° 1, chapitre 1, ◆◇◇◇◇, Sprint) | Premières minutes : le tout premier circuit de la carrière (sprint : boosters, chicanes rapides, premier wall-ride). | essais avant la première arrivée ; réapparitions ; meilleur temps ______ s ; médaille ______ |
+| 2 | **Tremplins du Crépuscule** (n° 3, chapitre 1, ◆◆◇◇◇, Acrobatique) | Circuit à plaques : cinq sauts reçus sur des plaques, départ en chute libre, rampe à 38°. | essais avant la première arrivée ; réapparitions ; meilleur temps ______ s ; médaille ______ |
+| 3 | **Lac Gelé** (n° 5, chapitre 1, ◆◆◆◇◇, Technique) | Glace et virages serrés : épingles, glace avant les épingles, deux routes étroites : le ressenti de la glisse. | essais avant la première arrivée ; réapparitions ; meilleur temps ______ s ; médaille ______ |
+| 4 | **Racines Boueuses** (n° 11, chapitre 2, ◆◆◆◇◇, Rollercoaster) | Circuit à gravité : départ au plafond, slalom plafond-murs, loopings et tube (la route suit la gravité retournée). | essais avant la première arrivée ; réapparitions ; meilleur temps ______ s ; médaille ______ |
+| 5 | **Temple** (n° 12, chapitre 2, ◆◆◆◆◇, Technique) | Technique ◆4 : départ en tunnel avec deux virages serrés, tube, lacets en spirale, chicanes serrées. | essais avant la première arrivée ; réapparitions ; meilleur temps ______ s ; médaille ______ |
+| 6 | **Grand Archipel** (n° 18, chapitre 3, ◆◆◆◆◆, Speedway) | Vitesse ◆5, le plus dur du parcours : très grands virages relevés, wall-ride, croisement ; s’ouvre avec 4 médailles au chapitre 2. | essais avant la première arrivée ; réapparitions ; meilleur temps ______ s ; médaille ______ |
+| 7 | Multijoueur | Menu principal › Multijoueur, deux personnes sur deux appareils : l’une choisit « Créer une salle » (mode « Course »), l’autre « Rejoindre » avec le code à 6 caractères. Courir Premiers Éclats ensemble (départ commun), puis la revanche ; ensuite un « Championnat » de deux circuits. Chacun note si le départ commun, les autres voitures et les éventuelles saccades se sentent. | départ commun, voitures des autres, saccades ; notes ______ |
+
+Pour jouer un circuit précis sans passer par la carrière, ouvrir la console du navigateur (F12) et taper `copytrack.playBuiltin(N)`, où N = numéro du circuit − 1 (ordinateur seulement).
+
+### Premières minutes (l'observateur note, sans rien dire)
+
+- [ ] Minutes écoulées entre l’ouverture du jeu et la première arrivée (chronomètre de l’observateur). ______
+- [ ] Hésitation ou erreur sur : choix du pseudo · fenêtre « Aider à équilibrer les circuits ? » · tutoriel · affichage des commandes · relance (R). ______
+- [ ] A-t-il compris sans aide : accélérer, freiner, tourner, glisser, repartir du checkpoint ? ______
+- [ ] Soupirs, rires, « c’est injuste », « je n’ai rien compris » (mot pour mot, sans nom). ______
+- [ ] Abandon : à quel circuit, à quel endroit, après combien d’essais. ______
+
+## 3. Questions de ressenti
+
+À poser **après le parcours** (ou après chaque étape si le testeur préfère), à voix haute : même échelle que le formulaire du jeu. Ce sont des réponses de testeurs, pas des mesures.
+
+### Dans le formulaire du jeu (Paramètres › Donner mon avis, ou proposé après 6 courses finies)
+
+Le testeur le remplit lui-même, dans le jeu : rien à recopier ici.
+
+| Question du formulaire | Échelle |
+| --- | --- |
+| Plaisir de jeu | 1 aucun … 5 énorme |
+| Dérapage | −2 trop dur à tenir · 0 juste · +2 trop facile |
+| Chocs contre les murs | −2 trop punitifs · 0 juste · +2 pas assez |
+| Contrôle en l’air | −2 trop faible · 0 juste · +2 trop fort |
+| Difficulté des circuits | −2 trop durs · 0 juste · +2 trop faciles |
+| Caméra | 1 gênante … 5 parfaite |
+
+### Sur la fiche seulement (non demandées par le formulaire)
+
+| Question | Échelle | Réponse |
+| --- | --- | --- |
+| Accélération et vitesse de pointe | −2 trop molles · 0 juste · +2 trop violentes | ______ |
+| Freinage | −2 trop faible · 0 juste · +2 trop brutal | ______ |
+| Précision du volant (braquage, rattrapage d’une glisse) | −2 trop mou ou flou · 0 juste · +2 trop nerveux | ______ |
+| Tenue de route à grande vitesse | −2 on la perd tout de suite · 0 juste · +2 trop stable | ______ |
+| Mes commandes (clavier, manette ou écran tactile) me donnent la précision dont j’ai besoin | 1 pas du tout … 5 tout à fait | ______ |
+| Quand je rate un passage, je comprends pourquoi | 1 jamais … 5 toujours | ______ |
+| Repartir du dernier checkpoint (touche R) ne me piège jamais | 1 souvent piégé … 5 jamais | ______ |
+| Gravité retournée (circuit Racines) : je sais où est le haut et où je vais | 1 perdu … 5 à l’aise | ______ |
+| Plaques (circuit Tremplins) : je vois où atterrir et ce que la plaque me demande | 1 illisible … 5 clair | ______ |
+| Multijoueur : le départ commun, les autres voitures et la fluidité | 1 gênant … 5 très bien | ______ |
+| Les médailles : le bronze est à ma portée, l’argent demande de s’appliquer, l’or est un vrai défi | −2 trop dures · 0 juste · +2 trop faciles | ______ |
+
+- Le moment où j’ai failli arrêter (circuit, endroit, pourquoi). ______
+- Le meilleur moment. ______
+- La première chose que je changerais. ______
+
+## 4. Cibles du protocole (rappel)
+
+- Testeurs qui comptent : au moins **8** ; débutants ≥ 3, habitués ≥ 3 ; clavier ≥ 3, écran tactile ≥ 2, manette ≥ 1.
+- Médailles visées par le recalage (Mode B) : bronze atteint par ~90 % des testeurs, argent ~50 %, or ~15 %, cristal rarement.
+
+## 5. Les 72 circuits
+
+À remplir en jouant, **un circuit après l'autre, dans l'ordre de la carrière** (un chapitre s'ouvre avec 4 médailles dans le précédent), par un testeur qui veut tout passer en revue : facultatif, les temps arrivent tout seuls par les statistiques.
+Pour chaque circuit, coche ce qui est vrai et note le meilleur temps. Le temps du pilote automatique sert de repère.
 
 | Case | Question |
 | --- | --- |
@@ -16,7 +100,7 @@ Pour chaque circuit, coche ce qui est vrai et note le meilleur temps. Le temps d
 
 _Sprint, speedway, tremplins, épingles et grand huit : tous les profils de circuits, avec un wall-ride dès le premier._
 
-### 1. Premiers Éclats — Sprint, ◆◇◇◇◇
+### 1. Premiers Éclats — Sprint, ◆◇◇◇◇ · **parcours imposé**
 
 - Départ : sous une arche, deux boosters → slalom de chicanes rapides. Au programme : premier wall-ride, bifurcation (petit saut ou voie de côté), croisement traversé deux fois (trois virages géants, un relevé), route large sous un portique, chicanes longues.
 - Pilote automatique : **48.1 s** · médailles : cristal 45.8 · or 48.2 · argent 55.4 · bronze 65
@@ -32,7 +116,7 @@ _Sprint, speedway, tremplins, épingles et grand huit : tous les profils de circ
 - [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
 - Mon meilleur temps : ______ s · Notes : ____________________________________________
 
-### 3. Tremplins du Crépuscule — Acrobatique, ◆◆◇◇◇
+### 3. Tremplins du Crépuscule — Acrobatique, ◆◆◇◇◇ · **parcours imposé**
 
 - Départ : chute libre (la voiture quitte la plateforme de départ, à l’arrêt). Au programme : cinq sauts reçus sur des plaques, chicanes, wall-ride, rampe à 38°, bifurcation : sauter la terrasse ou descendre la pente, dernier saut dans un anneau.
 - Pilote automatique : **58.9 s** · médailles : cristal 55.9 · or 58.9 · argent 67.7 · bronze 79.5
@@ -48,7 +132,7 @@ _Sprint, speedway, tremplins, épingles et grand huit : tous les profils de circ
 - [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
 - Mon meilleur temps : ______ s · Notes : ____________________________________________
 
-### 5. Lac Gelé — Technique, ◆◆◆◇◇
+### 5. Lac Gelé — Technique, ◆◆◆◇◇ · **parcours imposé**
 
 - Départ : sur une route étroite, épingle sur la glace. Au programme : virages serrés, deux nœuds en 8 par des croisements, chicanes en S, wall-ride, seconde route étroite, glace avant les épingles, bifurcation : ligne verglacée ou détour qui accroche.
 - Pilote automatique : **83.4 s** · médailles : cristal 79.2 · or 83.4 · argent 95.9 · bronze 112.6
@@ -100,7 +184,7 @@ _Rampe de lancement, tube, rebonds de champignons et slalom en moto : la jungle 
 - [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
 - Mon meilleur temps : ______ s · Notes : ____________________________________________
 
-### 11. Racines Boueuses — Rollercoaster, ◆◆◆◇◇
+### 11. Racines Boueuses — Rollercoaster, ◆◆◆◇◇ · **parcours imposé**
 
 - Départ : au plafond, dans les racines, trois boosters puis le mur gauche. Au programme : slalom plafond-murs, plongeon à 38°, looping modulaire, route large sous un portique, tube qui tourne, double looping.
 - Pilote automatique : **52.5 s** · médailles : cristal 49.8 · or 52.4 · argent 60.2 · bronze 70.7
@@ -108,7 +192,7 @@ _Rampe de lancement, tube, rebonds de champignons et slalom en moto : la jungle 
 - [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
 - Mon meilleur temps : ______ s · Notes : ____________________________________________
 
-### 12. Temple — Technique, ◆◆◆◆◇
+### 12. Temple — Technique, ◆◆◆◆◇ · **parcours imposé**
 
 - Départ : dans un tunnel du temple, deux virages serrés. Au programme : allée de colonnes, tube, lacets en spirale, chicane de tunnels, route étroite, chicanes serrées, saut ou détour en T, arche, croisement traversé deux fois.
 - Pilote automatique : **69.7 s** · médailles : cristal 66.2 · or 69.7 · argent 80.2 · bronze 94.1
@@ -160,7 +244,7 @@ _Descente en moto, slalom en bateau et décollage en deltaplane autour du phare.
 - [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
 - Mon meilleur temps : ______ s · Notes : ____________________________________________
 
-### 18. Grand Archipel — Speedway, ◆◆◆◆◆
+### 18. Grand Archipel — Speedway, ◆◆◆◆◆ · **parcours imposé**
 
 - Départ : longue pente douce vers la mer. Au programme : très grands virages relevés, route large sous un portique, chicane rapide, wall-ride, croisement traversé deux fois (boucle relevée puis en pente), grand S.
 - Pilote automatique : **60.0 s** · médailles : cristal 56.9 · or 59.9 · argent 68.9 · bronze 80.9
