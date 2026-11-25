@@ -1,6 +1,7 @@
 // Raccords d'orientation (0.9.3) : une route sur un mur ne se raccorde pas directement au sol, il faut une transition.
 //
-// Module pur (aucun rendu), utilisé par l'éditeur pour afficher un avertissement et par les tests. Pour chaque pièce posée sur un mur ou
+// Module pur (aucun rendu), importé aujourd'hui SEULEMENT par des tests et outils (tools/test-continuite.mjs, tools/test-pentes-murs.mjs, tools/contract.mjs) : l'éditeur
+// n'en dépend pas, ses avertissements de raccord viennent de js/continuity.js et js/connect.js. Pour chaque pièce posée sur un mur ou
 // de type « transition », on cherche les pièces qui touchent chacune de ses extrémités (même point, sens opposés) et on compare le roulis
 // de la route de chaque côté : s'il diffère (mur gauche contre sol, mur droit contre mur gauche...), la voiture ne passe pas.
 import { PIECES, oriAngle, rollOfO, ORIENTS } from './pieces.js';
