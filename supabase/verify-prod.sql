@@ -304,6 +304,66 @@ checks as (
               else (xpath('/row/c/text()', query_to_xml('select (select count(*) from public.accounts a where not exists (select 1 from public.recovery_codes c where c.user_id = a.user_id and c.code_hash is not null)) || '' sur '' || (select count(*) from public.accounts) as c', false, true, '')))[1]::text end,
          'info'
   union all
+  -- ---- 4 octies. étape 22 (outils de modération, COMPLETE-004) : tables fermées, fonctions réservées aux sessions (jamais anon) et qui refusent un non-modérateur, déclencheurs de suspension, journal ------
+  select 150, 'étape 22 : moderation_log et account_suspensions présentes, RLS activée, aucun droit pour anon ni authenticated', 'fermées',
+         case when to_regclass('public.moderation_log') is null or to_regclass('public.account_suspensions') is null then 'absentes'
+              when exists (select 1 from pg_class c where c.oid in (to_regclass('public.moderation_log'), to_regclass('public.account_suspensions'))
+                           and (not c.relrowsecurity or has_table_privilege('anon', c.oid, 'select,insert,update,delete') or has_table_privilege('authenticated', c.oid, 'select,insert,update,delete'))) then 'OUVERTES'
+              else 'fermées' end,
+         case when to_regclass('public.moderation_log') is null or to_regclass('public.account_suspensions') is null then 'MANQUE'
+              when exists (select 1 from pg_class c where c.oid in (to_regclass('public.moderation_log'), to_regclass('public.account_suspensions'))
+                           and (not c.relrowsecurity or has_table_privilege('anon', c.oid, 'select,insert,update,delete') or has_table_privilege('authenticated', c.oid, 'select,insert,update,delete'))) then 'ÉCART'
+              else 'ok' end
+  union all
+  select 151, 'étape 22 : les 11 fonctions mod_* présentes, exécutables par authenticated et JAMAIS par anon ; les 3 fonctions internes moderation_* fermées à l''API', 'conformes',
+         case when exists (select 1 from unnest(array['public.mod_status()', 'public.mod_queue(text,text,integer,integer)', 'public.mod_detail(text,text)', 'public.mod_reports(text,text)',
+                'public.mod_set_track_hidden(uuid,boolean,text)', 'public.mod_set_comment_hidden(bigint,boolean,text)', 'public.mod_hide(text,text,boolean)', 'public.mod_suspend(uuid,text,timestamp with time zone)',
+                'public.mod_unsuspend(uuid,text)', 'public.mod_suspensions(boolean,integer,integer)', 'public.mod_log(text,text,integer,integer)', 'public.moderation_active_suspension(uuid)',
+                'public.moderation_apply_hide(text,text,boolean,text,boolean)', 'public.moderation_suspension_guard()']) g(sig) where to_regprocedure(g.sig) is null) then 'fonctions absentes'
+              when exists (select 1 from unnest(array['public.mod_status()', 'public.mod_queue(text,text,integer,integer)', 'public.mod_detail(text,text)', 'public.mod_reports(text,text)',
+                'public.mod_set_track_hidden(uuid,boolean,text)', 'public.mod_set_comment_hidden(bigint,boolean,text)', 'public.mod_hide(text,text,boolean)', 'public.mod_suspend(uuid,text,timestamp with time zone)',
+                'public.mod_unsuspend(uuid,text)', 'public.mod_suspensions(boolean,integer,integer)', 'public.mod_log(text,text,integer,integer)']) g(sig)
+                where has_function_privilege('anon', g.sig, 'execute') or not has_function_privilege('authenticated', g.sig, 'execute'))
+                or exists (select 1 from unnest(array['public.moderation_active_suspension(uuid)', 'public.moderation_apply_hide(text,text,boolean,text,boolean)', 'public.moderation_suspension_guard()']) g(sig)
+                where has_function_privilege('anon', g.sig, 'execute') or has_function_privilege('authenticated', g.sig, 'execute')) then 'droits non conformes'
+              else 'conformes' end,
+         case when exists (select 1 from unnest(array['public.mod_status()', 'public.mod_queue(text,text,integer,integer)', 'public.mod_detail(text,text)', 'public.mod_reports(text,text)',
+                'public.mod_set_track_hidden(uuid,boolean,text)', 'public.mod_set_comment_hidden(bigint,boolean,text)', 'public.mod_hide(text,text,boolean)', 'public.mod_suspend(uuid,text,timestamp with time zone)',
+                'public.mod_unsuspend(uuid,text)', 'public.mod_suspensions(boolean,integer,integer)', 'public.mod_log(text,text,integer,integer)', 'public.moderation_active_suspension(uuid)',
+                'public.moderation_apply_hide(text,text,boolean,text,boolean)', 'public.moderation_suspension_guard()']) g(sig) where to_regprocedure(g.sig) is null) then 'MANQUE'
+              when exists (select 1 from unnest(array['public.mod_status()', 'public.mod_queue(text,text,integer,integer)', 'public.mod_detail(text,text)', 'public.mod_reports(text,text)',
+                'public.mod_set_track_hidden(uuid,boolean,text)', 'public.mod_set_comment_hidden(bigint,boolean,text)', 'public.mod_hide(text,text,boolean)', 'public.mod_suspend(uuid,text,timestamp with time zone)',
+                'public.mod_unsuspend(uuid,text)', 'public.mod_suspensions(boolean,integer,integer)', 'public.mod_log(text,text,integer,integer)']) g(sig)
+                where has_function_privilege('anon', g.sig, 'execute') or not has_function_privilege('authenticated', g.sig, 'execute'))
+                or exists (select 1 from unnest(array['public.moderation_active_suspension(uuid)', 'public.moderation_apply_hide(text,text,boolean,text,boolean)', 'public.moderation_suspension_guard()']) g(sig)
+                where has_function_privilege('anon', g.sig, 'execute') or has_function_privilege('authenticated', g.sig, 'execute')) then 'ÉCART'
+              else 'ok' end
+  union all
+  select 152, 'étape 22 : chaque fonction mod_* (hors mod_status) et moderation_apply_hide commence par le contrôle « if not is_moderator(… », en SECURITY DEFINER avec un search_path fixé', 'contrôle en tête',
+         case when not exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'mod\_%') then 'fonctions absentes'
+              when exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and (p.proname like 'mod\_%' or p.proname = 'moderation_apply_hide') and p.proname <> 'mod_status'
+                           and (p.prosrc !~ '^\s*(#variable_conflict use_column\s+)?(declare[^\n]*\n\s*)?begin\s+if not is_moderator\(' or not p.prosecdef or array_to_string(p.proconfig, ',') not like 'search_path=%')) then 'contrôle absent ou search_path libre'
+              else 'contrôle en tête' end,
+         case when not exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'mod\_%') then 'MANQUE'
+              when exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and (p.proname like 'mod\_%' or p.proname = 'moderation_apply_hide') and p.proname <> 'mod_status'
+                           and (p.prosrc !~ '^\s*(#variable_conflict use_column\s+)?(declare[^\n]*\n\s*)?begin\s+if not is_moderator\(' or not p.prosecdef or array_to_string(p.proconfig, ',') not like 'search_path=%')) then 'ÉCART'
+              else 'ok' end
+  union all
+  select 153, 'étape 22 : la garde de suspension (publier, commenter) est branchée sur circuits, commentaires, modes et playlists ; mod_hide passe par le journal', 'branchée',
+         case when to_regprocedure('public.mod_hide(text,text,boolean)') is null then 'mod_hide absente'
+              when (select count(distinct tgrelid) from pg_trigger where tgname in ('moderation_suspension_guard', 'moderation_suspension_guard_upd') and not tgisinternal and tgrelid in (to_regclass('public.tracks'), to_regclass('public.track_comments'), to_regclass('public.community_modes'), to_regclass('public.playlists'))) < 4 then 'garde absente d''une table'
+              when (select prosrc from pg_proc where oid = to_regprocedure('public.mod_hide(text,text,boolean)')) not like '%moderation_apply_hide%' then 'mod_hide d''avant l''étape 22 (sans journal)'
+              else 'branchée' end,
+         case when to_regprocedure('public.mod_hide(text,text,boolean)') is null then 'MANQUE'
+              when (select count(distinct tgrelid) from pg_trigger where tgname in ('moderation_suspension_guard', 'moderation_suspension_guard_upd') and not tgisinternal and tgrelid in (to_regclass('public.tracks'), to_regclass('public.track_comments'), to_regclass('public.community_modes'), to_regclass('public.playlists'))) < 4 then 'MANQUE'
+              when (select prosrc from pg_proc where oid = to_regprocedure('public.mod_hide(text,text,boolean)')) not like '%moderation_apply_hide%' then 'ÉCART'
+              else 'ok' end
+  union all
+  select 154, 'étape 22 : modérateurs enregistrés (table moderators, à remplir à la main : supabase/COMPTES.md) · suspensions en cours · décisions au journal', 'info',
+         case when to_regclass('public.moderation_log') is null or to_regclass('public.account_suspensions') is null then 'tables absentes'
+              else (xpath('/row/c/text()', query_to_xml('select (select count(*) from public.moderators) || '' modérateur(s) · '' || (select count(*) from public.account_suspensions where lifted_at is null and (until is null or until > now())) || '' suspension(s) en cours · '' || (select count(*) from public.moderation_log) || '' décision(s) au journal'' as c', false, true, '')))[1]::text end,
+         'info'
+  union all
   -- ---- 5. renseignements ---------------------------------------------------------------------------------------------------------------------
   select 70, 'circuits publiés dont le temps auteur n''est PAS vérifié (publiés avant l''étape 15)', 'info',
          case when exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'tracks' and column_name = 'author_verified')

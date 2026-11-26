@@ -41,6 +41,8 @@ if [ -z "${AVANT:-}" ]; then $P -d $DB -f supabase/etape18-maintenance.sql >/dev
 if [ -z "${AVANT:-}" ]; then $P -d $DB -f supabase/etape20-droits-et-regles.sql >/dev/null; $P -d $DB -f supabase/etape20-droits-et-regles.sql >/dev/null; fi          # (0.16.12) relançable
 if [ -z "${AVANT:-}" ]; then $P -d $DB -f supabase/etape21-recuperation.sql >/dev/null; $P -d $DB -f supabase/etape21-recuperation.sql >/dev/null; fi          # (0.16.13) relançable : le code de secours (COMPLETE-003) ; ses attaques sont dans test-etape21-sql.sh, ses droits sont revérifiés ici
 
+if [ -z "${AVANT:-}" ]; then $P -d $DB -f supabase/etape22-moderation.sql >/dev/null; $P -d $DB -f supabase/etape22-moderation.sql >/dev/null; fi          # (0.22.0) relançable : la modération (COMPLETE-004) ; ses attaques sont dans test-etape22-sql.sh, ses droits sont revérifiés ici
+
 # verify-prod.sql (lecture seule) sur la base COMPLÈTE (étapes 1 à 17), avant tout objet d'essai : aucune ligne MANQUE ni ÉCART (ses lignes « étape 17 », « étape 16 » et « RLS partout »).
 VP="$($P -d $DB -At -F'|' -f supabase/verify-prod.sql)"
 if [ -z "${AVANT:-}" ]; then
@@ -50,6 +52,7 @@ if [ -z "${AVANT:-}" ]; then
   [ "$(echo "$VP" | grep -c 'étape 19')" -ge 1 ] || { echo "  FAIL verify-prod.sql ne contient pas la ligne de l'étape 19"; VPFAIL=1; }
   [ "$(echo "$VP" | grep -c 'étape 20')" -ge 3 ] || { echo "  FAIL verify-prod.sql ne contient pas les trois lignes de l'étape 20"; VPFAIL=1; }
   [ "$(echo "$VP" | grep -c 'étape 21')" -ge 4 ] || { echo "  FAIL verify-prod.sql ne contient pas les lignes de l'étape 21"; VPFAIL=1; }
+  [ "$(echo "$VP" | grep -c 'étape 22')" -ge 5 ] || { echo "  FAIL verify-prod.sql ne contient pas les lignes de l'étape 22"; VPFAIL=1; }
   [ "$(echo "$VP" | grep -c 'lisibilité (TECH-021)')" -ge 6 ] || { echo "  FAIL verify-prod.sql ne contient pas les six lignes de lisibilité des colonnes (TECH-021)"; VPFAIL=1; }
 else VPFAIL=0; fi
 
