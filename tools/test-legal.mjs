@@ -141,6 +141,25 @@ test('règles de la communauté : respect, vie privée, triche, créations, spam
   for (const w of ['Respect', 'Vie privée', 'triche', 'un autre jeu', 'spam', '15 ans', 'Trois signalements']) assert.ok(r.includes(w), w);
 });
 
+test('modération (COMPLETE-004) : chaque engagement de la page des règles correspond à une fonction qui existe, et le jeu ne promet pas ce qui n\'est pas fait', () => {
+  const sql = read('supabase/etape22-moderation.sql');
+  const pages = { fr: legalPage('regles', 'fr').html, en: legalPage('regles', 'en').html };
+  // masquer / rétablir un circuit ou un commentaire, avec un motif ; suspendre un compte (publier et commenter seulement) ; journal ; pas de barème ni de délai garanti ; pas de notification
+  const promises = { fr: ['masquer ou rétablir un circuit ou un commentaire', 'un motif', 'suspendre un compte', 'ne peut plus publier ni commenter', 'temps, ses classements et sa progression restent', 'journal', 'pas de barème', 'sans délai garanti', 'ne te prévient pas'],
+    en: ['hide or restore a track or a comment', 'a reason', 'suspend an account', 'can no longer publish or comment', 'times, rankings and progress remain', 'log', 'no scale of penalties', 'no guaranteed delay', 'does not notify you'] };
+  for (const l of ['fr', 'en']) for (const w of promises[l]) assert.ok(pages[l].includes(w), l + ' : ' + w);
+  for (const fn of ['mod_set_track_hidden', 'mod_set_comment_hidden', 'mod_suspend', 'mod_unsuspend', 'mod_log', 'mod_queue', 'mod_reports']) assert.match(sql, new RegExp('function public\\.' + fn + '\\('), fn);
+  assert.match(sql, /moderation_suspension_guard/, 'la suspension est appliquée par un déclencheur');
+  // « seulement publier et commenter » : la garde ne touche ni les scores ni les amis ni les sauvegardes
+  const guarded = [...sql.matchAll(/(?:before (?:insert|update)[^;]*? on public\.(\w+))/g)].map((m) => m[1]);
+  assert.deepEqual([...new Set(guarded)].sort(), ['community_modes', 'playlists', 'track_comments', 'tracks']);
+  // promesses qu'on ne tient PAS : aucune mention d'une réponse sous X jours, d'un appel, d'une notification envoyée, d'un barème graduel
+  for (const l of ['fr', 'en']) assert.ok(!/(sous|within) \d+ ?(h|heures?|jours?|hours?|days?)|avertissement|warning|three strikes|bannissement automatique/i.test(pages[l]), l + ' : une promesse non tenue');
+  // la confidentialité dit ce que le serveur garde pour la modération, dans les deux langues
+  assert.ok(legalPage('confidentialite', 'fr').html.includes('journal') && legalPage('confidentialite', 'en').html.includes('log'));
+  assert.ok(legalPage('confidentialite', 'fr').html.includes('jamais qui les a faits') && legalPage('confidentialite', 'en').html.includes('never who made them'));
+});
+
 test('dans le jeu : liens du menu et des Paramètres, case d’âge à la création de compte, case des règles à la publication, rappel sous les commentaires', () => {
   const html = read('index.html');
   for (const id of ['credits', 'confidentialite', 'mentions']) assert.ok(html.includes(`data-action="legal-${id}"`), id);

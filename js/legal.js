@@ -6,7 +6,7 @@ import { GAME_NAME, VERSION } from './version.js';
 import { CONFIG } from './config.js';
 
 export const LEGAL_IDS = ['confidentialite', 'mentions', 'regles', 'credits'];
-export const LEGAL_UPDATED = '2026-11-24';      // (0.16.16 : multijoueur : adresses visibles des abonnés du canal, clé de reprise ; avant : 0.12.5, erreurs du jeu, conservation appliquée par la base)
+export const LEGAL_UPDATED = '2026-11-26';      // (0.22.0 : outils de modération, suspension de compte, journal des décisions ; avant : 0.16.16, multijoueur : adresses visibles des abonnés du canal, clé de reprise)
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const link = (href, text) => `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(text)}</a>`;
@@ -36,6 +36,7 @@ const PAGES = {
 <li><b>Compte</b> (seulement si tu en crées un) : ton pseudo, ton mot de passe (gardé sous forme de hachage bcrypt par le service d'authentification : personne ne peut le lire) et la date de création. <b>Aucune adresse e-mail</b> n'est demandée. Sert à retrouver ta progression sur un autre appareil (sauvegarde dans le cloud).</li>
 <li><b>Jeu en ligne</b> (invité ou compte) : une session à identifiant aléatoire ; tes temps (avec les commandes de la course, que le serveur rejoue pour vérifier le temps), les circuits que tu publies, tes commentaires, mentions « j'aime », signalements, abonnements, amis, duels et tournois, avec ton pseudo. Le pseudo, les temps, les circuits publiés et les commentaires sont <b>visibles par les autres joueurs</b>.</li>
 <li><b>Protection contre les abus</b> : des compteurs (identifiant de session et heure) limitent les envois ; ils sont effacés au bout d'une heure environ.</li>
+<li><b>Modération</b> : quand tu signales un circuit ou un commentaire, le serveur garde ton signalement (avec ton identifiant et la date) pour compter les signalements et masquer un contenu abusif ; l'écran des modérateurs montre le nombre et la date des signalements, jamais qui les a faits. Quand un modérateur masque ou rétablit un contenu, ou suspend ou réactive un compte, la décision est inscrite dans un <b>journal</b> : quelle décision, sur quel contenu ou quel compte, quel modérateur, quand, et le motif qu'il a écrit. Ce journal et les suspensions ne sont lisibles que des modérateurs (ils n'apparaissent pas dans « Exporter mes données » : pour en obtenir copie, écris au contact ci-dessus). Une suspension n'empêche que de publier et de commenter ; tes temps et ta progression ne changent pas.</li>
 <li><b>Statistiques anonymes</b> (seulement si tu as dit oui) : le temps de tes arrivées et abandons et ton nombre d'essais sur les circuits officiels, et les erreurs du jeu s'il en survient (message nettoyé, fichier et ligne du code, version, famille de navigateur), avec un identifiant aléatoire propre à l'appareil, jamais lié à ton pseudo ni à ton compte. Elles servent à régler la difficulté et les médailles, et à corriger les plantages. Tu peux retirer ton accord à tout moment (Paramètres › Jeu).</li>
 <li><b>Avis</b> (seulement si tu en envoies un, Paramètres › Donner mon avis) : tes réponses (appareil, commandes, expérience, notes, textes), l'identifiant aléatoire de l'appareil, la version du jeu ; ton pseudo seulement si tu coches « joindre mon pseudo ». Lus par l'éditeur pour régler le jeu.</li>
 <li><b>Multijoueur</b> : les joueurs d'une salle se connectent directement entre eux (WebRTC) : ils voient ton adresse IP, ton pseudo et l'apparence de ta voiture. Pour se trouver, les navigateurs échangent leurs offres de connexion et leurs candidats réseau, qui contiennent ton adresse IP publique (et celle d'un relais s'il sert), par un canal du service Supabase Realtime, <b>sans chiffrement propre au jeu</b> : ils y sont diffusés à <b>tous les abonnés</b> du canal. Or ce canal porte le code de la salle : quiconque le connaît peut s'y abonner <b>sans figurer parmi les joueurs</b>, donc sans que personne le voie, et le code d'un <b>salon public</b> est affiché dans la liste. Ne donne le code qu'à des personnes de confiance et évite les salons publics si cela te gêne : le jeu n'a pas de salle privée. Les serveurs de mise en relation (STUN de Google, et un relais si le réseau l'exige) voient aussi ton adresse IP le temps de la partie. Pour retrouver ta place après un rechargement de la page, une clé secrète propre à la salle reste dans la mémoire de l'onglet (20 secondes de validité, effacée à sa fermeture) ; elle ne quitte jamais ton navigateur, seule une preuve faite avec elle est envoyée aux autres joueurs.</li>
@@ -55,6 +56,7 @@ const PAGES = {
 <li>Données d'une session invitée : 12 mois au plus après sa dernière activité.</li>
 <li>Statistiques anonymes et avis : 12 mois au plus ; erreurs du jeu : 90 jours.</li>
 <li>Compteurs contre les abus : environ une heure.</li>
+<li>Signalements : tant que le contenu existe. Journal de modération : conservé sans limite de durée fixée ; quand le compte concerné est supprimé (Profil › Supprimer le compte), ses lignes n'y sont plus rattachées (la décision reste, sans ton identifiant).</li>
 </ul>
 <h3>Tes droits</h3>
 <p>Tu peux accéder à tes données, les corriger, les effacer, les récupérer (Profil › Sauvegardes › <b>Exporter mes données</b> : un fichier JSON), t'opposer à un traitement, le limiter et retirer ton consentement. Pour toute demande : ${contactHtml('fr', L)}. Tu peux aussi adresser une réclamation à la CNIL (${link('https://www.cnil.fr/fr/plaintes', 'cnil.fr')}).</p>
@@ -76,6 +78,7 @@ const PAGES = {
 <li><b>Account</b> (only if you create one): your username, your password (kept as a bcrypt hash by the authentication service: nobody can read it) and the creation date. <b>No email address</b> is requested. Used to find your progress on another device (cloud save).</li>
 <li><b>Online play</b> (guest or account): a session with a random identifier; your times (with the race inputs, which the server replays to check the time), the tracks you publish, your comments, likes, reports, follows, friends, duels and tournaments, with your username. Usernames, times, published tracks and comments are <b>visible to other players</b>.</li>
 <li><b>Abuse protection</b>: counters (session identifier and time) limit submissions; they are erased after about one hour.</li>
+<li><b>Moderation</b>: when you report a track or a comment, the server keeps your report (with your identifier and the date) to count reports and hide abusive content; the moderators' screen shows the number and date of reports, never who made them. When a moderator hides or restores content, or suspends or reactivates an account, the decision is written to a <b>log</b>: which decision, on which content or account, which moderator, when, and the reason they wrote. This log and the suspensions can only be read by moderators (they do not appear in “Export my data”: to get a copy, write to the contact above). A suspension only prevents publishing and commenting; your times and progress do not change.</li>
 <li><b>Anonymous statistics</b> (only if you said yes): your finish and retirement times and number of attempts on the official tracks, and the game's errors if any occur (cleaned message, code file and line, version, browser family), with a random identifier specific to the device, never linked to your username or account. They are used to tune difficulty and medals, and to fix crashes. You can withdraw your consent at any time (Settings › Game).</li>
 <li><b>Feedback</b> (only if you send it, Settings › Give feedback): your answers (device, controls, experience, ratings, texts), the device's random identifier, the game version; your username only if you tick “attach my username”. Read by the publisher to tune the game.</li>
 <li><b>Multiplayer</b>: players in a room connect directly to each other (WebRTC): they see your IP address, your username and your car's look. To find each other, the browsers exchange their connection offers and network candidates, which contain your public IP address (and a relay's, if one is used), through a channel of the Supabase Realtime service, <b>without any encryption of the game's own</b>: they are broadcast to <b>all subscribers</b> of the channel. That channel carries the room code: anyone who knows it can subscribe <b>without appearing among the players</b>, so without anyone seeing them, and the code of a <b>public room</b> is shown in the list. Only give the code to people you trust, and avoid public rooms if this bothers you: the game has no private room. The connection servers (Google STUN, and a relay if the network requires one) also see your IP address for the duration of the game. To find your place again after the page is reloaded, a secret key specific to the room stays in the tab's memory (valid for 20 seconds, erased when the tab closes); it never leaves your browser, only a proof made with it is sent to the other players.</li>
@@ -95,6 +98,7 @@ const PAGES = {
 <li>Guest session data: at most 12 months after its last activity.</li>
 <li>Anonymous statistics and feedback: at most 12 months; game errors: 90 days.</li>
 <li>Abuse counters: about one hour.</li>
+<li>Reports: as long as the content exists. Moderation log: kept with no fixed time limit; when the account concerned is deleted (Profile › Delete account), its lines are no longer attached to it (the decision remains, without your identifier).</li>
 </ul>
 <h3>Your rights</h3>
 <p>You can access, correct, erase and retrieve your data (Profile › Saves › <b>Export my data</b>: a JSON file), object to or restrict processing, and withdraw your consent. For any request: ${contactHtml('en', L)}. You can also lodge a complaint with the French data protection authority, the CNIL (${link('https://www.cnil.fr/fr/plaintes', 'cnil.fr')}), or with your own country's authority.</p>
@@ -117,7 +121,7 @@ const PAGES = {
 <h3>Propriété intellectuelle</h3>
 <p>Le code du jeu est publié sous licence MIT (${link(L.source, 'code source')}). Décors, véhicules, pièces, circuits officiels, icônes, musique et sons ont été créés pour le jeu. Les éléments tiers et leurs licences sont listés dans « Crédits et licences ». Les circuits, pseudos et commentaires publiés par les joueurs restent sous la responsabilité de leurs auteurs.</p>
 <h3>Signaler un contenu</h3>
-<p>Chaque circuit et chaque commentaire publiés ont un bouton « Signaler ». Pour un contenu illicite ou une demande urgente : ${contactHtml('fr', L)}.</p>`,
+<p>Chaque circuit et chaque commentaire publiés ont un bouton « Signaler ». Les signalements sont examinés par des modérateurs, sans délai garanti (voir « Règles de la communauté »). Pour un contenu illicite ou une demande urgente : ${contactHtml('fr', L)}.</p>`,
     }),
     en: (L) => ({
       title: 'Legal notice',
@@ -130,7 +134,7 @@ const PAGES = {
 <h3>Intellectual property</h3>
 <p>The game's code is published under the MIT licence (${link(L.source, 'source code')}). Scenery, vehicles, pieces, official tracks, icons, music and sounds were created for the game. Third-party components and their licences are listed under "Credits and licences". Tracks, usernames and comments published by players remain the responsibility of their authors.</p>
 <h3>Report content</h3>
-<p>Every published track and comment has a "Report" button. For illegal content or an urgent request: ${contactHtml('en', L)}.</p>`,
+<p>Every published track and comment has a "Report" button. Reports are reviewed by moderators, with no guaranteed delay (see "Community rules"). For illegal content or an urgent request: ${contactHtml('en', L)}.</p>`,
     }),
   },
   // -------------------------------------------------------------------------------------------------------------------------------------------- règles
@@ -147,7 +151,9 @@ const PAGES = {
 <li><b>Âge</b> : 15 ans ou plus pour publier, ou avec l'accord d'un parent.</li>
 </ul>
 <h3>Modération</h3>
-<p>Chaque circuit et chaque commentaire peuvent être signalés. Trois signalements de comptes différents masquent un contenu en attendant la modération ; les modérateurs peuvent masquer ou rétablir un contenu. Un compte qui enfreint ces règles à répétition peut être supprimé. Contact : ${contactHtml('fr', L)}.</p>`,
+<p>Chaque circuit et chaque commentaire peuvent être signalés. Trois signalements de comptes différents masquent un contenu en attendant la modération (pour un circuit, seuls comptent les comptes créés depuis plus de 24 heures).</p>
+<p>Les modérateurs sont désignés par l'éditeur. Dans le jeu, ils voient les contenus signalés (le nombre et la date des signalements, jamais qui les a faits) et peuvent masquer ou rétablir un circuit ou un commentaire, en écrivant un motif : masquer ne supprime rien, le contenu se rétablit. Ils peuvent aussi suspendre un compte, pour une durée ou jusqu'à sa réactivation : un compte suspendu ne peut plus publier ni commenter, mais ses temps, ses classements et sa progression restent. Chaque décision est inscrite dans un journal (quoi, qui, quand, pourquoi).</p>
+<p>Il n'y a pas de barème de sanctions : les modérateurs décident au cas par cas, sans délai garanti, et le jeu ne te prévient pas d'une décision. Un compte qui enfreint ces règles à répétition peut être suspendu, puis supprimé par l'éditeur. Pour une demande ou pour contester une décision : ${contactHtml('fr', L)}.</p>`,
     }),
     en: (L) => ({
       title: 'Community rules',
@@ -161,7 +167,9 @@ const PAGES = {
 <li><b>Age</b>: 15 or over to publish, or with a parent's consent.</li>
 </ul>
 <h3>Moderation</h3>
-<p>Every track and comment can be reported. Three reports from different accounts hide content pending moderation; moderators can hide or restore content. An account that repeatedly breaks these rules may be deleted. Contact: ${contactHtml('en', L)}.</p>`,
+<p>Every track and comment can be reported. Three reports from different accounts hide content pending moderation (for a track, only accounts created more than 24 hours ago count).</p>
+<p>Moderators are appointed by the publisher. In the game they see reported content (the number and date of reports, never who made them) and can hide or restore a track or a comment, by writing a reason: hiding deletes nothing, the content can be restored. They can also suspend an account, for a set time or until it is reactivated: a suspended account can no longer publish or comment, but its times, rankings and progress remain. Every decision is written to a log (what, who, when, why).</p>
+<p>There is no scale of penalties: moderators decide case by case, with no guaranteed delay, and the game does not notify you of a decision. An account that repeatedly breaks these rules may be suspended, then deleted by the publisher. For a request or to contest a decision: ${contactHtml('en', L)}.</p>`,
     }),
   },
   // -------------------------------------------------------------------------------------------------------------------------------------------- crédits
