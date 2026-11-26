@@ -38,6 +38,7 @@ import { rewardsMethods } from './app/rewards.js';
 import { careerEndMethods } from './app/careerEnd.js';
 import { mechanicsMethods } from './app/mechanics.js';
 import { communityMethods } from './app/community.js';
+import { moderationMethods } from './app/moderation.js';
 import { screenMethods } from './app/screens.js';
 import { settingsMethods } from './app/settings.js';
 import { profileMethods } from './app/profile.js';
@@ -562,7 +563,7 @@ class App {
 }
 
 // Les familles de méthodes vivent dans app/ ; elles s'ajoutent au prototype (`this` est l'instance).
-Object.assign(App.prototype, multiMethods, academyMethods, competitionMethods, labMethods, rewardsMethods, careerEndMethods, mechanicsMethods, communityMethods, screenMethods, settingsMethods, profileMethods, wiringMethods, editorFlowMethods, uiCustomMethods, modesMethods, raceHubMethods, theaterAppMethods, legalMethods, feedbackMethods, updateMethods);
+Object.assign(App.prototype, multiMethods, academyMethods, competitionMethods, labMethods, rewardsMethods, careerEndMethods, mechanicsMethods, communityMethods, moderationMethods, screenMethods, settingsMethods, profileMethods, wiringMethods, editorFlowMethods, uiCustomMethods, modesMethods, raceHubMethods, theaterAppMethods, legalMethods, feedbackMethods, updateMethods);
 
 
 // Application installable et jouable hors ligne (service worker), si le contexte le permet.

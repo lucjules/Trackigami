@@ -817,6 +817,20 @@ body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after 
 .comm-status { margin: 4px 0 12px; color: var(--muted, #a99fd0); font-size: 14px; }
 .comm-more { display: flex; justify-content: center; margin: 14px 0 30px; }
 #comm-list .btn.on { color: #ff6b9a; border-color: #ff6b9a; }
+/* ---- Modération (réservée aux modérateurs, js/app/moderation.js) ---- */
+.mod-panel .mod-screen { display: flex; flex-direction: column; gap: 10px; max-height: 68vh; overflow-y: auto; padding-right: 4px; }
+.mod-tabs { flex-wrap: wrap; }
+.mod-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.mod-row.is-hidden { opacity: 0.8; border-style: dashed; }
+.mod-row-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; overflow-wrap: anywhere; }
+.mod-detail { display: flex; flex-direction: column; gap: 8px; overflow-wrap: anywhere; }
+.mod-detail h3, .mod-detail h4, .mod-screen > h3 { margin: 6px 0 2px; }
+.mod-list-plain { margin: 0; padding-left: 18px; line-height: 1.5; }
+.mod-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.mod-reason-label { display: flex; flex-direction: column; gap: 6px; }
+.mod-reason { width: 100%; box-sizing: border-box; resize: vertical; }
+.mod-error:empty { display: none; }
+@media (max-width: 600px) { .mod-row { flex-direction: column; align-items: stretch; } }
 
 /* ---- Classements ---- */
 .fin-online { margin: 4px 0; font-size: 14px; font-weight: 600; color: var(--muted, #a99fd0); }
