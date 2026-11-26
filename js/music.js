@@ -53,6 +53,7 @@ export class Music {
       this.synth.setVolume(this.volume * 0.7);
       this.synth.updateWithCarSpeed(kind === 'menu' ? 0.5 : 0);
       this.synth.start(kind === 'menu' ? 'house' : 'chill', variant);
+      if (variant) this.synth.updateWithCarSpeed(0);      // le filtre de la variante (le réglage d'avant start a été fait avec le mode précédent)
     }, wasPlaying ? 450 : 0);
   }
 

@@ -277,6 +277,21 @@ test('Music.play(\'game\', décor) joue la variante du décor ; le même morceau
   m.play('game', 'nope'); T.fire(); assert.equal(m.synth.variant, null);
   m.stop(); assert.equal(m.synth.running, false);
 }));
+test('le menu qui suit une course à variante règle son filtre comme avant (la variante ne laisse rien derrière elle), et la variante règle le sien après son départ', () => withTimers((T) => {
+  const cutoffAfter = (variantId) => {
+    seedRandom(3);
+    const ctx = fakeContext(); const m = new Music({ ctx });
+    m.play('game', variantId); T.fire(); m.setSpeed(0.4);
+    m.play('menu'); T.fire();
+    return { menu: m.synth.lp.frequency.last, mode: m.synth.mode, variant: m.synth.variant };
+  };
+  const withVariant = cutoffAfter('polar'), without = cutoffAfter('');
+  assert.equal(withVariant.mode, 'house'); assert.equal(withVariant.variant, null);
+  assert.equal(withVariant.menu, without.menu, 'même filtre au menu, que la course d\'avant ait eu une variante ou non');
+  seedRandom(3);
+  const ctx = fakeContext(); const m = new Music({ ctx }); m.play('game', 'polar'); T.fire();
+  assert.equal(m.synth.lp.frequency.last, VARIANTS.polar.open[0], 'à l\'arrêt, le filtre de la variante est à son ouverture de repos');
+}));
 test('Music : la vitesse suit (boost compris avec une variante, plafonnée à 1 sans) ; le budget de qualité arrive au séquenceur, même créé après', () => withTimers((T) => {
   seedRandom(3);
   const ctx = fakeContext(); const m = new Music({ ctx });

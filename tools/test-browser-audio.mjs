@@ -103,9 +103,10 @@ function lib() {
   };
   // Graphe réel : liaisons suivies pour compter ce qui est relié (de proche en proche) à la sortie.
   const watch = () => {
-    const edges = new Map(), oc = AudioNode.prototype.connect, od = AudioNode.prototype.disconnect;
-    AudioNode.prototype.connect = function (dst, ...r) { if (dst instanceof AudioNode) { if (!edges.has(this)) edges.set(this, new Set()); edges.get(this).add(dst); } return oc.call(this, dst, ...r); };
-    AudioNode.prototype.disconnect = function (dst, ...r) { if (dst === undefined) edges.delete(this); else if (dst instanceof AudioNode && edges.has(this)) edges.get(this).delete(dst); return od.call(this, ...(dst === undefined ? [] : [dst, ...r])); };
+    const AN = window.AudioNode;
+    const edges = new Map(), oc = AN.prototype.connect, od = AN.prototype.disconnect;
+    AN.prototype.connect = function (dst, ...r) { if (dst instanceof AN) { if (!edges.has(this)) edges.set(this, new Set()); edges.get(this).add(dst); } return oc.call(this, dst, ...r); };
+    AN.prototype.disconnect = function (dst, ...r) { if (dst === undefined) edges.delete(this); else if (dst instanceof AN && edges.has(this)) edges.get(this).delete(dst); return od.call(this, ...(dst === undefined ? [] : [dst, ...r])); };
     const reachable = (ctx) => {
       const back = new Map();
       for (const [a, set] of edges) for (const b of set) { if (!back.has(b)) back.set(b, new Set()); back.get(b).add(a); }
@@ -113,7 +114,7 @@ function lib() {
       while (st.length) { const n = st.pop(); if (seen.has(n)) continue; seen.add(n); for (const a of back.get(n) || []) st.push(a); }
       return seen.size;
     };
-    return { reachable, stop: () => { AudioNode.prototype.connect = oc; AudioNode.prototype.disconnect = od; } };
+    return { reachable, stop: () => { AN.prototype.connect = oc; AN.prototype.disconnect = od; } };
   };
   // Rend `seconds` secondes du moteur d'un véhicule ; steps = [[t, état]] : l'état est posé à chaque image de 50 ms (comme la boucle de rendu).
   const engine = async (GameAudio, seconds, stateAt) => {
@@ -241,7 +242,7 @@ await test('profils de qualité : Potato et Ultra Potato rendent un signal non n
     }
     return out;
   });
-  let dropped = { high: 0, potato: 0, ultrapotato: 0 };
+  const dropped = { high: 0, potato: 0, ultrapotato: 0 };
   for (const [id, v] of Object.entries(r)) for (const [name, f] of Object.entries(v)) {
     assert.ok(f.rms > 0.003 && f.peak < 1, `${id} ${name} : rms ${f.rms} crête ${f.peak}`);
     dropped[name] += f.dropped;

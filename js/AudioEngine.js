@@ -104,6 +104,7 @@ export class AudioEngine {
     this.running = false;
     clearInterval(this._timer); this._timer = null;
     this._retire();
+    this.variant = null;                // (le menu qui suit une course règle son filtre comme avant : updateWithCarSpeed lit le mode et la variante AVANT start)
     const t = this.ctx.currentTime;
     this.out.gain.cancelScheduledValues(t); this.out.gain.setValueAtTime(this.out.gain.value, t); this.out.gain.linearRampToValueAtTime(0, t + 0.4);
   }
