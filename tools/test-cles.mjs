@@ -49,6 +49,8 @@ const OLD_OFFICIAL = {
   cite: 'u-nh8y6q', galerie: 'u-fypaw0', plafond: 'u-1pkrnst', cristalfele: 'u-1jav3n1', miroir: 'u-at09rx', vrilles: 'u-dy0o3x', coeur: 'u-tv4kzc',
   garde: 'u-19q7puh', cadence: 'u-1jgqopy', pendule: 'u-82q4pd', rotors: 'u-1sh7okr', montecharge: 'u-1tdykjg', grandatelier: 'u-12jb5q5',
 };
+// Les 72 circuits qui existaient en 0.16.5 (les circuits ajoutés en 0.17.0 n'ont pas de clé « d'avant » : ils sont nés avec l'algorithme actuel).
+const OLD72 = BUILTIN_TRACKS.filter((d) => Object.hasOwn(OLD_OFFICIAL, d.id));
 // Un circuit à logique dont un groupe de deux pièces s'ouvre au checkpoint : le groupe est posé sur la route (variante A) ou sur l'anneau de la même case (variante B).
 // Avant la phase 7, les deux avaient la même clé (collision) ; capturée avec le code de la 0.16.5.
 const OLD_RING_ROAD = 'u-1e7zjyg';
@@ -67,14 +69,15 @@ const spikesPi = () => { const t = scriptTrack('o', 'start S4 finish'); t.addDec
 console.log('1. Ce qui ne change pas');
 test('les 72 clés b-… (empreinte du CODE du circuit intégré, pas sa signature) et les 60 clés daily-… (la date seule) sont celles d\'avant', () => {
   for (const d of BUILTIN_TRACKS) assert.equal(`b-${d.id}-${hashString(buildBuiltin(d).encode())}`, corpus.builtinKeys[d.id], d.id);
-  assert.equal(Object.keys(corpus.builtinKeys).length, 72);
+  assert.equal(Object.keys(corpus.builtinKeys).length, 84);      // 0.17.0 : 72 + 12 circuits ajoutés (les 72 d'avant inchangés : tools/test-cles-officielles.mjs)
   let n = 0;
   for (let m = 11; m <= 12; m++) for (let dd = 1; dd <= 30; dd++) { const day = `2026-${m}-${String(dd).padStart(2, '0')}`, c = dailyChallenge(day); assert.equal(c.key, 'daily-' + day); n++; }
   assert.equal(n, 60);
 });
 test('une clé u-… ne change que pour un circuit AVEC obstacle, solide ou groupe de logique : les 72 officiels exportés (4 sans solide gardent leur clé, 68 changent), les codes SHW1 et SHW2 du corpus, le lien de partage', () => {
   let same = 0, changed = 0;
-  for (const d of BUILTIN_TRACKS) {
+  assert.equal(OLD72.length, 72);
+  for (const d of OLD72) {
     const t = asUser(d), old = OLD_OFFICIAL[d.id];
     precondition(!!old, `clé d'avant de ${d.id}`);
     assert.equal(t.userKey === old, !hasPhysical(t), `${d.id} : la clé change si, et seulement si, le circuit a un obstacle, un solide ou un groupe de logique`);
@@ -147,7 +150,8 @@ test('anneau et route sur la même case : le groupe de logique posé sur l\'un o
 // ---------------------------------------------------------------------------------------------------------------------------------- 3. l'ancien algorithme figé
 console.log('3. L\'ancien algorithme (signature « legacy ») reproduit les clés d\'avant');
 test('72 circuits officiels exportés : legacySignatureText redonne EXACTEMENT la clé u-… calculée par le code de la 0.16.5', () => {
-  for (const d of BUILTIN_TRACKS) assert.equal('u-' + hashString(asUser(d).legacySignatureText()), OLD_OFFICIAL[d.id], d.id);
+  assert.equal(OLD72.length, 72);
+  for (const d of OLD72) assert.equal('u-' + hashString(asUser(d).legacySignatureText()), OLD_OFFICIAL[d.id], d.id);
 });
 test('la collision anneau / route : les deux variantes ont la MÊME ancienne clé (celle de la 0.16.5) et deux nouvelles clés distinctes', () => {
   const road = ringRoad(false), ring = ringRoad(true);

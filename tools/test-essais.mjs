@@ -1,5 +1,5 @@
 // Outil d'après-essais (tools/essais.mjs) : modèle commun « niveau du testeur × difficulté du circuit » sur un PETIT groupe, médailles proposées pour les
-// 72 circuits, exports CSV du tableau de bord, résumé des avis, écriture dans js/tracks.js (sur un texte, jamais sur le vrai fichier).
+// 84 circuits, exports CSV du tableau de bord, résumé des avis, écriture dans js/tracks.js (sur un texte, jamais sur le vrai fichier).
 //   node tools/test-essais.mjs   (npm test)
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
@@ -81,7 +81,7 @@ test('modèle commun sur 8 testeurs simulés : niveau moyen, niveaux et difficul
   assert.ok(fit.sigma > 0.02 && fit.sigma < 0.08, 'bruit ±' + fit.sigma.toFixed(3));
 });
 
-test('médailles proposées : 72 circuits, croissantes, les testeurs atteignent bronze ~90 %, or ~15 %, cristal rarement ; circuits non joués extrapolés', () => {
+test('médailles proposées : 84 circuits, croissantes, les testeurs atteignent bronze ~90 %, or ~15 %, cristal rarement ; circuits non joués extrapolés', () => {
   const { rows } = simulate();
   const { best } = bestTimes(rows, { golden });
   const fit = fitPooled(best, golden), P = proposePooled(fit, golden);
@@ -151,11 +151,11 @@ test('les vrais circuits sont tous réinscriptibles (structure de js/tracks.js r
 });
 
 // Recaler les médailles ne doit JAMAIS changer la clé d'un circuit (records, fantômes, classements en ligne y sont rangés) : la clé « b-<id>-<empreinte> » est celle du
-// CODE du circuit (Track.encode), où les médailles, l'objectif bonus et medalsBy n'entrent pas. Ce test le prouve sur les 72 circuits, avant tout recalage.
+// CODE du circuit (Track.encode), où les médailles, l'objectif bonus et medalsBy n'entrent pas. Ce test le prouve sur les 84 circuits (les 72 d'avant et les 12 de la 0.17.0), avant tout recalage.
 const keyOf = (d) => `b-${d.id}-${hashString(buildBuiltin(d).encode())}`;
 const corpus = JSON.parse(readFileSync(new URL('./compat/corpus.json', import.meta.url), 'utf8'));
-test('les médailles ne font pas partie de la clé : 72 clés b- identiques à celles d’avant, quelles que soient les médailles, l’objectif et medalsBy', () => {
-  assert.equal(BUILTIN_TRACKS.length, 72);
+test('les médailles ne font pas partie de la clé : 84 clés b- identiques à celles du corpus, quelles que soient les médailles, l’objectif et medalsBy', () => {
+  assert.equal(BUILTIN_TRACKS.length, 84);
   for (const d of BUILTIN_TRACKS) {
     const f = (k) => Math.round(d.medals[k] * 1.37 * 10) / 10 + 3;
     const other = { ...d, medals: { cristal: f('cristal'), or: f('or'), argent: f('argent'), bronze: f('bronze') }, medalsBy: 'humain', ...(d.goal && d.goal.id === 'under' ? { goal: { ...d.goal, t: d.goal.t + 7 } } : {}) };
@@ -165,7 +165,7 @@ test('les médailles ne font pas partie de la clé : 72 clés b- identiques à c
   }
 });
 
-test('seuils de médailles actuels : pour chacun des 72 circuits, cristal ≤ or ≤ argent ≤ bronze, tous positifs', () => {
+test('seuils de médailles actuels : pour chacun des 84 circuits, cristal ≤ or ≤ argent ≤ bronze, tous positifs', () => {
   for (const d of BUILTIN_TRACKS) { const m = d.medals; assert.ok(m.cristal > 0 && m.cristal <= m.or && m.or <= m.argent && m.argent <= m.bronze, d.id + ' ' + JSON.stringify(m)); }
 });
 
@@ -276,13 +276,13 @@ test('avis : groupes par commandes (clavier, manette, tactile) et filtre de date
   assert.equal(summariseFeedback(avisSim()).n, 8);
 });
 
-test('clés des 72 circuits : vérifiables (--verifier-cles), un écart est nommé ; ordre des médailles proposées contrôlé', () => {
-  assert.deepEqual(verifierCles(), { ok: true, changed: [], missing: [], n: 72 });
+test('clés des 84 circuits : vérifiables (--verifier-cles), un écart est nommé ; ordre des médailles proposées contrôlé', () => {
+  assert.deepEqual(verifierCles(), { ok: true, changed: [], missing: [], n: 84 });
   const corpus = JSON.parse(readFileSync(new URL('./compat/corpus.json', import.meta.url), 'utf8')).builtinKeys;
   const bad = verifierCles(BUILTIN_TRACKS, { ...corpus, eclats: 'b-eclats-xxxx' });
   assert.equal(bad.ok, false); assert.equal(bad.changed[0].id, 'eclats');
   const run = spawnSync(process.execPath, [new URL('./essais.mjs', import.meta.url).pathname, '--verifier-cles'], { encoding: 'utf8' });
-  assert.equal(run.status, 0); assert.match(run.stdout, /72 clés b-… sont inchangées/);
+  assert.equal(run.status, 0); assert.match(run.stdout, /84 clés b-… sont inchangées/);
   assert.deepEqual(medailleDesordre([{ id: 'a', medals: { cristal: 1, or: 2, argent: 3, bronze: 4 } }, { id: 'b', medals: { cristal: 3, or: 2, argent: 3, bronze: 4 } }]), ['b']);
   const fit = fitPooled(bestTimes(simulate().rows, { golden }).best, golden);
   assert.deepEqual(medailleDesordre(proposePooled(fit, golden)), [], 'les médailles proposées par le modèle sont toujours ordonnées');
@@ -308,15 +308,15 @@ test('--ecrire ne touche pas à js/tracks.js sans avis (profils inconnus) ni pro
 // ---- Le document, la fiche générée et le code disent la même chose ---------------------------------------------------------------------------------------------
 const read = (f) => readFileSync(new URL('../' + f, import.meta.url), 'utf8');
 
-test('docs/FICHE-ESSAI.md et docs/temps-humains.json sont la sortie de tools/fiche-essai.mjs (sinon : node tools/fiche-essai.mjs), avec le parcours, les questions et les 72 circuits', () => {
+test('docs/FICHE-ESSAI.md et docs/temps-humains.json sont la sortie de tools/fiche-essai.mjs (sinon : node tools/fiche-essai.mjs), avec le parcours, les questions et les 84 circuits', () => {
   const { fiche, temps, n } = buildFiche();
-  assert.equal(n, 72);
+  assert.equal(n, 84);
   assert.equal(read('docs/FICHE-ESSAI.md'), fiche, 'FICHE-ESSAI.md n’est pas à jour : node tools/fiche-essai.mjs (ne pas la modifier à la main)');
   assert.equal(read('docs/temps-humains.json'), temps, 'temps-humains.json n’est pas à jour : node tools/fiche-essai.mjs');
   for (const p of parcours()) assert.ok(fiche.includes(`**${p.name}** (n° ${p.index + 1}`) && fiche.includes('· **parcours imposé**'), p.id);
   for (const s of SCALES) assert.ok(fiche.includes(`| ${s.label} |`), 'question du formulaire : ' + s.label);
   for (const q of QUESTIONS_RESSENTI) assert.ok(fiche.includes(`| ${q.label} |`), 'question de la fiche : ' + q.key);
-  assert.equal((fiche.match(/^### \d+\. /gm) || []).length, 72); assert.equal((fiche.match(/^## Chapitre /gm) || []).length, 12);
+  assert.equal((fiche.match(/^### \d+\. /gm) || []).length, 84); assert.equal((fiche.match(/^## Chapitre /gm) || []).length, 14);
   assert.ok(!/[0-9a-f]{16}/.test(fiche.replace(/[0-9a-f]{16,}(?=\.mjs)/g, '')), 'aucun identifiant d’installation dans la fiche');
   assert.match(fiche, new RegExp(`Physique : \\*\\*${PHYS_VER}\\*\\*`));
 });

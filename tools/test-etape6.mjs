@@ -7,11 +7,13 @@ import assert from 'node:assert/strict';
 import { test, finish } from './harness.mjs';
 import { BUILTIN_TRACKS, buildBuiltin } from '../js/tracks.js';
 import { CHAPTERS } from '../js/career.js';
+import { chapterKeyOf } from '../js/themes.js';
 import { newElements, FAMILIES_NEW } from './nouveautes.mjs';
 import { runTrack } from './lab.mjs';
 
 const REFAITS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];      // indices dans CHAPTERS des chapitres refaits autour des nouvelles pièces
-const CH = REFAITS.map((c) => BUILTIN_TRACKS.filter((d) => d.decor === CHAPTERS[c].decor));
+// (0.17.0 : le chapitre d'un circuit est son champ `chapitre`, sinon son décor ; les chapitres bonus de la 0.17.0 ne sont pas des chapitres « refaits » : voir tools/test-extension.mjs)
+const CH = REFAITS.map((c) => BUILTIN_TRACKS.filter((d) => chapterKeyOf(d) === CHAPTERS[c].key));
 const CH1 = CH[0];
 const built = new Map(CH.flat().map((d) => [d.id, buildBuiltin(d)]));
 

@@ -6231,6 +6231,15 @@ var CAREER_ORDER = [
   "caves",
   "atelier"
 ];
+var EXTRA_CHAPTERS = [
+  "elements",
+  "manoeuvres"
+];
+var CHAPTER_KEYS = [
+  ...CAREER_ORDER,
+  ...EXTRA_CHAPTERS
+];
+var chapterKeyOf = (def) => def.chapitre || def.decor;
 var DAILY_DECORS = Object.keys(DECORS).slice(0, 11);
 
 // js/ambiance.js
@@ -9553,6 +9562,15 @@ function scriptTrack(name, script, opts2 = {}) {
       case "V":
         l += n;
         break;
+      // 0.17.0 : LJR / LJL : la route reprend dans la colonne voisine (à droite / à gauche), même niveau, même cap, sans pièce entre les deux : la voie d'avant s'arrête
+      // (un vide), on la quitte par-dessus la bordure, poussé par un ressort latéral (revêtement « spring »). Le chemin du pilote saute de colonne au même endroit.
+      case "LJR":
+      case "LJL": {
+        const r = rot(h, op === "LJR" ? 1 : -1, 0);
+        x += Math.round(r.x);
+        z += Math.round(r.z);
+        break;
+      }
       default:
         throw new Error("Instruction inconnue : " + op);
     }
@@ -15646,9 +15664,639 @@ var BUILTIN_TRACKS = [
       argent: 45.3,
       bronze: 53.2
     }
+  },
+  // ---- 0.17.0 (COMPLETE-002, COMPLETE-011) : deux chapitres BONUS, chacun centré sur ce que la carrière n'employait pas ----------------------------------------------
+  // Champ `chapitre` (themes.js : EXTRA_CHAPTERS) : ces circuits sont rangés APRÈS l'Atelier (les 72 d'avant gardent leur rang) mais s'ouvrent au milieu de la carrière
+  // (career.js : BONUS). Chacun déclare dans `meca` la mécanique qu'il enseigne ; tools/contract.mjs vérifie qu'elle y est et que le pilote la vit. Mécanismes à rythme
+  // (pièces mobiles) placés par recherche (tools/lab.mjs) : le pilote passe sans choc de 75 à 115 % de sa vitesse, et repart de chaque checkpoint.
+  // Chapitre 13 · Les Éléments (ouvert par 4 médailles au chapitre 5)
+  {
+    // 13 · 1/6 — RESPIRATION : une AMBIANCE d'auteur (nuit brumeuse, musique du menu) et trois DÉCLENCHEURS (l'aube se lève au checkpoint, la brume se dissipe avant la
+    // descente, un éclat à l'arrivée). Sprint sans difficulté : route large, chicanes rapides, deux virages énormes, grand S.
+    id: "clairdelune",
+    name: "Clair de Lune",
+    decor: "isles",
+    chapitre: "elements",
+    difficulty: 1,
+    profil: "sprint",
+    meca: [
+      "ambiance",
+      "declencheurs"
+    ],
+    appris: "D\xE9part : une route large sous la lune. Au programme : une nuit brumeuse choisie par l\u2019auteur, l\u2019aube qui se l\xE8ve au checkpoint, la brume qui se dissipe avant la descente, chicanes rapides, grand S.",
+    goal: {
+      id: "under",
+      t: 39
+    },
+    opts: {
+      l: 4
+    },
+    pilot: {
+      vCap: 66
+    },
+    params: {
+      ambiance: {
+        sky: "night",
+        fog: "misty",
+        music: "menu"
+      },
+      scripts: [
+        {
+          x: -16,
+          z: -15,
+          a: "sky",
+          v: "dawn"
+        },
+        {
+          x: -31,
+          z: -21,
+          a: "fog",
+          v: "clear"
+        },
+        {
+          x: -33,
+          z: -31,
+          a: "burst",
+          v: "#ffd66b"
+        }
+      ]
+    },
+    script: "start*3 WI W WO B3 HL S B2 ZR4 S ZL4 S C*3 B2 WI W WO S HR S B2 [cdi1] [dn2] [cdo1] S ZZL S B2 finish*3",
+    medals: {
+      cristal: 34,
+      or: 35.8,
+      argent: 41.2,
+      bronze: 48.4
+    }
+  },
+  {
+    // 13 · 2/6 — RESPIRATION : TROIS TOURS d'une boucle courte (le passage de la ligne est un point de retour à chaque tour). Quatre très grands virages relevés,
+    // chicanes longues dans les deux sens, route large : on apprend la boucle, on la réussit au troisième tour.
+    id: "manege",
+    name: "Man\xE8ge",
+    decor: "city",
+    chapitre: "elements",
+    difficulty: 1,
+    profil: "speedway",
+    meca: [
+      "tours"
+    ],
+    appris: "D\xE9part : deux boosters \u2192 un virage relev\xE9. Au programme : trois tours d\u2019une boucle courte, quatre tr\xE8s grands virages relev\xE9s, chicanes longues, route large ; la ligne sert de point de retour \xE0 chaque tour.",
+    goal: {
+      id: "nowall"
+    },
+    opts: {
+      l: 4
+    },
+    pilot: {
+      vCap: 70
+    },
+    laps: 3,
+    script: "start*2 B2 S2 B BRR B2 ZR3 ZL3 BRR S WI WO BRR C*2 B ZL3 ZR3 BRR finish*2",
+    medals: {
+      cristal: 77.5,
+      or: 81.6,
+      argent: 93.9,
+      bronze: 110.2
+    }
+  },
+  {
+    // 13 · 3/6 — PLUIE : piste mouillée partout (moins d'adhérence) et FLAQUES qui glissent beaucoup ; la pluie forcit et faiblit pendant la course (envVary).
+    // Mêmes flaques au même endroit pour tout le monde (graine). Ambiance : averse et brume.
+    id: "averse",
+    name: "Averse",
+    decor: "jungle",
+    chapitre: "elements",
+    difficulty: 2,
+    profil: "sprint",
+    meca: [
+      "pluie"
+    ],
+    appris: "D\xE9part : trois cases \u2192 chicane longue sous l\u2019averse. Au programme : piste mouill\xE9e et flaques qui glissent, une pluie qui forcit et faiblit, tr\xE8s grands virages, chicanes, route large, grand S.",
+    goal: {
+      id: "nowall"
+    },
+    opts: {
+      l: 6
+    },
+    pilot: {
+      vCap: 66
+    },
+    params: {
+      rain: 85,
+      envSeed: 12,
+      envVary: true,
+      ambiance: {
+        sky: "day",
+        weather: "rain",
+        fog: "misty"
+      }
+    },
+    script: "start*2 S3 ZR3 B2 S ZL3 S B2 HR S2 C*3 B2 S2 [crs1] S2 [cds1] B HL S B2 WI W WO S ZZR S B2 finish*2",
+    medals: {
+      cristal: 32.6,
+      or: 34.4,
+      argent: 39.5,
+      bronze: 46.4
+    }
+  },
+  {
+    // 13 · 4/6 — VENT et RAFALES : vent de 25 % vers le nord-ouest, rafales de 70 % dans la même direction. Selon le cap, il pousse, freine ou déporte (+5 s pour le
+    // pilote par rapport au même circuit sans vent). Très grands virages relevés, wall-ride sur le mur droit, route large.
+    id: "bourrasques",
+    name: "Bourrasques",
+    decor: "sky",
+    chapitre: "elements",
+    difficulty: 3,
+    profil: "speedway",
+    meca: [
+      "vent",
+      "rafales"
+    ],
+    appris: "D\xE9part : quatre boosters \u2192 virage relev\xE9. Au programme : vent constant et rafales qui poussent par \xE0-coups (selon le cap, il aide ou freine), tr\xE8s grands virages relev\xE9s, wall-ride, route large, chicanes.",
+    goal: {
+      id: "norespawn"
+    },
+    opts: {
+      l: 8
+    },
+    pilot: {
+      vCap: 70
+    },
+    params: {
+      wind: 25,
+      windDir: 315,
+      gust: 70,
+      envSeed: 5
+    },
+    script: "start*2 B4 BRR S2 B ZR4 S ZL4 B BLL S2 C*2 WI W WO S B BRR S2 B [tr02l] S4> [tr20l] S B BLL S2 C*3 ZR3 S ZL3 S B2 BRR S2 B2 finish*2",
+    medals: {
+      cristal: 49.1,
+      or: 51.6,
+      argent: 59.4,
+      bronze: 69.7
+    }
+  },
+  {
+    // 13 · 5/6 — GIVRE : plaques de verglas (35 % d'adhérence) sur les lignes droites, de nuit sous la neige. Circuit technique : épingles, route étroite, wall-ride,
+    // croisement traversé deux fois ; les plaques se voient et s'évitent (la graine 28 en met sur la trajectoire du pilote).
+    id: "givre",
+    name: "Nuit de Givre",
+    decor: "polar",
+    chapitre: "elements",
+    difficulty: 3,
+    profil: "technique",
+    meca: [
+      "givre"
+    ],
+    appris: "D\xE9part : deux boosters \u2192 \xE9pingles. Au programme : plaques de givre sur les lignes droites (on les \xE9vite ou on les traverse droit), route \xE9troite, wall-ride, croisement travers\xE9 deux fois, descente.",
+    goal: {
+      id: "nowall"
+    },
+    opts: {
+      l: 6
+    },
+    params: {
+      frost: 100,
+      envSeed: 28,
+      ambiance: {
+        sky: "night",
+        weather: "snow"
+      }
+    },
+    script: "start*2 B2 R L R B S2 C*3 B NI N2 NO S R S L B ZR S ZL B C*3 S [tr01s] S2< [tr10s] S R B S L B S JX R C*3 R R S JX R S NI N NO [cdi1] [dn2] [cdo1] S B finish*1",
+    medals: {
+      cristal: 47.5,
+      or: 50,
+      argent: 57.5,
+      bronze: 67.5
+    }
+  },
+  {
+    // 13 · 6/6 — RESSORT et GRAVITÉ : trois RESSORTS LATÉRAUX au bout d'une voie qui s'arrête (LJR / LJL, track.js : la route reprend dans la colonne voisine) : à 150 %
+    // ils font sauter d'une voie à l'autre par-dessus la bordure ; une plaque de basse GRAVITÉ (40 %) allonge le premier saut, une autre rend la gravité normale.
+    id: "ressorts",
+    name: "Ressorts",
+    decor: "orbit",
+    chapitre: "elements",
+    difficulty: 4,
+    profil: "acrobatique",
+    meca: [
+      "ressort",
+      "gravite"
+    ],
+    appris: "D\xE9part : basse gravit\xE9 \u2192 grand saut re\xE7u sur une plaque. Au programme : trois ressorts lat\xE9raux qui font sauter d\u2019une voie \xE0 l\u2019autre (la voie s\u2019arr\xEAte : il faut le ressort), sauts re\xE7us sur des plaques, route large.",
+    goal: {
+      id: "perfect",
+      n: 2
+    },
+    opts: {
+      l: 12
+    },
+    pilot: {
+      vCap: 60
+    },
+    script: "start*2 B2 S.g40 [crs1] UU GR2 G5 V-5 [plate3]*10 S3 S.g100 B S.r150 LJR S2 C*3 B2 S [crv1] UU G2 V-2 [plate3]*10 ZR3 S B S.r50 LJL S2 C*3 B2 S [crv2] UX G2 DX DX [cdo2] [plate3]*10 S B S.r150 LJR S2 ZL3 S WI W WO S B2 finish*2",
+    medals: {
+      cristal: 53.1,
+      or: 55.9,
+      argent: 64.3,
+      bronze: 75.5
+    }
+  },
+  // Chapitre 14 · Grandes Manœuvres (ouvert par 4 médailles au chapitre 9)
+  {
+    // 14 · 1/6 — RESPIRATION en MOTO : une plaque moto après le grand S, une boucle de virages géants et de chicanes rapides en moto, une seconde plaque rend la voiture.
+    id: "balade",
+    name: "Balade \xE0 Moto",
+    decor: "desert",
+    chapitre: "manoeuvres",
+    difficulty: 1,
+    profil: "sprint",
+    meca: [
+      "moto"
+    ],
+    appris: "D\xE9part : deux boosters, grand S, puis une plaque moto. Au programme : une boucle en moto (virages \xE9normes, chicanes rapides, bosses), retour en voiture sur une seconde plaque, route large.",
+    goal: {
+      id: "under",
+      t: 36
+    },
+    opts: {
+      l: 6
+    },
+    pilot: {
+      vCap: 66
+    },
+    script: "start*2 B2 ZZR S.o B2 S2 HL S B2 ZR4 S ZL4 S C*3 B2 S [crs1] S2 [cds1] B HR S2 B2 S.o S WI W WO S B2 finish*2",
+    medals: {
+      cristal: 31.5,
+      or: 33.2,
+      argent: 38.1,
+      bronze: 44.8
+    }
+  },
+  {
+    // 14 · 2/6 — PORTES et INTERRUPTEURS (logique du circuit, js/sim/logic.js) : un mur plein barre la route (porte, groupe 2) ; l'interrupteur (pièce du groupe 1) l'ouvre,
+    // elle se referme derrière au checkpoint. Le second interrupteur (groupe 3) ouvre la dernière porte (groupe 4) et fait apparaître le pont de l'arrivée (groupe 5, caché au
+    // départ). Un retour au checkpoint remet portes et pont dans l'état du checkpoint (on repasse sur l'interrupteur). Sans la logique, le pilote ne finit pas.
+    id: "interrupteurs",
+    name: "Interrupteurs",
+    decor: "factory",
+    chapitre: "manoeuvres",
+    difficulty: 2,
+    profil: "atelier",
+    meca: [
+      "logic"
+    ],
+    appris: "D\xE9part : deux boosters, deux cases. Au programme : un interrupteur ouvre la porte devant (elle se referme derri\xE8re, au checkpoint), un second ouvre la derni\xE8re porte et fait appara\xEEtre le pont de l\u2019arriv\xE9e.",
+    goal: {
+      id: "norespawn"
+    },
+    opts: {
+      l: 6
+    },
+    pilot: {
+      vCap: 62
+    },
+    script: "start*2 B2 S2 [crs1] S B2 S3 HR S2 C*3 S B2 S3 ZR3 S ZL3 S HL S B2 S3 WI W WO S2 B finish*2",
+    medals: {
+      cristal: 30.5,
+      or: 32.1,
+      argent: 36.9,
+      bronze: 43.3
+    },
+    lgZones: [
+      {
+        g: 1,
+        at: 0.0903
+      },
+      {
+        g: 3,
+        at: 0.6715
+      },
+      {
+        g: 5,
+        at: 0.9134
+      },
+      {
+        g: 5,
+        at: 0.935
+      }
+    ],
+    obst: [
+      {
+        k: "wallS",
+        at: 0.2,
+        side: 0,
+        s: 1.5,
+        g: 2
+      },
+      {
+        k: "wallS",
+        at: 0.8,
+        side: 0,
+        s: 1.5,
+        g: 4
+      }
+    ],
+    lg: {
+      off: [
+        5
+      ],
+      rules: [
+        {
+          on: [
+            "zone",
+            1
+          ],
+          do: [
+            [
+              "hide",
+              2
+            ],
+            [
+              "fx",
+              "sound",
+              "ding"
+            ]
+          ]
+        },
+        {
+          on: [
+            "cp",
+            1
+          ],
+          do: [
+            [
+              "show",
+              2
+            ]
+          ]
+        },
+        {
+          on: [
+            "zone",
+            3
+          ],
+          do: [
+            [
+              "hide",
+              4
+            ],
+            [
+              "show",
+              5
+            ],
+            [
+              "fx",
+              "burst",
+              "#ffd23e"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  {
+    // 14 · 3/6 — PIÈCES MOBILES : deux ASCENSEURS et deux GLISSIÈRES à des rythmes différents (vitesses 100, 35 et 100, 25 % ; amplitudes 1 niveau, ½ case).
+    id: "plateaux",
+    name: "Plateaux Mobiles",
+    decor: "volcano",
+    chapitre: "manoeuvres",
+    difficulty: 3,
+    profil: "atelier",
+    meca: [
+      "lift",
+      "slide"
+    ],
+    appris: "D\xE9part : trois boosters \u2192 vague. Au programme : deux ascenseurs et deux glissi\xE8res, chacun \xE0 son rythme (on lit le mouvement avant d\u2019y entrer), tr\xE8s grands virages, chicanes longues, route large.",
+    goal: {
+      id: "nowall"
+    },
+    opts: {
+      l: 6
+    },
+    pilot: {
+      vCap: 62
+    },
+    movers: [
+      {
+        ms: 100,
+        ma: 1
+      },
+      {
+        ms: 100,
+        ma: 0.5
+      },
+      {
+        ms: 35,
+        ma: 1
+      },
+      {
+        ms: 25,
+        ma: 0.5
+      }
+    ],
+    script: "start*2 B3 S2 [crs1] S2~ B HR S2= C S HL S B2 S2~ B ZR3 S ZL3 S2= C*3 S B2 WI W WO S2 B finish*2",
+    medals: {
+      cristal: 29.5,
+      or: 31.1,
+      argent: 35.8,
+      bronze: 42
+    }
+  },
+  {
+    // 14 · 4/6 — RELAIS DE VÉHICULES : épingles en MOTO, retour en voiture, lacets en BATEAU sur l'eau, puis une plaque DELTAPLANE et un grand saut jusqu'à l'arrivée.
+    id: "relais",
+    name: "Relais",
+    decor: "isles",
+    chapitre: "manoeuvres",
+    difficulty: 3,
+    profil: "technique",
+    meca: [
+      "moto",
+      "bateau",
+      "deltaplane"
+    ],
+    appris: "D\xE9part : descente vers la plage. Au programme : \xE9pingles en moto, route \xE9troite, retour en voiture, lacets en bateau sur l\u2019eau, puis une plaque deltaplane et un grand saut jusqu\u2019\xE0 l\u2019arriv\xE9e.",
+    goal: {
+      id: "under",
+      t: 58
+    },
+    opts: {
+      l: 6
+    },
+    script: "start*2 [cdi1] [dn2] [cdo1] S.o B R L R L B S2 C*3 B NI N2 NO S.o S R B S L B S.n S2.a R.a L.a R.a L.a S.a S.n B2 S C*3 R B S2 ZR S ZL B S.e B2 UU GR4 DD S4 finish*2",
+    medals: {
+      cristal: 51.4,
+      or: 54.2,
+      argent: 62.3,
+      bronze: 73.1
+    }
+  },
+  {
+    // 14 · 5/6 — AIGUILLAGE : une bifurcation (SPL … MRG) où le VÉHICULE est une décision : à gauche la route en voiture (épingles, boosters), à droite une plaque bateau,
+    // l'eau tout droit, une plaque qui rend la voiture. Le pilote prend l'eau (46,3 s) ; par la route il met 48,0 s (tools/test-extension.mjs). L'objectif demande l'eau.
+    id: "aiguillage",
+    name: "Aiguillage",
+    decor: "reef",
+    chapitre: "manoeuvres",
+    difficulty: 4,
+    profil: "technique",
+    meca: [
+      "aiguillage",
+      "bateau"
+    ],
+    appris: "D\xE9part : route \xE9troite, \xE9pingles. Au programme : un aiguillage : \xE0 gauche la route en voiture, \xE0 droite l\u2019eau en bateau (plus directe, plus rapide si l\u2019on tient la barre), \xE9pingles, chicanes.",
+    goal: {
+      id: "under",
+      t: 47.5
+    },
+    opts: {
+      l: 6
+    },
+    script: "start*2 B2 NI N NO R L B S2 C*3 B R S L B SPL B2 L R B R L B2 ALTP S.n S5.a S.n MRG B S2 R B S L C*3 B ZR S ZL B S2 R L B S2 finish*2",
+    medals: {
+      cristal: 44,
+      or: 46.3,
+      argent: 53.2,
+      bronze: 62.5
+    }
+  },
+  {
+    // 14 · 6/6 — ÉPREUVE FINALE : sous la PLUIE au coucher du soleil, un tronçon en MOTO, un ASCENSEUR et une GLISSIÈRE, un INTERRUPTEUR qui ouvre la porte (elle se
+    // referme derrière au checkpoint) et un second qui fait apparaître le pont d'après le checkpoint.
+    id: "finale",
+    name: "Grande Finale",
+    decor: "caves",
+    chapitre: "manoeuvres",
+    difficulty: 5,
+    profil: "atelier",
+    meca: [
+      "logic",
+      "lift",
+      "slide",
+      "pluie",
+      "moto"
+    ],
+    appris: "D\xE9part : tube de lancement. Au programme : sous la pluie, une moto, un ascenseur et une glissi\xE8re, un interrupteur qui ouvre la porte, un autre qui fait appara\xEEtre un pont : les deux chapitres d\u2019un coup.",
+    goal: {
+      id: "norespawn"
+    },
+    opts: {
+      l: 6
+    },
+    pilot: {
+      vCap: 60
+    },
+    params: {
+      rain: 60,
+      envSeed: 33,
+      ambiance: {
+        sky: "sunset",
+        weather: "rain"
+      }
+    },
+    movers: [
+      {
+        ms: 80,
+        ma: 1
+      },
+      {
+        ms: 50,
+        ma: 0.5
+      }
+    ],
+    script: "start*2 TI TM TO B2 S2 S.o S2~ B HR S2= C*3 S B2 S3 ZR3 S ZL3 S.o S HL S B2 S3 C*3 B S2 WI W WO S2 B finish*2",
+    medals: {
+      cristal: 33.5,
+      or: 35.2,
+      argent: 40.5,
+      bronze: 47.6
+    },
+    lgZones: [
+      {
+        g: 1,
+        at: 0.4193
+      },
+      {
+        g: 3,
+        at: 0.6429
+      },
+      {
+        g: 5,
+        at: 0.8323
+      },
+      {
+        g: 5,
+        at: 0.8509
+      }
+    ],
+    obst: [
+      {
+        k: "wallS",
+        at: 0.7578,
+        side: 0,
+        s: 1.5,
+        g: 2
+      }
+    ],
+    lg: {
+      off: [
+        5
+      ],
+      rules: [
+        {
+          on: [
+            "zone",
+            1
+          ],
+          do: [
+            [
+              "hide",
+              2
+            ],
+            [
+              "fx",
+              "sound",
+              "ding"
+            ]
+          ]
+        },
+        {
+          on: [
+            "cp",
+            2
+          ],
+          do: [
+            [
+              "show",
+              2
+            ]
+          ]
+        },
+        {
+          on: [
+            "zone",
+            3
+          ],
+          do: [
+            [
+              "show",
+              5
+            ],
+            [
+              "fx",
+              "burst",
+              "#ffb070"
+            ]
+          ]
+        }
+      ]
+    }
   }
 ];
-BUILTIN_TRACKS.sort((a, b) => CAREER_ORDER.indexOf(a.decor) - CAREER_ORDER.indexOf(b.decor) || a.difficulty - b.difficulty);
+BUILTIN_TRACKS.sort((a, b) => CHAPTER_KEYS.indexOf(chapterKeyOf(a)) - CHAPTER_KEYS.indexOf(chapterKeyOf(b)) || a.difficulty - b.difficulty);
 function wallSolid(t, def, o, i, a, ux, uz) {
   const tile = t.tilesAt(Math.floor(a[0] / CELL), Math.floor(a[2] / CELL)).find((x) => (x.o === 1 || x.o === 2) && PIECES[x.t].kind === "line" && !PIECES[x.t].rise);
   if (!tile) throw new Error(`${def.id} : obstacle \xAB ${o.k} \xBB sur un mur (at ${o.at}) : pas de ligne droite sur un mur \xE0 cet endroit`);
@@ -15715,7 +16363,10 @@ function buildBuiltin(def) {
         ry,
         s: o.s || 1,
         c: o.c || 0,
-        ph: o.ph || 0
+        ph: o.ph || 0,
+        ...o.g ? {
+          g: o.g
+        } : {}
       }, {
         exact: true
       });
@@ -15725,6 +16376,16 @@ function buildBuiltin(def) {
       wallSolid(t, def, o, i, a, dx / l, dz / l);
     }
   }
+  if (def.lgZones && t.path) {
+    const P = t.path, n = def.laps > 1 ? Math.floor(P.length / def.laps) : P.length;
+    for (const z of def.lgZones) {
+      const a = P[Math.min(n - 1, Math.floor(n * z.at))];
+      const near = t.tilesAt(Math.floor(a[0] / CELL), Math.floor(a[2] / CELL)).filter((x) => !PIECES[x.t].checkpoint).sort((u, v) => Math.abs(u.l * LEVEL_H - a[1]) - Math.abs(v.l * LEVEL_H - a[1]));
+      if (!near.length) throw new Error(`${def.id} : zone du groupe ${z.g} (at ${z.at}) : aucune pi\xE8ce sous le chemin`);
+      near[0].g = z.g;
+    }
+  }
+  if (def.lg) t.setLogic(def.lg);
   return t;
 }
 
@@ -19792,8 +20453,108 @@ var seasonBounds = (n) => ({
   starts: SEASON_EPOCH + (n - 1) * SEASON_MS,
   ends: SEASON_EPOCH + n * SEASON_MS
 });
+var SEASON_POOL_1 = Object.freeze([
+  "eclats",
+  "canyon",
+  "tremplins",
+  "spirale",
+  "verglas",
+  "grandtour",
+  "lianes",
+  "canopee",
+  "spores",
+  "serpent",
+  "racines",
+  "temple",
+  "lagon",
+  "recif",
+  "phare",
+  "vrille",
+  "lunaire",
+  "archipel",
+  "neons",
+  "boulevard",
+  "hyper",
+  "metro",
+  "tours",
+  "viaduc",
+  "aurore",
+  "banquise",
+  "glacier",
+  "helice",
+  "couronne",
+  "blizzard",
+  "braises",
+  "coulee",
+  "basalte",
+  "cheminee",
+  "caldeira",
+  "eruption",
+  "quai",
+  "navette",
+  "ceinture",
+  "grandanneau",
+  "apesanteur",
+  "zenith",
+  "courant",
+  "corail",
+  "epave",
+  "meduses",
+  "abysses",
+  "barriere",
+  "chaine",
+  "laminoir",
+  "engrenages",
+  "fonderie",
+  "presse",
+  "usinefolle",
+  "envol",
+  "suspendues",
+  "rafales",
+  "montgolfieres",
+  "pontvents",
+  "cite",
+  "galerie",
+  "plafond",
+  "cristalfele",
+  "miroir",
+  "vrilles",
+  "coeur"
+]);
+var SEASON_POOL_2 = Object.freeze([
+  ...SEASON_POOL_1,
+  "clairdelune",
+  "manege",
+  "averse",
+  "bourrasques",
+  "givre",
+  "ressorts",
+  "balade",
+  "interrupteurs",
+  "plateaux",
+  "relais",
+  "aiguillage",
+  "finale"
+]);
+var SEASON_POOLS = Object.freeze([
+  Object.freeze({
+    from: 1,
+    ids: SEASON_POOL_1
+  }),
+  Object.freeze({
+    from: 16,
+    decided: "2026-11-25",
+    ids: SEASON_POOL_2
+  })
+]);
+function seasonPoolIds(n) {
+  let ids = SEASON_POOLS[0].ids;
+  for (const p of SEASON_POOLS) if (n >= p.from) ids = p.ids;
+  return ids;
+}
 function seasonTracks(n) {
-  const pool = BUILTIN_TRACKS.filter((d) => d.decor !== "atelier");
+  const pool = seasonPoolIds(n).map((id) => BUILTIN_TRACKS.find((d) => d.id === id));
+  if (pool.some((d) => !d)) throw new Error("Saison " + n + " : un circuit du pool n\u2019existe pas.");
   const r = rng("season#" + n), out = [];
   while (out.length < SEASON_TRACKS) {
     const d = pool[Math.floor(r() * pool.length)];
@@ -20421,4 +21182,4 @@ Deno.serve(createHandler({
   serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   allowedOrigin: Deno.env.get("ALLOWED_ORIGIN") ?? "*"
 }));
-globalThis.__COPYTRACK_BUILD__ = "b0ba031220d4f7fc";
+globalThis.__COPYTRACK_BUILD__ = "36aaa12c9150ba34";

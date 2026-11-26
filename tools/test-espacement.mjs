@@ -28,15 +28,22 @@ test('l\'écart se mesure entre points de retour consécutifs (départ, checkpoi
   assert.deepEqual(lap.gaps, [20, 20, 38]); assert.equal(lap.maxCpOnly, 58, 'sans le passage de ligne (mesure de l\'audit) : 58 s, avec : 38 s');
 });
 test('les chiffres de l\'audit sont retrouvés : « Double Hélice » 52 s, « Cheminée » 41,7 s, « Récif » 41,1 s, « Viaduc » 41 s, « Épave » 40,2 s ; médiane des 72 circuits 28,6 s', () => {
-  assert.equal(rows.length, 72);
-  assert.ok(rows.every((r) => r.ok && r.respawns === 0), 'le pilote finit les 72 circuits sans réapparition');
+  const rows72 = rows.slice(0, 72);      // les circuits de l'audit (0.17.0 : 12 circuits ajoutés après eux, voir le test suivant)
+  assert.equal(rows.length, 84);
+  assert.ok(rows.every((r) => r.ok && r.respawns === 0), 'le pilote finit les 84 circuits sans réapparition');
   assert.deepEqual([by.helice.max, by.cheminee.max, by.recif.max, by.viaduc.max, by.epave.max].map(r1), [52, 41.7, 41.1, 41, 40.2]);
   const med = (a) => { const s = a.slice().sort((x, y) => x - y); return (s[35] + s[36]) / 2; };
-  assert.ok(Math.abs(med(rows.map((r) => r.maxCpOnly)) - 28.6) < 0.2, 'médiane (checkpoints seuls, comme l\'audit) : ' + med(rows.map((r) => r.maxCpOnly)));
+  assert.ok(Math.abs(med(rows72.map((r) => r.maxCpOnly)) - 28.6) < 0.2, 'médiane (checkpoints seuls, comme l\'audit) : ' + med(rows72.map((r) => r.maxCpOnly)));
   assert.equal(by.helice.checkpoints, 1);
 });
 test('les circuits à plusieurs tours comptent la ligne comme point de retour : « Grand Anneau » et « Caldeira » passent la règle, alors qu\'à checkpoints seuls ils la dépasseraient', () => {
   for (const id of ['grandanneau', 'caldeira']) { assert.ok(by[id].maxCpOnly > MAX_GAP, id); assert.ok(by[id].max <= MAX_GAP, id); assert.ok(!Object.hasOwn(ex, id), id + ' n\'est pas une exception'); }
+});
+
+test('0.17.0 : les 12 circuits ajoutés (après la règle) la respectent tous, sans exception : 30 s au plus entre deux points de retour, sur la course du pilote', () => {
+  const added = rows.slice(72);
+  assert.equal(added.length, 12);
+  for (const r of added) { assert.ok(r.max <= MAX_GAP, `${r.id} : ${r.max} s`); assert.ok(!Object.hasOwn(ex, r.id), r.id); assert.ok(r.checkpoints >= 1, r.id); }
 });
 
 console.log('La liste figée');
@@ -46,7 +53,7 @@ test('tools/checkpoints-exceptions.json est EXACTEMENT l\'ensemble des circuits 
   for (const id of Object.keys(ex)) { assert.ok(by[id], id + ' existe'); assert.ok(by[id].max <= ex[id] + TOLERANCE, `${id} : ${by[id].max} > ${ex[id]} figé`); assert.ok(Math.abs(by[id].max - ex[id]) < 0.1, `${id} : valeur figée à remettre à jour (${ex[id]} → ${by[id].max})`); }
   assert.equal(over.length, 26);
 });
-test('les 72 circuits existants passent la règle (les exceptions passent, figées) ; un circuit de la liste qui grandirait, ou qui respecterait la règle sans être retiré, échoue', () => {
+test('les 84 circuits existants passent la règle (les exceptions passent, figées) ; un circuit de la liste qui grandirait, ou qui respecterait la règle sans être retiré, échoue', () => {
   for (const r of rows) assert.deepEqual(spacingFails(r.id, runCache(r.id), ex), [], r.id);
   const S = runCache('helice');
   assert.match(spacingFails('helice', S, { helice: 45 }).join(), /plus que les 45\.0 s figés/, 'un écart qui grandit');

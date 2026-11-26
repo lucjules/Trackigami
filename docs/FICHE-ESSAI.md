@@ -1,4 +1,4 @@
-# Fiche d'essai — protocole et 72 circuits
+# Fiche d'essai — protocole et 84 circuits
 
 _Ce fichier est généré (`node tools/fiche-essai.mjs`) : ne pas le modifier à la main. Le protocole complet, le consentement et le calendrier sont dans [ESSAIS.md](ESSAIS.md)._
 
@@ -82,9 +82,9 @@ Le testeur le remplit lui-même, dans le jeu : rien à recopier ici.
 - Testeurs qui comptent : au moins **8** ; débutants ≥ 3, habitués ≥ 3 ; clavier ≥ 3, écran tactile ≥ 2, manette ≥ 1.
 - Médailles visées par le recalage (Mode B) : bronze atteint par ~90 % des testeurs, argent ~50 %, or ~15 %, cristal rarement.
 
-## 5. Les 72 circuits
+## 5. Les 84 circuits
 
-À remplir en jouant, **un circuit après l'autre, dans l'ordre de la carrière** (un chapitre s'ouvre avec 4 médailles dans le précédent), par un testeur qui veut tout passer en revue : facultatif, les temps arrivent tout seuls par les statistiques.
+À remplir en jouant, **un circuit après l'autre, dans l'ordre de la carrière** (un chapitre s'ouvre avec 4 médailles dans le précédent ; un chapitre bonus, dans le chapitre que dit sa description), par un testeur qui veut tout passer en revue : facultatif, les temps arrivent tout seuls par les statistiques.
 Pour chaque circuit, coche ce qui est vrai et note le meilleur temps. Le temps du pilote automatique sert de repère.
 
 | Case | Question |
@@ -716,6 +716,110 @@ _Piques, balancier, marteau, balayeur, ascenseur, glissière : chaque mécanisme
 
 - Départ : deux boosters → deux cases. Au programme : un marteau, un balancier puis un mur coulissant à la suite. Puis chicanes rapides, route large sous un portique, tube qui tourne à droite puis à gauche.
 - Pilote automatique : **39.4 s** · médailles : cristal 37.5 · or 39.4 · argent 45.3 · bronze 53.2
+- Objectif bonus ★ : Finir sans réapparition
+- [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
+- Mon meilleur temps : ______ s · Notes : ____________________________________________
+
+## Chapitre 13 · Les Éléments
+
+_Nuit d’auteur, trois tours, pluie, rafales, givre, ressorts : le temps qu’il fait change la conduite._
+
+### 73. Clair de Lune — Sprint, ◆◇◇◇◇
+
+- Départ : une route large sous la lune. Au programme : une nuit brumeuse choisie par l’auteur, l’aube qui se lève au checkpoint, la brume qui se dissipe avant la descente, chicanes rapides, grand S.
+- Pilote automatique : **35.8 s** · médailles : cristal 34 · or 35.8 · argent 41.2 · bronze 48.4
+- Objectif bonus ★ : Finir en moins de 39 s
+- [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
+- Mon meilleur temps : ______ s · Notes : ____________________________________________
+
+### 74. Manège — Speedway, ◆◇◇◇◇
+
+- Départ : deux boosters → un virage relevé. Au programme : trois tours d’une boucle courte, quatre très grands virages relevés, chicanes longues, route large ; la ligne sert de point de retour à chaque tour.
+- Pilote automatique : **81.6 s** · médailles : cristal 77.5 · or 81.6 · argent 93.9 · bronze 110.2
+- Objectif bonus ★ : Finir sans toucher de muret
+- [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
+- Mon meilleur temps : ______ s · Notes : ____________________________________________
+
+### 75. Averse — Sprint, ◆◆◇◇◇
+
+- Départ : trois cases → chicane longue sous l’averse. Au programme : piste mouillée et flaques qui glissent, une pluie qui forcit et faiblit, très grands virages, chicanes, route large, grand S.
+- Pilote automatique : **34.4 s** · médailles : cristal 32.6 · or 34.4 · argent 39.5 · bronze 46.4
+- Objectif bonus ★ : Finir sans toucher de muret
+- [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
+- Mon meilleur temps : ______ s · Notes : ____________________________________________
+
+### 76. Bourrasques — Speedway, ◆◆◆◇◇
+
+- Départ : quatre boosters → virage relevé. Au programme : vent constant et rafales qui poussent par à-coups (selon le cap, il aide ou freine), très grands virages relevés, wall-ride, route large, chicanes.
+- Pilote automatique : **51.6 s** · médailles : cristal 49.1 · or 51.6 · argent 59.4 · bronze 69.7
+- Objectif bonus ★ : Finir sans réapparition
+- [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
+- Mon meilleur temps : ______ s · Notes : ____________________________________________
+
+### 77. Nuit de Givre — Technique, ◆◆◆◇◇
+
+- Départ : deux boosters → épingles. Au programme : plaques de givre sur les lignes droites (on les évite ou on les traverse droit), route étroite, wall-ride, croisement traversé deux fois, descente.
+- Pilote automatique : **50.0 s** · médailles : cristal 47.5 · or 50 · argent 57.5 · bronze 67.5
+- Objectif bonus ★ : Finir sans toucher de muret
+- [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
+- Mon meilleur temps : ______ s · Notes : ____________________________________________
+
+### 78. Ressorts — Acrobatique, ◆◆◆◆◇
+
+- Départ : basse gravité → grand saut reçu sur une plaque. Au programme : trois ressorts latéraux qui font sauter d’une voie à l’autre (la voie s’arrête : il faut le ressort), sauts reçus sur des plaques, route large.
+- Pilote automatique : **55.9 s** · médailles : cristal 53.1 · or 55.9 · argent 64.3 · bronze 75.5
+- Objectif bonus ★ : 2 réceptions parfaites
+- [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
+- Mon meilleur temps : ______ s · Notes : ____________________________________________
+
+## Chapitre 14 · Grandes Manœuvres
+
+_Moto, portes et interrupteurs, plateaux mobiles, relais de véhicules, aiguillage par l’eau, épreuve finale._
+
+### 79. Balade à Moto — Sprint, ◆◇◇◇◇
+
+- Départ : deux boosters, grand S, puis une plaque moto. Au programme : une boucle en moto (virages énormes, chicanes rapides, bosses), retour en voiture sur une seconde plaque, route large.
+- Pilote automatique : **33.2 s** · médailles : cristal 31.5 · or 33.2 · argent 38.1 · bronze 44.8
+- Objectif bonus ★ : Finir en moins de 36 s
+- [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
+- Mon meilleur temps : ______ s · Notes : ____________________________________________
+
+### 80. Interrupteurs — Mécanisme, ◆◆◇◇◇
+
+- Départ : deux boosters, deux cases. Au programme : un interrupteur ouvre la porte devant (elle se referme derrière, au checkpoint), un second ouvre la dernière porte et fait apparaître le pont de l’arrivée.
+- Pilote automatique : **32.1 s** · médailles : cristal 30.5 · or 32.1 · argent 36.9 · bronze 43.3
+- Objectif bonus ★ : Finir sans réapparition
+- [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
+- Mon meilleur temps : ______ s · Notes : ____________________________________________
+
+### 81. Plateaux Mobiles — Mécanisme, ◆◆◆◇◇
+
+- Départ : trois boosters → vague. Au programme : deux ascenseurs et deux glissières, chacun à son rythme (on lit le mouvement avant d’y entrer), très grands virages, chicanes longues, route large.
+- Pilote automatique : **31.1 s** · médailles : cristal 29.5 · or 31.1 · argent 35.8 · bronze 42
+- Objectif bonus ★ : Finir sans toucher de muret
+- [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
+- Mon meilleur temps : ______ s · Notes : ____________________________________________
+
+### 82. Relais — Technique, ◆◆◆◇◇
+
+- Départ : descente vers la plage. Au programme : épingles en moto, route étroite, retour en voiture, lacets en bateau sur l’eau, puis une plaque deltaplane et un grand saut jusqu’à l’arrivée.
+- Pilote automatique : **54.1 s** · médailles : cristal 51.4 · or 54.2 · argent 62.3 · bronze 73.1
+- Objectif bonus ★ : Finir en moins de 58 s
+- [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
+- Mon meilleur temps : ______ s · Notes : ____________________________________________
+
+### 83. Aiguillage — Technique, ◆◆◆◆◇
+
+- Départ : route étroite, épingles. Au programme : un aiguillage : à gauche la route en voiture, à droite l’eau en bateau (plus directe, plus rapide si l’on tient la barre), épingles, chicanes.
+- Pilote automatique : **46.3 s** · médailles : cristal 44 · or 46.3 · argent 53.2 · bronze 62.5
+- Objectif bonus ★ : Finir en moins de 47.5 s
+- [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
+- Mon meilleur temps : ______ s · Notes : ____________________________________________
+
+### 84. Grande Finale — Mécanisme, ◆◆◆◆◆
+
+- Départ : tube de lancement. Au programme : sous la pluie, une moto, un ascenseur et une glissière, un interrupteur qui ouvre la porte, un autre qui fait apparaître un pont : les deux chapitres d’un coup.
+- Pilote automatique : **35.2 s** · médailles : cristal 33.5 · or 35.2 · argent 40.5 · bronze 47.6
 - Objectif bonus ★ : Finir sans réapparition
 - [ ] Départ  - [ ] Passage  - [ ] Médaille  - [ ] Bonus  - [ ] Checkpoint  - [ ] Fini
 - Mon meilleur temps : ______ s · Notes : ____________________________________________

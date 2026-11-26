@@ -135,12 +135,12 @@ try {
     // pas au milieu d'un autre test ; elle a son propre test (test-browser-i18n.mjs).
     await app(() => { window.copytrack.settings.telemetry = false; window.copytrack.saveSettings(); if (window.copytrack.ui.modalOpen) window.copytrack.ui.closeModal(); });
     assert.ok(await app(() => !document.getElementById('menu').classList.contains('hidden')), 'le menu doit être visible');
-    assert.equal(await app(() => window.copytrack.builtins.length), 72);
+    assert.equal(await app(() => window.copytrack.builtins.length), 84);      // (0.17.0 : 72 + les 12 des chapitres bonus 13 et 14)
   });
 
-  await test('carrière : 72 circuits listés, le premier se lance et se conduit', async () => {
+  await test('carrière : 84 circuits listés en 14 chapitres, le premier se lance et se conduit', async () => {
     await click('[data-action="play"]');
-    await waitApp(() => document.querySelectorAll('#track-list .card:not(.daily-card):not(.season-card)').length === 72);      // (hors défi du jour et circuits de la saison de la semaine, qui s'ajoutent en tête)
+    await waitApp(() => document.querySelectorAll('#track-list .card:not(.daily-card):not(.season-card)').length === 84 && document.querySelectorAll('#track-list .chapter-head').length === 14);      // (hors défi du jour et circuits de la saison de la semaine, qui s'ajoutent en tête)
     await shot('03-carriere');
     await click('#track-list .track-group:not(.ch-open) .card:not(.daily-card):not(.season-card):not(.locked)');
     await waitApp(() => !document.getElementById('race-hub').classList.contains('hidden'));     // une carte ouvre la fiche du circuit (Race Hub)
@@ -267,7 +267,7 @@ try {
     assert.match(await page.evaluate(() => document.querySelector('.hub-mastery').textContent), /1 \/ 4/, 'arrivée sans choc : un défi de maîtrise');
     await app(() => { window.copytrack.closeRaceHub(); window.copytrack.showScreen('level'); });
     await waitApp(() => document.querySelector('#prog-level') && /Niveau \d+/.test(document.querySelector('#prog-level').textContent));
-    assert.match(await page.evaluate(() => document.querySelector('#prog-level').textContent), /Licence C[\s\S]*Licence S[\s\S]*Pour la Licence C[\s\S]*Défis de maîtrise : 1 \/ 288/);
+    assert.match(await page.evaluate(() => document.querySelector('#prog-level').textContent), /Licence C[\s\S]*Licence S[\s\S]*Pour la Licence C[\s\S]*Défis de maîtrise : 1 \/ 336/);      // (quatre défis par circuit : 4 × 84)
     await app(async () => { const { profile, saveProfile } = await import('/js/profile.js'); const p = profile(); p.xp = 0; p.mastery = {}; p.xpDay = null; saveProfile(); window.copytrack.showMenu('menu'); });
   });
 
@@ -1706,6 +1706,9 @@ try {
 
   await test('cycle de vie (TECH-016) : record aux commandes illisibles : « Regarder » refusé proprement ; une exception à la construction ramène au menu ou à la fiche, sans session fantôme ni objet de scène laissé', async () => {
     const snap = () => app(() => { const A = window.copytrack; return { scene: A.scene.children.length, track: A.scenery.trackGroup.children.length }; });
+    // (0.17.0) La démonstration du menu tire son circuit au hasard ; depuis que des circuits officiels ont de la pluie (effets ajoutés à la scène, libérés à la sortie), deux démonstrations
+    // n'ont plus forcément le même nombre d'objets : on la fixe sur le premier circuit pendant ce test, pour comparer la scène à elle-même.
+    await app(() => { window.__rnd = Math.random; Math.random = () => 0; });
     await lcClean();
     await app(async () => { const A = window.copytrack, s = await import('/js/storage.js'), v = await import('/js/version.js'); s.saveRecord(A.builtins[0].key, { time: 33.3, inputs: '%%%not-base64%%%', pv: v.PHYS_VER, date: Date.now(), splits: [] }); A.showMenu('tracks'); A.openBuiltinHub(0, 'tracks'); });
     await waitApp(() => !document.getElementById('race-hub').classList.contains('hidden') && document.getElementById('hub-watch'));
@@ -1734,6 +1737,7 @@ try {
     assert.deepEqual(st2, { mode: 'menu', demo: true });
     assert.deepEqual(await snap(), before2, 'scène propre');
     dropProvoked();            // (les erreurs journalisées ci-dessus sont CELLES QU'ON A PROVOQUÉES : console.error de la construction avortée)
+    await app(() => { Math.random = window.__rnd; });
     await lcClean();
     await app(() => window.copytrack.showMenu('menu'));
   });

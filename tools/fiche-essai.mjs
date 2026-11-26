@@ -23,7 +23,7 @@ export function buildFiche(defs = BUILTIN_TRACKS) {
     : human ? `Les médailles de ${human} circuits sur ${defs.length} sont calées sur des temps de testeurs, les autres sur le pilote automatique (Or = son temps).`
       : 'Les médailles sont calées sur le pilote automatique (**Or = son temps**), pas encore sur des testeurs : c’est ce que les essais vérifient.';
   const L = [];
-  L.push('# Fiche d\'essai — protocole et 72 circuits', '',
+  L.push(`# Fiche d'essai — protocole et ${defs.length} circuits`, '',
     '_Ce fichier est généré (`node tools/fiche-essai.mjs`) : ne pas le modifier à la main. Le protocole complet, le consentement et le calendrier sont dans [ESSAIS.md](ESSAIS.md)._', '',
     `Physique : **${PHYS_VER}**. ${calage}`, '',
     '## 1. Le testeur (une fiche par testeur et par appareil)', '',
@@ -53,8 +53,8 @@ export function buildFiche(defs = BUILTIN_TRACKS) {
     '## 4. Cibles du protocole (rappel)', '',
     `- Testeurs qui comptent : au moins **${QUOTAS.testeurs}** ; débutants ≥ ${QUOTAS.experience.debutant}, habitués ≥ ${QUOTAS.experience.habitue} ; clavier ≥ ${QUOTAS.controls.clavier}, écran tactile ≥ ${QUOTAS.controls.tactile}, manette ≥ ${QUOTAS.controls.manette}.`,
     '- Médailles visées par le recalage (Mode B) : bronze atteint par ~90 % des testeurs, argent ~50 %, or ~15 %, cristal rarement.', '',
-    '## 5. Les 72 circuits', '',
-    'À remplir en jouant, **un circuit après l\'autre, dans l\'ordre de la carrière** (un chapitre s\'ouvre avec 4 médailles dans le précédent), par un testeur qui veut tout passer en revue : facultatif, les temps arrivent tout seuls par les statistiques.',
+    `## 5. Les ${defs.length} circuits`, '',
+    'À remplir en jouant, **un circuit après l\'autre, dans l\'ordre de la carrière** (un chapitre s\'ouvre avec 4 médailles dans le précédent ; un chapitre bonus, dans le chapitre que dit sa description), par un testeur qui veut tout passer en revue : facultatif, les temps arrivent tout seuls par les statistiques.',
     'Pour chaque circuit, coche ce qui est vrai et note le meilleur temps. Le temps du pilote automatique sert de repère.', '',
     '| Case | Question |', '| --- | --- |',
     '| Départ | le départ est clair dès la première seconde, sans réapparaître |',

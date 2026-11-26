@@ -127,7 +127,12 @@ await pageTest('TECH-019 (b) : règle de logique « montrer » sur un groupe : l
 console.log('TECH-063 : garage, minuterie de l\'atelier');
 await pageTest('TECH-063 : modification de l\'atelier puis sortie en moins de 120 ms : aucune voiture orpheline, aucun appel après la sortie', async (page) => {
   const r = await page.evaluate(async () => {
-    const A = window.copytrack, before = A.scene.children.length;
+    // (0.17.0) La démonstration du menu tire son circuit au hasard ; certains circuits officiels ont maintenant de la pluie (effets ajoutés à la scène, libérés à la sortie) :
+    // on fixe la démonstration sur le premier circuit, avant ET après le garage, pour comparer la scène à elle-même.
+    const rnd = Math.random; Math.random = () => 0;
+    const A = window.copytrack;
+    A.showMenu('menu');
+    const before = A.scene.children.length;
     A.openGarage();
     const inGarage = A.scene.children.length;
     const S = A.session;
@@ -138,7 +143,9 @@ await pageTest('TECH-063 : modification de l\'atelier puis sortie en moins de 12
     const modeAfter = A.mode;
     await new Promise((r) => setTimeout(r, 400));
     A.audio.setVoice = sv;
-    return { before, inGarage, after: A.scene.children.length, modeAfter, voiceAfterExit: voice - voiceBefore };
+    const after = A.scene.children.length;
+    Math.random = rnd;
+    return { before, inGarage, after, modeAfter, voiceAfterExit: voice - voiceBefore };
   });
   precondition(r.modeAfter === 'menu', 'on est bien sorti du garage : ' + JSON.stringify(r));
   assert.equal(r.after, r.before, 'une voiture orpheline est restée dans la scène : ' + JSON.stringify(r));

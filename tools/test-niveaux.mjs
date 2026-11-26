@@ -1,4 +1,5 @@
-// Tests de la refonte du level design (0.9.6 → 0.9.9 : les 66 circuits d'origine ; 0.9.15 : un 12e chapitre bonus de 6 circuits « Mécanismes ») : node tools/test-niveaux.mjs   (npm test)
+// Tests de la refonte du level design (0.9.6 → 0.9.9 : les 66 circuits d'origine ; 0.9.15 : un 12e chapitre bonus de 6 circuits « Mécanismes » ; 0.17.0 : deux chapitres bonus de plus,
+// « Les Éléments » et « Grandes Manœuvres », rangés après l'Atelier : voir aussi tools/test-extension.mjs) : node tools/test-niveaux.mjs   (npm test)
 //
 // Chaque circuit porte un champ `profil` (sprint, speedway, technique, rollercoaster, acrobatique). Le CONTRAT de ces profils, et de tout circuit
 // « bien fait », est écrit une seule fois, dans tools/contract.mjs (checkDef) : chaque profil est défini par des mesures (virages serrés, vitesse,
@@ -12,7 +13,7 @@ import { join } from 'node:path';
 import { test, finish } from './harness.mjs';
 
 const { BUILTIN_TRACKS, buildBuiltin } = await import('../js/tracks.js');
-const { CAREER_ORDER: THEME_ORDER } = await import('../js/themes.js');
+const { CAREER_ORDER: THEME_ORDER, EXTRA_CHAPTERS, chapterKeyOf } = await import('../js/themes.js');
 const { PROFILS, CHAPTERS, CHAPTER_SIZE, GOALS } = await import('../js/career.js');
 const { VERSION } = await import('../js/version.js');
 const { OBST } = await import('../js/obstacles.js');
@@ -51,6 +52,9 @@ const CAREER = [
   ['envol', 'suspendues', 'rafales', 'montgolfieres', 'pontvents', 'cite'],
   ['galerie', 'plafond', 'cristalfele', 'miroir', 'vrilles', 'coeur'],
   ['garde', 'cadence', 'pendule', 'rotors', 'montecharge', 'grandatelier'],       // chapitre bonus : les mécanismes, un à un
+  // 0.17.0 (COMPLETE-002) : deux chapitres bonus, chacun centré sur ce que la carrière n'employait pas
+  ['clairdelune', 'manege', 'averse', 'bourrasques', 'givre', 'ressorts'],       // Les Éléments : ambiance, tours, pluie, vent, givre, ressorts
+  ['balade', 'interrupteurs', 'plateaux', 'relais', 'aiguillage', 'finale'],      // Grandes Manœuvres : moto, logique, pièces mobiles, véhicules, aiguillage, finale
 ];
 
 // Les trois premiers jetons après « start » : l'ouverture de chaque circuit, écrite ici pour que personne ne la change sans le vouloir.
@@ -79,6 +83,10 @@ const OPENINGS = {
   galerie: 'B2 S3.y S2', plafond: 'B TW.f S2^', cristalfele: 'B2 S.f V8', miroir: 'B3 BLL S', vrilles: 'B [cdi1] [dn2]', coeur: 'B S2.v500 S',
   // chapitre 12 (Atelier, bonus) : bumpers et piques · piques escamotables · balancier · marteau + balayeur · ascenseur + glissière · tout ensemble
   garde: 'B4 [cds1] S', cadence: 'B3 S3 [crs1]', pendule: 'B2 [crs1] S2', rotors: 'S3 B3 [cds1]', montecharge: 'B5 S [crs1]', grandatelier: 'B2 S2 [cds1]',
+  // chapitre 13 (Les Éléments) : route large sous la lune · boucle à trois tours · chicane sous l'averse · virage relevé dans le vent · épingles givrées · basse gravité
+  clairdelune: 'WI W WO', manege: 'B2 S2 B', averse: 'S3 ZR3 B2', bourrasques: 'B4 BRR S2', givre: 'B2 R L', ressorts: 'B2 S.g40 [crs1]',
+  // chapitre 14 (Grandes Manœuvres) : grand S avant la moto · interrupteur · vague · descente vers la plage · route étroite · tube de lancement
+  balade: 'B2 ZZR S.o', interrupteurs: 'B2 S2 [crs1]', plateaux: 'B3 S2 [crs1]', relais: '[cdi1] [dn2] [cdo1]', aiguillage: 'B2 NI N', finale: 'TI TM TO',
 };
 
 console.log('Version et profils');
@@ -87,17 +95,21 @@ test('version 0.9.9 ou plus (bêta X.Y.Z suit package.json ; 0.10.0 depuis le re
   assert.equal(VERSION, 'bêta ' + v);
   assert.ok(a > 0 || b > 9 || (b === 9 && c >= 9), v);
 });
-test('les 72 circuits (66 + 6 de l’Atelier) ont chacun un profil connu', () => {
-  assert.equal(BUILTIN_TRACKS.length, 72);
+test('les 84 circuits (66 + 6 de l’Atelier + 12 des chapitres bonus de la 0.17.0) ont chacun un profil connu', () => {
+  assert.equal(BUILTIN_TRACKS.length, 84);
   assert.deepEqual(BUILTIN_TRACKS.filter((d) => !d.profil).map((d) => d.id), []);
   for (const d of BUILTIN_TRACKS) assert.ok(PROFILS[d.profil], d.id + ' : profil inconnu ' + d.profil);
 });
-test('douze chapitres de six circuits, un thème par chapitre, dans l’ordre de THEME_ORDER et des CHAPTERS de la carrière', () => {
-  assert.equal(chapters.length, 12);
-  chapters.forEach((ch, i) => {
-    assert.equal(ch.length, CHAPTER_SIZE, 'chapitre ' + (i + 1));
-    assert.ok(ch.every((d) => d.decor === THEME_ORDER[i]), 'thème du chapitre ' + (i + 1));
+test('quatorze chapitres de six circuits : un thème par chapitre pour les douze premiers (ordre de THEME_ORDER et des CHAPTERS), puis les deux chapitres bonus de la 0.17.0 (champ chapitre)', () => {
+  assert.equal(chapters.length, 14);
+  chapters.forEach((ch, i) => assert.equal(ch.length, CHAPTER_SIZE, 'chapitre ' + (i + 1)));
+  chapters.slice(0, 12).forEach((ch, i) => {
+    assert.ok(ch.every((d) => d.decor === THEME_ORDER[i] && !d.chapitre), 'thème du chapitre ' + (i + 1));
     assert.equal(CHAPTERS[i].decor, THEME_ORDER[i]);
+  });
+  chapters.slice(12).forEach((ch, i) => {
+    assert.ok(ch.every((d) => d.chapitre === EXTRA_CHAPTERS[i] && chapterKeyOf(d) === EXTRA_CHAPTERS[i]), 'chapitre ' + (13 + i));
+    assert.equal(CHAPTERS[12 + i].key, EXTRA_CHAPTERS[i]); assert.ok(CHAPTERS[12 + i].bonus);
   });
 });
 test('chaque chapitre (sauf l’Atelier, bonus) propose les cinq profils', () => {
@@ -129,7 +141,7 @@ console.log('Départs');
 test('aucun départ « classique » (booster, deux droites, virage) : le contrat le vérifie, ici sur la liste écrite', () => {
   for (const d of BUILTIN_TRACKS) assert.ok(!/^(B S2? R|S2 B|S B|B S2 B|B S2 R)/.test(d.script.replace(/^start\S* /, '')), d.id + ' : ' + openingOf(d));
 });
-test('les 72 ouvertures sont toutes différentes', () => {
+test('les 84 ouvertures sont toutes différentes', () => {
   const o = BUILTIN_TRACKS.map(openingOf);
   const dup = o.filter((x, i) => o.indexOf(x) !== i);
   assert.deepEqual(dup, [], 'ouvertures en double');
@@ -183,6 +195,7 @@ test('chaque circuit a son texte « ce qu’il enseigne » (infobulle de la cart
 test('étoiles de difficulté : le premier circuit d’un chapitre a au plus 3 étoiles, l’avant-dernier au moins 3, le dernier au moins 4, et un sprint n’a jamais plus de 2', () => {
   for (const ch of chapters.slice(0, 11)) { assert.ok(ch[0].difficulty <= 3, ch[0].id); assert.ok(ch[4].difficulty >= 3 && ch[5].difficulty >= 4, ch[5].id); }
   assert.ok(chapters[11].every((d) => d.difficulty <= 3), 'l’Atelier est un chapitre d’apprentissage : trois étoiles au plus');
+  for (const ch of chapters.slice(12)) { assert.equal(ch[0].difficulty, 1, ch[0].id + ' : un chapitre bonus de la 0.17.0 commence par une respiration'); assert.ok(ch[5].difficulty >= 4, ch[5].id); }
   for (const d of BUILTIN_TRACKS.filter((x) => x.profil === 'sprint')) assert.ok(d.difficulty <= 2, d.id);
 });
 test('temps de référence : le pilote met le même temps qu’à la dernière validation (tools/golden-temps.json ; node tools/golden.mjs --update après un changement voulu)', () => {
@@ -206,10 +219,10 @@ test('état d’un chapitre et bilan de carrière (écran de carrière)', () => 
   assert.match(m, /careerSummary\(ids, gd\)/); assert.match(m, /chapterState\(/); assert.match(m, /class="ch-badge/);
   assert.match(read('css/style.css'), /\.career-summary/);
 });
-test('fiche d’essai et calage humain : 72 sections, gabarit de temps vide, médailles proposées à partir du meilleur temps', () => {
+test('fiche d’essai et calage humain : 84 sections, gabarit de temps vide, médailles proposées à partir du meilleur temps', () => {
   const f = read('docs/FICHE-ESSAI.md'), tpl = JSON.parse(read('docs/temps-humains.json'));
-  assert.equal((f.match(/^### \d+\. /gm) || []).length, 72);
-  assert.equal((f.match(/^## Chapitre /gm) || []).length, 12);
+  assert.equal((f.match(/^### \d+\. /gm) || []).length, 84);
+  assert.equal((f.match(/^## Chapitre /gm) || []).length, 14);
   assert.deepEqual(Object.keys(tpl), BUILTIN_TRACKS.map((d) => d.id));
   assert.deepEqual(proposeFromHumans([16.2, 15.4, 17.9]), { cristal: 15.4, or: 16.2, argent: 18.5, bronze: 21.6 });
   for (const d of BUILTIN_TRACKS) assert.ok(f.includes('### ' + (BUILTIN_TRACKS.indexOf(d) + 1) + '. ' + d.name), d.id);
@@ -267,7 +280,7 @@ test('obstacles : types connus, placés sur le parcours, et le pilote n’en tou
 });
 test('les circuits à plusieurs tours se referment (l’arrivée jouxte le départ) et le pilote les finit', () => {
   const laps = BUILTIN_TRACKS.filter((d) => d.laps > 1);
-  assert.deepEqual(laps.map((d) => d.id).sort(), ['caldeira', 'grandanneau']);
+  assert.deepEqual(laps.map((d) => d.id).sort(), ['caldeira', 'grandanneau', 'manege']);
   for (const d of laps) { const S = runTrack(buildBuiltin(d)); assert.ok(S.ok && S.respawns === 0, d.id + ' : ' + S.reason); }
 });
 test('circuit de sauts (Tremplins) : finissable de 44 à 64 m/s (158 à 230 km/h) à l’abord des rampes, sans checkpoint survolable (gravité 16 : les vols sont longs, une rampe prise à plus de 68 m/s dépasse la réception)', () => {

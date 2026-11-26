@@ -1188,6 +1188,9 @@ export function scriptTrack(name, script, opts = {}) {
       case 'TALTP': teeAlt(true); break;
       case 'TMRG': teeMerge(); break;
       case 'V': l += n; break;
+      // 0.17.0 : LJR / LJL : la route reprend dans la colonne voisine (à droite / à gauche), même niveau, même cap, sans pièce entre les deux : la voie d'avant s'arrête
+      // (un vide), on la quitte par-dessus la bordure, poussé par un ressort latéral (revêtement « spring »). Le chemin du pilote saute de colonne au même endroit.
+      case 'LJR': case 'LJL': { const r = rot(h, op === 'LJR' ? 1 : -1, 0); x += Math.round(r.x); z += Math.round(r.z); break; }
       default: throw new Error('Instruction inconnue : ' + op);
     }
   }

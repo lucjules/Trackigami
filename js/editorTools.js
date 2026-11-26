@@ -313,6 +313,16 @@ function endpoints(tile) {
   ];
 }
 
+// 0.17.0 : la sortie `a` (au bout d'une route à ressort latéral) se reçoit-elle sur l'entrée `b` d'une route parallèle (voir checkTrack) ?
+function springHop(a, b) {
+  if (!a.exit || !b.entry || a.tile === b.tile || a.tile.s !== 'spring' || (a.tile.p || 150) === 100) return false;
+  const hl = Math.hypot(a.dx, a.dz), bl = Math.hypot(b.dx, b.dz) || 1;
+  if (hl < 0.3) return false;
+  const ex = a.dx / hl, ez = a.dz / hl, sg = (a.tile.p || 150) > 100 ? 1 : -1, rx = -ez * sg, rz = ex * sg;
+  const vx = b.x - a.x, vz = b.z - a.z, along = vx * ex + vz * ez, side = vx * rx + vz * rz;
+  return (ex * b.dx + ez * b.dz) / bl < -0.7 && Math.abs(b.y - a.y) <= LEVEL_H * 1.2 && along >= -CELL / 2 && along <= 2 * CELL && side >= CELL / 2 && side <= 1.5 * CELL;
+}
+
 function platformAt(track, x, z, y) {
   for (const t of track.tilesAt(Math.floor(x / CELL), Math.floor(z / CELL))) {
     if (PIECES[t.t].kind !== 'area' || Math.abs(baseY(t) - y) >= 1.2) continue;
@@ -382,6 +392,11 @@ export function checkTrack(track) {
     const hl = Math.hypot(e.dx, e.dz);
     if (hl < 0.3) { issues.push({ tile: e.tile, level: 'error', msg: `${PIECES[e.tile.t].label} : une extrémité n'est reliée à rien.` }); continue; }
     const ex = e.dx / hl, ez = e.dz / hl;
+    // 0.17.0 : un ressort latéral au bout d'une route la fait quitter par-dessus la bordure vers la voie voisine (« saut d'une voie ») : la réception est l'entrée d'une
+    // route parallèle, du côté où il pousse (force > 100 % : à droite), une colonne plus loin sur le côté, à peu près au même endroit et au même niveau. Les deux
+    // extrémités (le bout de la voie au ressort, l'entrée de la voie d'arrivée) sont alors reliées.
+    const sp2 = e.exit ? free.find((g) => springHop(e, g)) : free.find((g) => springHop(g, e));
+    if (sp2) { join(e.tile, sp2.tile); continue; }
     for (const f of free) {
       if (f === e || f.tile === e.tile) continue;
       const fl = Math.hypot(f.dx, f.dz) || 1;

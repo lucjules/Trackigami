@@ -4,12 +4,13 @@
 // Chaque circuit a un `profil` (sprint, speedway, technique, rollercoaster, acrobatique), une ouverture qui n'est celle d'aucun autre, et respecte le contrat
 // de tools/contract.mjs (mesuré sur la course du pilote automatique). Le commentaire au-dessus de chaque circuit décrit son ouverture et ce qu'il enseigne ;
 // goal = objectif bonus ; pilot.vCap = vitesse visée du pilote qui sert à calibrer les médailles (or = son temps).
-// ATTENTION : l'ordre de ce fichier n'est PAS celui de la carrière. La liste est triée en bas de fichier (thème selon CAREER_ORDER, puis difficulté) :
+// ATTENTION : l'ordre de ce fichier n'est PAS celui de la carrière. La liste est triée en bas de fichier (chapitre selon CHAPTER_KEYS : le décor, ou le champ `chapitre` des chapitres bonus
+// de la 0.17.0, puis difficulté) :
 // pour retrouver le numéro d'un circuit, utiliser BUILTIN_TRACKS.findIndex() après import, jamais la position dans le texte.
 import { scriptTrack } from './track.js';
-import { CAREER_ORDER } from './themes.js';
+import { CHAPTER_KEYS, chapterKeyOf } from './themes.js';
 import { datan2, hypot2 } from './dmath.js';
-import { CELL } from './constants.js';
+import { CELL, LEVEL_H } from './constants.js';
 import { PIECES } from './pieces.js';
 import { isObstacle } from './obstacles.js';
 import { GAME_NAME } from './version.js';
@@ -919,12 +920,163 @@ export const BUILTIN_TRACKS = [
     obst: [{ k: 'hammer', at: 0.0272, side: 0, s: 1, ph: 0.966 }, { k: 'pendulum', at: 0.14637, side: 0, s: 1, ph: 0.7 }, { k: 'slider', at: 0.26813, side: 0, s: 1, ph: 0.396 }, { k: 'board_right', at: 0.415, side: -20, rot: Math.PI }, { k: 'board_left', at: 0.513, side: 20, rot: Math.PI }, { k: 'gantry', at: 0.635, side: 0, s: 2 }, { k: 'beamPost', at: 0.629, side: 36 }, { k: 'beamPost', at: 0.629, side: -36 }, { k: 'board_warn', at: 0.675, side: 18, rot: Math.PI }, { k: 'block', at: 0.96, side: 28 }, { k: 'block', at: 0.96, side: -28 }],
     medals: { cristal: 37.5, or: 39.4, argent: 45.3, bronze: 53.2 },
   },
+  // ---- 0.17.0 (COMPLETE-002, COMPLETE-011) : deux chapitres BONUS, chacun centré sur ce que la carrière n'employait pas ----------------------------------------------
+  // Champ `chapitre` (themes.js : EXTRA_CHAPTERS) : ces circuits sont rangés APRÈS l'Atelier (les 72 d'avant gardent leur rang) mais s'ouvrent au milieu de la carrière
+  // (career.js : BONUS). Chacun déclare dans `meca` la mécanique qu'il enseigne ; tools/contract.mjs vérifie qu'elle y est et que le pilote la vit. Mécanismes à rythme
+  // (pièces mobiles) placés par recherche (tools/lab.mjs) : le pilote passe sans choc de 75 à 115 % de sa vitesse, et repart de chaque checkpoint.
+  // Chapitre 13 · Les Éléments (ouvert par 4 médailles au chapitre 5)
+  {
+    // 13 · 1/6 — RESPIRATION : une AMBIANCE d'auteur (nuit brumeuse, musique du menu) et trois DÉCLENCHEURS (l'aube se lève au checkpoint, la brume se dissipe avant la
+    // descente, un éclat à l'arrivée). Sprint sans difficulté : route large, chicanes rapides, deux virages énormes, grand S.
+    id: 'clairdelune', name: 'Clair de Lune', decor: 'isles', chapitre: 'elements', difficulty: 1, profil: 'sprint',
+    meca: ['ambiance', 'declencheurs'],
+    appris: 'Départ : une route large sous la lune. Au programme : une nuit brumeuse choisie par l’auteur, l’aube qui se lève au checkpoint, la brume qui se dissipe avant la descente, chicanes rapides, grand S.',
+    goal: { id: 'under', t: 39 },
+    opts: { l: 4 }, pilot: { vCap: 66 },
+    params: { ambiance: { sky: 'night', fog: 'misty', music: 'menu' }, scripts: [{ x: -16, z: -15, a: 'sky', v: 'dawn' }, { x: -31, z: -21, a: 'fog', v: 'clear' }, { x: -33, z: -31, a: 'burst', v: '#ffd66b' }] },
+    script: 'start*3 WI W WO B3 HL S B2 ZR4 S ZL4 S C*3 B2 WI W WO S HR S B2 [cdi1] [dn2] [cdo1] S ZZL S B2 finish*3',
+    medals: { cristal: 34, or: 35.8, argent: 41.2, bronze: 48.4 },
+  },
+  {
+    // 13 · 2/6 — RESPIRATION : TROIS TOURS d'une boucle courte (le passage de la ligne est un point de retour à chaque tour). Quatre très grands virages relevés,
+    // chicanes longues dans les deux sens, route large : on apprend la boucle, on la réussit au troisième tour.
+    id: 'manege', name: 'Manège', decor: 'city', chapitre: 'elements', difficulty: 1, profil: 'speedway',
+    meca: ['tours'],
+    appris: 'Départ : deux boosters → un virage relevé. Au programme : trois tours d’une boucle courte, quatre très grands virages relevés, chicanes longues, route large ; la ligne sert de point de retour à chaque tour.',
+    goal: { id: 'nowall' },
+    opts: { l: 4 }, pilot: { vCap: 70 }, laps: 3,
+    script: 'start*2 B2 S2 B BRR B2 ZR3 ZL3 BRR S WI WO BRR C*2 B ZL3 ZR3 BRR finish*2',
+    medals: { cristal: 77.5, or: 81.6, argent: 93.9, bronze: 110.2 },
+  },
+  {
+    // 13 · 3/6 — PLUIE : piste mouillée partout (moins d'adhérence) et FLAQUES qui glissent beaucoup ; la pluie forcit et faiblit pendant la course (envVary).
+    // Mêmes flaques au même endroit pour tout le monde (graine). Ambiance : averse et brume.
+    id: 'averse', name: 'Averse', decor: 'jungle', chapitre: 'elements', difficulty: 2, profil: 'sprint',
+    meca: ['pluie'],
+    appris: 'Départ : trois cases → chicane longue sous l’averse. Au programme : piste mouillée et flaques qui glissent, une pluie qui forcit et faiblit, très grands virages, chicanes, route large, grand S.',
+    goal: { id: 'nowall' },
+    opts: { l: 6 }, pilot: { vCap: 66 },
+    params: { rain: 85, envSeed: 12, envVary: true, ambiance: { sky: 'day', weather: 'rain', fog: 'misty' } },
+    script: 'start*2 S3 ZR3 B2 S ZL3 S B2 HR S2 C*3 B2 S2 [crs1] S2 [cds1] B HL S B2 WI W WO S ZZR S B2 finish*2',
+    medals: { cristal: 32.6, or: 34.4, argent: 39.5, bronze: 46.4 },
+  },
+  {
+    // 13 · 4/6 — VENT et RAFALES : vent de 25 % vers le nord-ouest, rafales de 70 % dans la même direction. Selon le cap, il pousse, freine ou déporte (+5 s pour le
+    // pilote par rapport au même circuit sans vent). Très grands virages relevés, wall-ride sur le mur droit, route large.
+    id: 'bourrasques', name: 'Bourrasques', decor: 'sky', chapitre: 'elements', difficulty: 3, profil: 'speedway',
+    meca: ['vent', 'rafales'],
+    appris: 'Départ : quatre boosters → virage relevé. Au programme : vent constant et rafales qui poussent par à-coups (selon le cap, il aide ou freine), très grands virages relevés, wall-ride, route large, chicanes.',
+    goal: { id: 'norespawn' },
+    opts: { l: 8 }, pilot: { vCap: 70 },
+    params: { wind: 25, windDir: 315, gust: 70, envSeed: 5 },
+    script: 'start*2 B4 BRR S2 B ZR4 S ZL4 B BLL S2 C*2 WI W WO S B BRR S2 B [tr02l] S4> [tr20l] S B BLL S2 C*3 ZR3 S ZL3 S B2 BRR S2 B2 finish*2',
+    medals: { cristal: 49.1, or: 51.6, argent: 59.4, bronze: 69.7 },
+  },
+  {
+    // 13 · 5/6 — GIVRE : plaques de verglas (35 % d'adhérence) sur les lignes droites, de nuit sous la neige. Circuit technique : épingles, route étroite, wall-ride,
+    // croisement traversé deux fois ; les plaques se voient et s'évitent (la graine 28 en met sur la trajectoire du pilote).
+    id: 'givre', name: 'Nuit de Givre', decor: 'polar', chapitre: 'elements', difficulty: 3, profil: 'technique',
+    meca: ['givre'],
+    appris: 'Départ : deux boosters → épingles. Au programme : plaques de givre sur les lignes droites (on les évite ou on les traverse droit), route étroite, wall-ride, croisement traversé deux fois, descente.',
+    goal: { id: 'nowall' },
+    opts: { l: 6 },
+    params: { frost: 100, envSeed: 28, ambiance: { sky: 'night', weather: 'snow' } },
+    script: 'start*2 B2 R L R B S2 C*3 B NI N2 NO S R S L B ZR S ZL B C*3 S [tr01s] S2< [tr10s] S R B S L B S JX R C*3 R R S JX R S NI N NO [cdi1] [dn2] [cdo1] S B finish*1',
+    medals: { cristal: 47.5, or: 50, argent: 57.5, bronze: 67.5 },
+  },
+  {
+    // 13 · 6/6 — RESSORT et GRAVITÉ : trois RESSORTS LATÉRAUX au bout d'une voie qui s'arrête (LJR / LJL, track.js : la route reprend dans la colonne voisine) : à 150 %
+    // ils font sauter d'une voie à l'autre par-dessus la bordure ; une plaque de basse GRAVITÉ (40 %) allonge le premier saut, une autre rend la gravité normale.
+    id: 'ressorts', name: 'Ressorts', decor: 'orbit', chapitre: 'elements', difficulty: 4, profil: 'acrobatique',
+    meca: ['ressort', 'gravite'],
+    appris: 'Départ : basse gravité → grand saut reçu sur une plaque. Au programme : trois ressorts latéraux qui font sauter d’une voie à l’autre (la voie s’arrête : il faut le ressort), sauts reçus sur des plaques, route large.',
+    goal: { id: 'perfect', n: 2 },
+    opts: { l: 12 }, pilot: { vCap: 60 },
+    script: 'start*2 B2 S.g40 [crs1] UU GR2 G5 V-5 [plate3]*10 S3 S.g100 B S.r150 LJR S2 C*3 B2 S [crv1] UU G2 V-2 [plate3]*10 ZR3 S B S.r50 LJL S2 C*3 B2 S [crv2] UX G2 DX DX [cdo2] [plate3]*10 S B S.r150 LJR S2 ZL3 S WI W WO S B2 finish*2',
+    medals: { cristal: 53.1, or: 55.9, argent: 64.3, bronze: 75.5 },
+  },
+  // Chapitre 14 · Grandes Manœuvres (ouvert par 4 médailles au chapitre 9)
+  {
+    // 14 · 1/6 — RESPIRATION en MOTO : une plaque moto après le grand S, une boucle de virages géants et de chicanes rapides en moto, une seconde plaque rend la voiture.
+    id: 'balade', name: 'Balade à Moto', decor: 'desert', chapitre: 'manoeuvres', difficulty: 1, profil: 'sprint',
+    meca: ['moto'],
+    appris: 'Départ : deux boosters, grand S, puis une plaque moto. Au programme : une boucle en moto (virages énormes, chicanes rapides, bosses), retour en voiture sur une seconde plaque, route large.',
+    goal: { id: 'under', t: 36 },
+    opts: { l: 6 }, pilot: { vCap: 66 },
+    script: 'start*2 B2 ZZR S.o B2 S2 HL S B2 ZR4 S ZL4 S C*3 B2 S [crs1] S2 [cds1] B HR S2 B2 S.o S WI W WO S B2 finish*2',
+    medals: { cristal: 31.5, or: 33.2, argent: 38.1, bronze: 44.8 },
+  },
+  {
+    // 14 · 2/6 — PORTES et INTERRUPTEURS (logique du circuit, js/sim/logic.js) : un mur plein barre la route (porte, groupe 2) ; l'interrupteur (pièce du groupe 1) l'ouvre,
+    // elle se referme derrière au checkpoint. Le second interrupteur (groupe 3) ouvre la dernière porte (groupe 4) et fait apparaître le pont de l'arrivée (groupe 5, caché au
+    // départ). Un retour au checkpoint remet portes et pont dans l'état du checkpoint (on repasse sur l'interrupteur). Sans la logique, le pilote ne finit pas.
+    id: 'interrupteurs', name: 'Interrupteurs', decor: 'factory', chapitre: 'manoeuvres', difficulty: 2, profil: 'atelier',
+    meca: ['logic'],
+    appris: 'Départ : deux boosters, deux cases. Au programme : un interrupteur ouvre la porte devant (elle se referme derrière, au checkpoint), un second ouvre la dernière porte et fait apparaître le pont de l’arrivée.',
+    goal: { id: 'norespawn' },
+    opts: { l: 6 }, pilot: { vCap: 62 },
+    script: 'start*2 B2 S2 [crs1] S B2 S3 HR S2 C*3 S B2 S3 ZR3 S ZL3 S HL S B2 S3 WI W WO S2 B finish*2',
+    medals: { cristal: 30.5, or: 32.1, argent: 36.9, bronze: 43.3 },
+    lgZones: [{ g: 1, at: 0.0903 }, { g: 3, at: 0.6715 }, { g: 5, at: 0.9134 }, { g: 5, at: 0.935 }],
+    obst: [{ k: 'wallS', at: 0.2, side: 0, s: 1.5, g: 2 }, { k: 'wallS', at: 0.8, side: 0, s: 1.5, g: 4 }],
+    lg: { off: [5], rules: [{ on: ['zone', 1], do: [['hide', 2], ['fx', 'sound', 'ding']] }, { on: ['cp', 1], do: [['show', 2]] }, { on: ['zone', 3], do: [['hide', 4], ['show', 5], ['fx', 'burst', '#ffd23e']] }] },
+  },
+  {
+    // 14 · 3/6 — PIÈCES MOBILES : deux ASCENSEURS et deux GLISSIÈRES à des rythmes différents (vitesses 100, 35 et 100, 25 % ; amplitudes 1 niveau, ½ case).
+    id: 'plateaux', name: 'Plateaux Mobiles', decor: 'volcano', chapitre: 'manoeuvres', difficulty: 3, profil: 'atelier',
+    meca: ['lift', 'slide'],
+    appris: 'Départ : trois boosters → vague. Au programme : deux ascenseurs et deux glissières, chacun à son rythme (on lit le mouvement avant d’y entrer), très grands virages, chicanes longues, route large.',
+    goal: { id: 'nowall' },
+    opts: { l: 6 }, pilot: { vCap: 62 },
+    movers: [{ ms: 100, ma: 1 }, { ms: 100, ma: 0.5 }, { ms: 35, ma: 1 }, { ms: 25, ma: 0.5 }],
+    script: 'start*2 B3 S2 [crs1] S2~ B HR S2= C S HL S B2 S2~ B ZR3 S ZL3 S2= C*3 S B2 WI W WO S2 B finish*2',
+    medals: { cristal: 29.5, or: 31.1, argent: 35.8, bronze: 42 },
+  },
+  {
+    // 14 · 4/6 — RELAIS DE VÉHICULES : épingles en MOTO, retour en voiture, lacets en BATEAU sur l'eau, puis une plaque DELTAPLANE et un grand saut jusqu'à l'arrivée.
+    id: 'relais', name: 'Relais', decor: 'isles', chapitre: 'manoeuvres', difficulty: 3, profil: 'technique',
+    meca: ['moto', 'bateau', 'deltaplane'],
+    appris: 'Départ : descente vers la plage. Au programme : épingles en moto, route étroite, retour en voiture, lacets en bateau sur l’eau, puis une plaque deltaplane et un grand saut jusqu’à l’arrivée.',
+    goal: { id: 'under', t: 58 },
+    opts: { l: 6 },
+    script: 'start*2 [cdi1] [dn2] [cdo1] S.o B R L R L B S2 C*3 B NI N2 NO S.o S R B S L B S.n S2.a R.a L.a R.a L.a S.a S.n B2 S C*3 R B S2 ZR S ZL B S.e B2 UU GR4 DD S4 finish*2',
+    medals: { cristal: 51.4, or: 54.2, argent: 62.3, bronze: 73.1 },
+  },
+  {
+    // 14 · 5/6 — AIGUILLAGE : une bifurcation (SPL … MRG) où le VÉHICULE est une décision : à gauche la route en voiture (épingles, boosters), à droite une plaque bateau,
+    // l'eau tout droit, une plaque qui rend la voiture. Le pilote prend l'eau (46,3 s) ; par la route il met 48,0 s (tools/test-extension.mjs). L'objectif demande l'eau.
+    id: 'aiguillage', name: 'Aiguillage', decor: 'reef', chapitre: 'manoeuvres', difficulty: 4, profil: 'technique',
+    meca: ['aiguillage', 'bateau'],
+    appris: 'Départ : route étroite, épingles. Au programme : un aiguillage : à gauche la route en voiture, à droite l’eau en bateau (plus directe, plus rapide si l’on tient la barre), épingles, chicanes.',
+    goal: { id: 'under', t: 47.5 },
+    opts: { l: 6 },
+    script: 'start*2 B2 NI N NO R L B S2 C*3 B R S L B SPL B2 L R B R L B2 ALTP S.n S5.a S.n MRG B S2 R B S L C*3 B ZR S ZL B S2 R L B S2 finish*2',
+    medals: { cristal: 44, or: 46.3, argent: 53.2, bronze: 62.5 },
+  },
+  {
+    // 14 · 6/6 — ÉPREUVE FINALE : sous la PLUIE au coucher du soleil, un tronçon en MOTO, un ASCENSEUR et une GLISSIÈRE, un INTERRUPTEUR qui ouvre la porte (elle se
+    // referme derrière au checkpoint) et un second qui fait apparaître le pont d'après le checkpoint.
+    id: 'finale', name: 'Grande Finale', decor: 'caves', chapitre: 'manoeuvres', difficulty: 5, profil: 'atelier',
+    meca: ['logic', 'lift', 'slide', 'pluie', 'moto'],
+    appris: 'Départ : tube de lancement. Au programme : sous la pluie, une moto, un ascenseur et une glissière, un interrupteur qui ouvre la porte, un autre qui fait apparaître un pont : les deux chapitres d’un coup.',
+    goal: { id: 'norespawn' },
+    opts: { l: 6 }, pilot: { vCap: 60 },
+    params: { rain: 60, envSeed: 33, ambiance: { sky: 'sunset', weather: 'rain' } },
+    movers: [{ ms: 80, ma: 1 }, { ms: 50, ma: 0.5 }],
+    script: 'start*2 TI TM TO B2 S2 S.o S2~ B HR S2= C*3 S B2 S3 ZR3 S ZL3 S.o S HL S B2 S3 C*3 B S2 WI W WO S2 B finish*2',
+    medals: { cristal: 33.5, or: 35.2, argent: 40.5, bronze: 47.6 },
+    lgZones: [{ g: 1, at: 0.4193 }, { g: 3, at: 0.6429 }, { g: 5, at: 0.8323 }, { g: 5, at: 0.8509 }],
+    obst: [{ k: 'wallS', at: 0.7578, side: 0, s: 1.5, g: 2 }],
+    lg: { off: [5], rules: [{ on: ['zone', 1], do: [['hide', 2], ['fx', 'sound', 'ding']] }, { on: ['cp', 2], do: [['show', 2]] }, { on: ['zone', 3], do: [['show', 5], ['fx', 'burst', '#ffb070']] }] },
+  },
 ];
 
 // 0.9 : un chapitre de carrière = un thème. Chapitres du plus facile au plus dur, et
 // dans chaque chapitre du plus facile au plus dur (tri stable : l'ordre d'écriture
 // départage les circuits de même difficulté).
-BUILTIN_TRACKS.sort((a, b) => CAREER_ORDER.indexOf(a.decor) - CAREER_ORDER.indexOf(b.decor) || a.difficulty - b.difficulty);
+// 0.17.0 : la clé du chapitre est `chapitre` s'il existe (chapitres bonus qui ne sont pas un décor : EXTRA_CHAPTERS, rangés après l'Atelier), sinon le décor : l'ordre des
+// 72 circuits d'avant est inchangé (aucun n'a de champ `chapitre`).
+BUILTIN_TRACKS.sort((a, b) => CHAPTER_KEYS.indexOf(chapterKeyOf(a)) - CHAPTER_KEYS.indexOf(chapterKeyOf(b)) || a.difficulty - b.difficulty);
 
 // 0.11.3 (wall-ride) : solide posé SUR un mur (obst { k, at, wall: 'bas' | 'haut', s }) : collé à la paroi, sur le bas du mur (il faut passer AU-DESSUS) ou sur le haut (il faut
 // passer DESSOUS), et la ligne du pilote automatique monte ou descend de 6 m sur les 110 m qui précèdent et le long du bloc (t.path.wallLine, hauteur visée en m, + = vers le
@@ -978,12 +1130,26 @@ export function buildBuiltin(def) {
       // Obstacles : calcul d'avant, inchangé au bit près.
       if (o.rot || !isObstacle(o.k)) { let k = Math.round((ry + (o.rot || 0)) / (Math.PI / 8)); while (k > 8) k -= 16; while (k <= -8) k += 16; ry = (k * Math.PI) / 8; } else ry = +ry.toFixed(4);
       // (circuit généré : valeurs exactes, jouées depuis la mémoire ; voir track/edit.js, normalizeDeco)
-      t.addDeco({ k: o.k, x: q(a[0] + (-dz / l) * (o.side || 0), 0.5), y: q(a[1] + (o.dy || 0), 0.1), z: q(a[2] + (dx / l) * (o.side || 0), 0.5), ry, s: o.s || 1, c: o.c || 0, ph: o.ph || 0 }, { exact: true });
+      // 0.17.0 : g = groupe de la logique du circuit (une porte qu'une règle cache ou montre) ; absent sur les 72 circuits d'avant, dont le code ne change pas.
+      t.addDeco({ k: o.k, x: q(a[0] + (-dz / l) * (o.side || 0), 0.5), y: q(a[1] + (o.dy || 0), 0.1), z: q(a[2] + (dx / l) * (o.side || 0), 0.5), ry, s: o.s || 1, c: o.c || 0, ph: o.ph || 0, ...(o.g ? { g: o.g } : {}) }, { exact: true });
     }
     for (const o of def.obst.filter((x) => x.wall).sort((x, y) => x.at - y.at)) {
       const i = Math.min(n - 2, Math.floor(n * o.at)), a = P[i], b = P[i + 1], dx = b[0] - a[0], dz = b[2] - a[2], l = hypot2(dx, dz) || 1;
       wallSolid(t, def, o, i, a, dx / l, dz / l);
     }
   }
+  // 0.17.0 (COMPLETE-002) : logique du circuit (js/sim/logic.js), pour les circuits à portes et interrupteurs. def.lgZones = [{ g, at }] : la pièce du chemin du
+  // pilote au point `at` (fraction du chemin, comme les obstacles) rejoint le groupe g (un interrupteur : la règle ['zone', g] se déclenche quand la voiture y entre) ;
+  // def.lg = les règles. Les 72 circuits d'avant n'ont ni l'un ni l'autre : leur code (et donc leur clé) ne change pas.
+  if (def.lgZones && t.path) {
+    const P = t.path, n = def.laps > 1 ? Math.floor(P.length / def.laps) : P.length;
+    for (const z of def.lgZones) {
+      const a = P[Math.min(n - 1, Math.floor(n * z.at))];
+      const near = t.tilesAt(Math.floor(a[0] / CELL), Math.floor(a[2] / CELL)).filter((x) => !PIECES[x.t].checkpoint).sort((u, v) => Math.abs(u.l * LEVEL_H - a[1]) - Math.abs(v.l * LEVEL_H - a[1]));
+      if (!near.length) throw new Error(`${def.id} : zone du groupe ${z.g} (at ${z.at}) : aucune pièce sous le chemin`);
+      near[0].g = z.g;
+    }
+  }
+  if (def.lg) t.setLogic(def.lg);
   return t;
 }
