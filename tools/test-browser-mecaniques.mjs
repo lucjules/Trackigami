@@ -132,8 +132,9 @@ try {
       assert.match(body, idx);
       assert.match(body, /4 \/ 36/);
       assert.equal(await page.locator('#prog-mech .mech-row:not(.locked)').count(), 4, 'les quatre vues');
-      assert.equal(await page.locator('#prog-mech .mech-row.locked').count(), 32, 'les autres restent à découvrir');
-      assert.equal(await page.locator('#prog-mech .mech-row.locked').first().evaluate((el) => !el.textContent.includes('Verglas') && !el.textContent.includes('Ice')), true, 'une mécanique non vue ne se dévoile pas');
+      const hidden = await page.locator('#prog-mech .mech-row.locked b').allInnerTexts();
+      assert.equal(hidden.reduce((n, t) => n + parseInt(t, 10), 0), 32, 'les 32 autres restent à découvrir (une ligne par famille) : ' + hidden.join(' / '));
+      assert.equal(await page.locator('#prog-mech .mech-row.locked').first().evaluate((el) => !/Verglas|Ice|Aimant|Magnet/.test(el.textContent)), true, 'une mécanique non vue ne se dévoile pas');
       if (lang === 'en') assert.deepEqual(await frenchLeft(page), [], 'rien de français dans l\'index en anglais');
       assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#prof-tabs .tab')].map((t) => t.dataset.ptab)), ['records', 'level', 'stats', 'unlocks', 'mech']);
       await ctx.close();

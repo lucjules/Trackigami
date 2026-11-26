@@ -5,13 +5,14 @@ import { esc } from '../dom.js';
 import { buildBuiltin } from '../tracks.js';
 import { goalLabel } from '../career.js';
 import { LESSONS, lessonDone, lessonsDone, nextLesson, completeLesson, LESSON_COINS, GRADUATE_COINS } from '../academy.js';
+import { MECH_LESSONS, mechLessonDone, mechLessonsDone, nextMechLesson, completeMechLesson, learnMechs } from '../academyMech.js';
 import { SKILLS, DRILLS, GRADE_NAMES, GRADE_ICONS, DRILL_COINS, drillLevel, drillBest, skillLevel, weakestDrill, gradeDrill, valueOf, describeMeasure, goalTexts, recordDrill } from '../skills.js';
 import { measureRun, drillAdvice } from '../analysis/drill.js';
 import { formatTime } from '../storage.js';
 import { addXp, XP } from '../progression.js';
 
 const bestText = (d, v) => (v == null ? '' : d.measure === 'zoneSpeed' ? `${Math.round(v)} km/h` : d.measure === 'zoneTime' ? `${v.toFixed(2).replace('.', ',')} s`
-  : d.measure === 'landings' ? `${v} / 3` : v >= 21 ? 'renforcé sans choc' : v >= 20 ? 'mini-turbo renforcé' : v >= 10 ? 'mini-turbo simple' : '');
+  : d.measure === 'landings' ? `${v} / 3` : d.measure === 'shocks' ? `${v} choc${v > 1 ? 's' : ''}` : v >= 21 ? 'renforcé sans choc' : v >= 20 ? 'mini-turbo renforcé' : v >= 10 ? 'mini-turbo simple' : '');
 
 export const academyMethods = {
   // Remplace {accelerate} {brake} {left} {right} {respawn} par les touches du joueur (ou les boutons à l'écran sur tactile).
@@ -29,6 +30,12 @@ export const academyMethods = {
         <span class="ac-name"><b>${esc(L.name)}</b><small>${esc(goalLabel(L.goal))}</small></span>
         <button class="btn${nextLesson() === i ? ' primary' : ''}" data-lesson="${i}">${lessonDone(L.id) ? 'Refaire' : 'Jouer'}</button></li>`).join('')}</ol>
       <p class="meta">${done} / ${LESSONS.length} leçons réussies${done === LESSONS.length ? ' · 🎓 Diplômé !' : ''}</p>
+      <h3 class="ac-h">Leçons par mécanique</h3>
+      <p>Huit leçons courtes pour ce que la carrière te fait rencontrer : gravité, murs, eau, deltaplane, verre, aimant, obstacles animés, portes logiques. <b>+${LESSON_COINS} ◆</b> la première fois qu’une leçon est réussie.</p>
+      <ol class="academy-list ac-mech">${MECH_LESSONS.map((L, i) => `<li class="${mechLessonDone(L.id) ? 'done' : ''}"><span class="ac-st">${mechLessonDone(L.id) ? '✓' : i + 1}</span>
+        <span class="ac-name"><b>${esc(L.name)}</b><small>${esc(goalLabel(L.goal))}</small></span>
+        <button class="btn${nextMechLesson() === i && done === LESSONS.length ? ' primary' : ''}" data-mlesson="${i}">${mechLessonDone(L.id) ? 'Refaire' : 'Jouer'}</button></li>`).join('')}</ol>
+      <p class="meta">${mechLessonsDone()} / ${MECH_LESSONS.length} leçons par mécanique réussies</p>
       <h3 class="ac-h">Exercices évalués</h3>
       <p>Chaque exercice mesure un geste et le note <b>bronze</b>, <b>argent</b> ou <b>or</b>. Ta meilleure note fait le niveau de la compétence. <b>+${DRILL_COINS[1] + DRILL_COINS[2] + DRILL_COINS[3]} ◆</b> par exercice, une fois.</p>
       <div class="ac-skills">${SKILLS.map((sk) => { const l = skillLevel(sk.id); return `<span class="ac-skill${l >= 3 ? ' ac-gold' : ''}">${sk.icon} <span>${esc(sk.name)}</span> <b>${GRADE_ICONS[l]}</b></span>`; }).join('')}</div>
@@ -37,6 +44,7 @@ export const academyMethods = {
         <span class="ac-name"><b>${esc(d.name)}</b><small>${esc(SKILLS.find((sk) => sk.id === d.skill).name)}${b ? ` · meilleure mesure : ${esc(b)}` : ''}</small></span>
         <button class="btn${weak && weak.index === i ? ' primary' : ''}" data-drill="${i}">${l ? 'Refaire' : 'Jouer'}</button></li>`; }).join('')}</ol>`;
     for (const b of body.querySelectorAll('[data-lesson]')) b.onclick = () => { this.audio.click(); this.ui.closeModal(); this.lessonIntro(+b.dataset.lesson); };
+    for (const b of body.querySelectorAll('[data-mlesson]')) b.onclick = () => { this.audio.click(); this.ui.closeModal(); this.mechLessonIntro(+b.dataset.mlesson); };
     for (const b of body.querySelectorAll('[data-drill]')) b.onclick = () => { this.audio.click(); this.ui.closeModal(); this.drillIntro(+b.dataset.drill); };
     this.ui.modal({ title: '🎓 Académie', body, actions: [{ label: 'Fermer', primary: true }] });
   },
@@ -106,9 +114,54 @@ export const academyMethods = {
     this.playTrack(track, { academy: { index: i, tip: `Objectif : ${goalLabel(L.goal)}. ${L.tip}` }, trackKey: null, difficulty: 1, seed: 'academy-' + L.id });
   },
 
+  // Leçons par mécanique (academyMech.js, COMPLETE-008) : même déroulement que les six d'origine ; jouer la leçon marque ses mécaniques comme rencontrées (plus de rappel « Nouveau » en course).
+  mechLessonIntro(i) {
+    const L = MECH_LESSONS[i];
+    if (!L) return;
+    const body = `<ul class="tuto">${L.intro.map((t) => `<li>${this._lessonText(t)}</li>`).join('')}</ul><p class="academy-goal">🎯 Objectif : <b>${esc(goalLabel(L.goal))}</b></p>`;
+    this.ui.modal({
+      title: `Mécanique · ${L.name}`, body,
+      actions: [{ label: 'Commencer', primary: true, onClick: () => { setTimeout(() => this.playMechLesson(i), 0); return true; } }, { label: 'Retour', onClick: () => { setTimeout(() => this.academyMenu(), 0); return true; } }],
+    });
+  },
+
+  playMechLesson(i) {
+    const L = MECH_LESSONS[i];
+    if (!L) return;
+    learnMechs(i);
+    const track = buildBuiltin({ ...L, id: 'academy-' + L.id, name: L.name });
+    this.playTrack(track, { academy: { index: i, mech: true, tip: `Objectif : ${goalLabel(L.goal)}. ${L.tip}` }, trackKey: null, difficulty: 1, seed: 'academy-' + L.id });
+  },
+
+  onMechLessonFinished(session, time) {
+    const i = session.opts.academy.index, L = MECH_LESSONS[i];
+    const r = completeMechLesson(i, { ...session.stats, vehicle: session.phys.vehicle, time });
+    if (r.coins) { this.ui.updateCoins(); addXp(XP.lesson); }
+    if (r.passed) this.checkRewards();
+    const next = i + 1 < MECH_LESSONS.length ? i + 1 : null;
+    const actions = [];
+    if (r.passed && next != null) actions.push({ label: 'Leçon suivante', primary: true, onClick: () => { setTimeout(() => this.mechLessonIntro(next), 0); return true; } });
+    actions.push({ label: r.passed ? 'Rejouer' : 'Réessayer', primary: !(r.passed && next != null), onClick: () => { session.restart(); return true; } });
+    actions.push({ label: 'Académie', onClick: () => { setTimeout(() => { this.quitRace(); }, 0); return true; } });
+    const hints = {
+      air: 'Vol trop court : garde les gaz, décolle droit au bout de la rampe, et laisse la gravité réduite (ou le deltaplane) faire le reste.',
+      norespawn: 'Tu as dû réapparaître : regarde ce qui t’a fait tomber (vitesse trop faible, frein sur le verre, bosse sans aimant).',
+      vehicle: 'Tu n’es pas en bateau à l’arrivée : roule sur la plaque bleu clair et reste sur l’eau.',
+      noshock: 'Un obstacle t’a heurté : observe son rythme avant de passer, ralentis ou attends si besoin.',
+      nowall: 'Tu as touché un mur : passe sur l’interrupteur pour ouvrir la porte, va tout droit.',
+    };
+    this.ui.modal({
+      title: r.passed ? '✓ Leçon réussie' : 'Pas tout à fait…',
+      body: `<p>${r.passed ? `Objectif atteint : <b>${esc(r.text)}</b>.` : `Objectif : <b>${esc(r.text)}</b>. ${esc(hints[L.goal.id] || '')}`}</p>`
+        + (r.coins ? `<p>+${r.coins} ◆ · +${XP.lesson} XP</p>` : ''),
+      actions,
+    });
+  },
+
   // Arrivée d'une leçon : on la juge (objectif atteint ou non) et on propose la suite.
   onAcademyFinished(session, time) {
     if (session.opts.academy.drill != null) { this.onDrillFinished(session, time); return; }
+    if (session.opts.academy.mech) { this.onMechLessonFinished(session, time); return; }
     const i = session.opts.academy.index, L = LESSONS[i];
     const r = completeLesson(i, { ...session.stats, vehicle: session.phys.vehicle, time });
     if (r.coins) { this.ui.updateCoins(); addXp(XP.lesson); }                  // expérience (E14) : la première réussite d'une leçon

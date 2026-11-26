@@ -70,6 +70,7 @@ export function nextBuiltinIndex(i, total) {
 const sec = (g) => (g.a > 0 ? (g.b != null ? `du point ${g.a} au point ${g.b}` : `du point ${g.a} à l'arrivée`) : `du départ au point ${g.b}`);
 export const GOALS = {
   nowall: { label: 'Finir sans toucher de muret' },
+  noshock: { label: 'Finir sans heurter d’obstacle', circuit: true },      // (COMPLETE-008) leçon des obstacles animés : aucun choc contre une boule, un marteau, un mur coulissant, un balayeur ou un bumper
   norespawn: { label: 'Finir sans réapparition' },
   perfect: { label: (n) => `${n} réception${n > 1 ? 's' : ''} parfaite${n > 1 ? 's' : ''}` },
   turbo: { label: (n, g) => (g && (g.a > 0 || g.b != null) ? `${n} mini-turbo${n > 1 ? 's' : ''} ${sec(g)}` : `${n} mini-turbo${n > 1 ? 's' : ''}`) },
@@ -100,6 +101,7 @@ export function goalLabel(goal) {
 export function goalMet(goal, st) {
   switch (goal.id) {
     case 'nowall': return st.wallHits === 0;
+    case 'noshock': return !(st.shocks > 0);
     case 'norespawn': return st.respawns === 0;
     case 'perfect': return st.perfects >= (goal.n || 1);
     case 'turbo': return (goal.a > 0 || goal.b != null ? countBetween(st.turboAt || [], st.splits || [], st.steps, goal.a || 0, goal.b) : st.turbos) >= (goal.n || 1);

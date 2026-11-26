@@ -55,6 +55,24 @@ export const DRILLS = [
     intro: ['Trois sauts d’une terrasse vers une pente plus bas, deux juste après un virage. Ce qui compte : le nombre de <b>réceptions parfaites</b> (étincelles vertes).', 'La voiture bascule nez en bas en quittant le bord. En l’air, le frein (aérofrein) freine sa rotation et relève le nez, l’accélérateur le penche vers l’avant, le volant la tourne doucement ; frein et accélérateur ensemble : l’aérofrein seul.', 'Redresse <b>avant</b> le bord (volant droit au décollage), puis <b>freine en l’air</b> pour arriver à la pente de la réception.'],
     tip: 'Volant droit au décollage, puis freine en l’air (aérofrein) pour arriver à la pente de la réception.',
   },
+  // COMPLETE-008 : deux exercices notés pour les mécaniques les plus techniques (les leçons de academyMech.js les introduisent), mesurés par l'analyse comme les autres (la course REJOUÉE).
+  {
+    id: 'murs', skill: 'trajectoire', name: 'Vitesse sur le mur', decor: 'caves',
+    script: 'start B2 S [tr01s] S5< [tr10s] S2 C B S2 finish', opts: { l: 4 }, zones: [[4, 10]],
+    measure: 'zoneSpeed', where: 'sur le mur', better: 'high', unit: kmh, thresholds: [130, 155, 175],   // calés sur le pilote automatique (vitesse visée de 38, 46 et 52 m/s : 134, 163 et 184 km/h sur le mur ; 34 m/s : 120 km/h, sans note) : tools/test-skills.mjs
+    goals: ['Vitesse moyenne sur le mur : {v} km/h ou plus'],
+    intro: ['La route monte sur un <b>mur</b>, puis redescend. Ce qui compte : la <b>vitesse moyenne sur le mur</b>, de l’entrée à la sortie.', 'Il faut au moins 110 km/h environ pour tenir sur le mur ; plus tu en gardes, plus la note monte. Garde les <b>gaz</b> et reste sur ta ligne : un coup de volant brusque coûte de la vitesse.', 'Aborde le mur avec de l’élan : ne freine pas avant, ne lève pas le pied dessus.'],
+    tip: 'Garde les gaz sur le mur et reste sur ta ligne : chaque coup de volant coûte de la vitesse.',
+  },
+  {
+    id: 'animes', skill: 'trajectoire', name: 'Obstacles animés', decor: 'atelier',
+    script: 'start B2 S2 C S4 S4 S3 finish', opts: { l: 6 }, zones: [],
+    obst: [{ k: 'pendulum', at: 0.3, side: 0, s: 1, ph: 0 }, { k: 'hammer', at: 0.42, side: 0, s: 1, ph: 0.25 }, { k: 'slider', at: 0.54, side: 0, s: 1, ph: 0.25 }, { k: 'sweeper', at: 0.66, side: 9, s: 1, ph: 0.25 }, { k: 'pendulum', at: 0.78, side: 0, s: 1, ph: 0.5 }],
+    measure: 'shocks', better: 'low', unit: (v) => `${v} choc${v > 1 ? 's' : ''}`, thresholds: [3, 1, 0],   // calés par balayage du départ du pilote automatique (retenu 0 à 2 s : 0 choc à 0,5 s, 1 à 0,75 s, 2 à 0,25 s) : tools/test-skills.mjs
+    goals: ['3 chocs au plus contre les obstacles', '1 choc au plus', 'Aucun choc'],
+    intro: ['Cinq <b>obstacles animés</b> (boule balancier, marteau, mur coulissant, balayeur) bougent au rythme du chrono, toujours de la même façon. Ce qui compte : le nombre de <b>chocs</b> pendant la course.', 'Observe chaque obstacle, ralentis ou attends si besoin, puis passe quand le chemin est libre. Aucun choc : or.', 'Un choc te repousse et te fait perdre du temps ; il ne te fait pas réapparaître.'],
+    tip: 'Observe le rythme de chaque obstacle, puis passe quand le chemin est libre.',
+  },
 ];
 export const drillById = (id) => DRILLS.find((d) => d.id === id) || null;
 
@@ -78,6 +96,7 @@ export function valueOf(d, m) {
     case 'zoneSpeed': return m.zoneSpeed;
     case 'zoneTime': return m.zoneTime;
     case 'landings': return m.perfect;
+    case 'shocks': return m.shocks;
     case 'turbo': return m.turboLv * 10 + (m.walls === 0 ? 1 : 0);      // renforcé sans choc > renforcé > simple
     default: return null;
   }
@@ -86,9 +105,10 @@ export function valueOf(d, m) {
 export function describeMeasure(d, m) {
   if (!m || !m.finished) return 'Course non terminée';
   switch (d.measure) {
-    case 'zoneSpeed': return m.zoneSpeed == null ? '—' : `${kmh(m.zoneSpeed)} de moyenne dans les chicanes`;
+    case 'zoneSpeed': return m.zoneSpeed == null ? '—' : `${kmh(m.zoneSpeed)} de moyenne ${d.where || 'dans les chicanes'}`;
     case 'zoneTime': return m.zoneTime == null ? '—' : `${sec(m.zoneTime)} dans les zones de freinage`;
     case 'landings': return `${m.perfect} réception${m.perfect > 1 ? 's' : ''} parfaite${m.perfect > 1 ? 's' : ''} sur 3`;
+    case 'shocks': return `${m.shocks} choc${m.shocks > 1 ? 's' : ''} contre les obstacles`;
     case 'turbo': return `${m.turboLv >= 2 ? 'Mini-turbo renforcé' : m.turboLv ? 'Mini-turbo simple' : 'Aucun mini-turbo'}, ${m.walls} choc${m.walls > 1 ? 's' : ''}, ${sec(m.time)}`;
     default: return '';
   }
@@ -97,6 +117,7 @@ export function describeMeasure(d, m) {
 export function goalTexts(d) {
   if (d.measure === 'turbo') return d.goals.map((g) => g.replace('{t}', String(d.limit).replace('.', ',')));
   const fmt = (v) => (d.measure === 'zoneTime' ? v.toFixed(2).replace('.', ',') : String(v));
+  if (d.goals.length >= d.thresholds.length) return d.goals.map((g, i) => g.replace('{v}', fmt(d.thresholds[i])));      // un texte par note (« Aucun choc »)
   return d.thresholds.map((v) => d.goals[0].replace('{v}', fmt(v)));
 }
 

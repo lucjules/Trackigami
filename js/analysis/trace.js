@@ -7,7 +7,7 @@
 //
 // RunTrace : { every, n, t, pos (x, y, z), v, thr, brk, steer, air, lat, lon, events, source, time, finished }
 //   t[i] = (i + 1) × every × DT (chrono de la course) ; un retour au checkpoint efface ce qui suit le checkpoint, comme le fantôme.
-//   events : [{ k, i, step, q }] k = 'cp' | 'land' | 'wall' | 'turbo' | 'respawn' | 'veh' (i : échantillon le plus proche, q : détail)
+//   events : [{ k, i, step, q }] k = 'cp' | 'land' | 'wall' | 'shock' | 'turbo' | 'respawn' | 'veh' (i : échantillon le plus proche, q : détail)
 import { GhostRunner, inputAt, InputRecorder, quantSteer } from '../replay.js';
 import { Simulation } from '../simulation.js';
 import { Autopilot } from '../autopilot.js';
@@ -23,7 +23,7 @@ class TraceRunner extends GhostRunner {
     this.every = every;
     this.ch = { t: [], k: [], x: [], y: [], z: [], v: [], thr: [], brk: [], steer: [], air: [], lat: [], lon: [] };
     this.events = [];
-    this._cps = 0; this._veh = this.phys.vehicle; this._v = 0; this._wallAt = -1000;
+    this._cps = 0; this._veh = this.phys.vehicle; this._v = 0; this._wallAt = -1000; this._shockAt = -1000;
   }
   _note(k, q = 0) { this.events.push({ k, step: this.logic.steps, i: Math.max(0, Math.round(this.logic.steps / this.every) - 1), q }); }
   _gSample() {
@@ -33,6 +33,7 @@ class TraceRunner extends GhostRunner {
     if (L.splits.length > this._cps) this._note('cp', L.splits.length);
     this._cps = L.splits.length;
     if (e.wall > 4 && L.steps - this._wallAt > 36) { this._note('wall', e.wall); this._wallAt = L.steps; }      // un choc, pas chaque pas de frottement
+    if (e.shock > 0 && L.steps - this._shockAt > 60) { this._note('shock', e.shock); this._shockAt = L.steps; }      // un choc contre un obstacle animé ou un bumper (comme runStats.js : un compte tant qu'ils se suivent à moins d'une demi-seconde)
     if (e.landQ) this._note('land', e.landQ === 'perfect' ? 2 : e.landQ === 'ok' ? 1 : 0);
     if (e.miniTurbo) this._note('turbo', e.miniTurbo);
     if (p.vehicle !== this._veh) { this._note('veh', GHOST_VEHICLES.indexOf(p.vehicle)); this._veh = p.vehicle; }

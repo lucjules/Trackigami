@@ -57,13 +57,16 @@ export const mechanicsMethods = {
   _renderMechIndex(box) {
     this._mechSeed();
     const p = profile(), found = discoveredMechanics(p).length;
-    const rows = (g) => MECHANICS.filter((m) => m.group === g.id).map((m) => {
-      const lv = mechLevel(p, m.id);
-      if (!lv) return `<li class="mech-row locked" data-mech="${esc(m.id)}"><span class="mech-ico" aria-hidden="true">❔</span><div><b>À découvrir</b><p class="meta">Elle apparaîtra dans un circuit de la carrière.</p></div></li>`;
-      const L = lessonOf(m);
-      return `<li class="mech-row${lv >= 2 ? ' met' : ''}" data-mech="${esc(m.id)}"><span class="mech-ico" aria-hidden="true">${m.icon}</span>
-        <div><b>${esc(m.name)}</b>${lv >= 2 ? ' <small class="meta">✓ rencontrée</small>' : ''}<p>${esc(m.how)}</p>${L ? `<button type="button" class="btn small" data-mech-lesson="${L.kind}:${L.index}">🎓 Leçon · ${esc(L.name)}</button>` : ''}</div></li>`;
-    }).join('');
+    const rows = (g) => {
+      const all = MECHANICS.filter((m) => m.group === g.id), hidden = all.filter((m) => !mechLevel(p, m.id)).length;
+      const seen = all.filter((m) => mechLevel(p, m.id)).map((m) => {
+        const lv = mechLevel(p, m.id), L = lessonOf(m);
+        return `<li class="mech-row${lv >= 2 ? ' met' : ''}" data-mech="${esc(m.id)}"><span class="mech-ico" aria-hidden="true">${m.icon}</span>
+          <div><b>${esc(m.name)}</b>${lv >= 2 ? ' <small class="meta">✓ rencontrée</small>' : ''}<p>${esc(m.how)}</p>${L ? `<button type="button" class="btn small" data-mech-lesson="${L.kind}:${L.index}">🎓 Leçon · ${esc(L.name)}</button>` : ''}</div></li>`;
+      }).join('');
+      // Celles qu'on n'a pas encore vues ne se dévoilent pas : une seule ligne par famille.
+      return seen + (hidden ? `<li class="mech-row locked" data-mech-hidden="${g.id}"><span class="mech-ico" aria-hidden="true">❔</span><div><b>${hidden} à découvrir</b><p class="meta">Elles apparaîtront dans les circuits de la carrière.</p></div></li>` : '');
+    };
     box.innerHTML = `<h3 class="opt-h">Mécaniques découvertes</h3>
       <p class="prof-note">${found} / ${MECHANICS.length} mécaniques découvertes. Chaque mécanique est présentée à sa première rencontre ; retrouve ici ce qu’elle fait et comment t’en servir.</p>
       <div class="mech-bar"><i style="width:${Math.round((100 * found) / MECHANICS.length)}%"></i></div>
