@@ -25,6 +25,7 @@ La vue d'ensemble (principes, déterminisme, flux d'une course) est dans [ARCHIT
 | `camprefs.js` | Caméras personnalisées (lot 11) : jusqu'à 6 caméras de course en plus des 4 d'origine, réglées par le joueur. |
 | `camrig.js` | Aides de caméra de poursuite (phase 1 après l'audit 0.9.59) : anticipation des virages, compensation du retard de suivi à haute vitesse, visée vers la zone de réception pendant un saut, pente de la route, et transition « voiture quittant un ruban » (mur, looping, vrille). |
 | `career.js` | Mode carrière (v1.5) : les circuits intégrés, rangés du plus facile au plus dur, sont regroupés en chapitres de 6. Un chapitre s'ouvre avec 4 médailles dans le précédent. Chaque circuit a un objectif bonus qui rapporte des pièces une fois. |
+| `careerEnd.js` | Fin de carrière (COMPLETE-013) : la définition de « carrière complète », le bilan exact et la règle « l'écran de fin s'affiche une fois ». |
 | `carModel.js` | Modèles 3D de la voiture et de la moto (low-poly, originaux), construits par code. |
 | `categoriesFaisables.js` | Catégories de record que le pilote automatique FINIT, par circuit officiel (GAME-006) : données GÉNÉRÉES par tools/categories-faisables.mjs (npm run categories), à ne pas modifier à la main. |
 | `cloudsave.js` | Sauvegarde cloud : quelles données partent dans le cloud, et comment fusionner deux versions. |
@@ -152,6 +153,7 @@ La vue d'ensemble (principes, déterminisme, flux d'une course) est dans [ARCHIT
 | Fichier | Rôle |
 | --- | --- |
 | `academy.js` | Académie : menu des six leçons et des exercices évalués (E12), introduction, bilan à l'arrivée. Les données et les règles sont dans academy.js (leçons) et skills.js (compétences, exercices) ; la mesure d'un exercice, dans analysis/drill.js. |
+| `careerEnd.js` | Fin de carrière (COMPLETE-013) : l'écran de conclusion (épreuve finale, bilan exact, générique). Les règles et le calcul du bilan sont dans careerEnd.js (pur, testé) ; ici on rassemble les circuits, les records et le profil LOCAUX (aucun appel réseau) et on affiche. Ces méthodes s'ajoutent au prototype de App (voir main.js). |
 | `community.js` | Communauté : partage, classements en ligne, publication, import de circuits et de fantômes, aide. |
 | `competition.js` | Compétition asynchrone (Trackigami Evolution, E17) : duels classés entre amis (Elo) et tournois privés. Tout se joue sur des circuits de la carrière, sous des catégories de record « …~v1.duel-N » et « …~v1.tour-N » (variants.js) : la course est rejouée par le serveur comme toute autre, et les résultats, le classement Elo et la clôture sont calculés en base (supabase/etape12-competition.sql). Ces méthodes s'ajoutent au prototype de App. |
 | `editorFlow.js` | Passages entre le menu et l'éditeur : ouverture, aide, retour, essai d'un circuit. |

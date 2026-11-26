@@ -6,6 +6,14 @@ multijoueurs y sont liés. Une version qui change `PHYS_VER` impose de **redépl
 
 *Les nombres des sections anciennes (portées en cases, vitesses de saut…) sont ceux du monde de leur époque ; le monde est passé de cases de 24 m à 32 m en 0.9.11.*
 
+## Bêta 0.19.0 — une conclusion à la carrière et des récompenses de niveau jusqu'au 50 (COMPLETE-013, COMPLETE-016)
+
+**`PHYS_VER` reste 39** (la consigne disait 38 : le dépôt est à 39 ; non modifié), **`NET_VER` reste 5**. Aucune mécanique, aucune clé de circuit, aucun temps de référence ne change ; le garage reste purement visuel (`tools/test-cosmetics-physics.mjs` vert).
+
+- **Fin de carrière (COMPLETE-013)** : la carrière est *complète* quand chacun des 84 circuits officiels a une médaille (au moins bronze). L'écran de fin s'ouvre tout seul **une seule fois** à l'écran des circuits (la date est gardée dans le profil : `careerEnd`), puis se rouvre par un bouton (écran des circuits, Progression › Records). Il montre l'épreuve finale (*Grande Finale*, circuit existant et inchangé, rejouable), un **bilan calculé** d'après les records et le profil locaux (circuits terminés, médailles par palier, objectifs bonus, temps cumulé des meilleurs temps, circuits chronométrés, courses, niveau) et un générique ; aucun appel réseau. Le message « il n'y a plus rien à finir ici » disparaît. Un joueur qui avait déjà fini la carrière voit l'écran une fois au prochain passage. Fusion entre appareils : la date la plus ancienne. Textes fr/en ; animations réduites respectées.
+- **Récompenses de niveau (COMPLETE-016)** : une récompense tous les cinq niveaux, du 5 au 50 (avant : 5, 10, 20, 30). Six objets visuels gratuits s'ajoutent : Azur (15), Traînée solaire (25), Rubis (35), Traînée jade (40), Améthyste (45), Prisme (50). Les joueurs déjà au-dessus d'un palier reçoivent les objets manquants au prochain contrôle, sans doublon ni perte.
+- **Non fait** : pas de nouveau titre (la liste est dupliquée côté serveur, `set_title`) ; pas de compteur de « records battus » (aucun historique : il serait faux pour les profils existants).
+
 ## Bêta 0.18.0 — le fantôme de la médaille suivante et des objectifs bonus liés à ce que chaque circuit enseigne (COMPLETE-009, COMPLETE-012)
 
 **`PHYS_VER` reste 39** (la consigne disait 38 : le dépôt est à 39 ; non modifié), **`NET_VER` reste 5**. Aucune mécanique du moteur, aucun circuit (code), aucune médaille ne change : l'empreinte de la physique (230 scénarios), les **84 clés `b-`** (`tools/builtin-keys.json`), les temps de référence (`tools/golden-temps.json`), le défi du jour et le tirage des saisons sont identiques au bit près. `autopilot.js` n'est pas modifié.
