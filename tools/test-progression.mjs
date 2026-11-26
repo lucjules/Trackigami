@@ -124,8 +124,25 @@ test('récompenses de niveau : des éléments exclusifs du garage, visuels, grat
   }
   reset();
   assert.deepEqual(grantRewards({ ...emptyContext(), level: 9 }).exclusives.map((e) => e.id).sort(), ['mint']);
-  assert.deepEqual(grantRewards({ ...emptyContext(), level: 30 }).exclusives.map((e) => e.id).sort(), ['pale', 'plasma', 'violet']);
+  assert.deepEqual(grantRewards({ ...emptyContext(), level: 30 }).exclusives.map((e) => e.id).sort(), ['azure', 'pale', 'plasma', 'solar', 'violet'], 'menthe déjà reçue au niveau 9 : seuls les paliers manquants arrivent');
   assert.ok(owns('trail', 'plasma'));
+  reset();
+});
+test('COMPLETE-016 : une récompense tous les cinq niveaux jusqu’au 50 ; un joueur de niveau 42 reçoit rétroactivement les paliers jusqu’à 40, sans doublon ; un nouveau joueur les reçoit au fil des niveaux', () => {
+  assert.deepEqual(LEVEL_REWARDS.map(([l]) => l), [5, 10, 15, 20, 25, 30, 35, 40, 45, 50], 'régulier, jusqu’au niveau maximal');
+  assert.equal(LEVEL_REWARDS.at(-1)[0], MAX_LEVEL);
+  assert.equal(new Set(LEVEL_REWARDS.map(([, c, i]) => c + ':' + i)).size, LEVEL_REWARDS.length, 'aucun objet donné deux fois');
+  reset();
+  const first = grantRewards({ ...emptyContext(), level: 42 }).exclusives.map((e) => e.id).sort();
+  const upTo40 = LEVEL_REWARDS.filter(([l]) => l <= 40).map(([, , i]) => i).sort();
+  assert.deepEqual(first, upTo40, 'tous les paliers jusqu’à 40, aucun au-delà');
+  assert.equal(owns('trail', 'jade'), true); assert.equal(owns('led', 'amethyst'), false); assert.equal(owns('trail', 'prism'), false);
+  assert.deepEqual(grantRewards({ ...emptyContext(), level: 42 }).exclusives, [], 'second contrôle : aucun doublon');
+  assert.deepEqual(grantRewards({ ...emptyContext(), level: 50 }).exclusives.map((e) => e.id).sort(), ['amethyst', 'prism'], 'les deux derniers arrivent au niveau voulu');
+  reset();
+  const seen = [];
+  for (let lvl = 1; lvl <= MAX_LEVEL; lvl++) for (const e of grantRewards({ ...emptyContext(), level: lvl }).exclusives) seen.push([lvl, e.id]);
+  assert.deepEqual(seen, LEVEL_REWARDS.map(([l, , i]) => [l, i]), 'un nouveau joueur reçoit chaque objet exactement à son niveau');
   reset();
 });
 test('aucun module de la simulation ni de la vérification serveur n’importe le profil, la progression, le garage ou le stockage', () => {
