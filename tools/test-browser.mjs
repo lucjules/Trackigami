@@ -1218,7 +1218,7 @@ try {
   await test('académie : menu des six leçons, leçon 1 jouée et réussie, bilan, retour au menu des leçons', async () => {
     const btn = (label) => page.evaluate((l) => { const b = [...document.querySelectorAll('#modal-actions button')].find((x) => x.textContent.trim() === l); if (!b) throw new Error('bouton introuvable : ' + l); b.click(); }, label);
     await app(async () => { const { profile, saveProfile } = await import('/js/profile.js'); const p = profile(); p.academy = {}; saveProfile(); window.copytrack.academyMenu(); });
-    await waitApp(() => document.querySelectorAll('.academy-list:not(.ac-drills) li').length === 6 && document.querySelectorAll('.ac-drills li').length === 4);
+    await waitApp(() => document.querySelectorAll('.academy-list:not(.ac-drills):not(.ac-mech) li').length === 6 && document.querySelectorAll('.ac-mech li').length === 8 && document.querySelectorAll('.ac-drills li').length === 6);      // (0.20.0 : huit leçons par mécanique et deux exercices de plus, en plus des six leçons et quatre exercices d'origine)
     await shot('16-academie');
     await app(() => document.querySelector('[data-lesson="0"]').click());
     await waitApp(() => window.copytrack.ui.modalOpen && /Leçon 1/.test(document.getElementById('modal-title').textContent));
@@ -1230,14 +1230,14 @@ try {
     assert.equal(await app(async () => (await import('/js/profile.js')).profile().academy.prise), 1);
     await shot('17-lecon-reussie');
     await btn('Académie');
-    await waitApp(() => window.copytrack.mode === 'menu' && document.querySelectorAll('.academy-list:not(.ac-drills) li.done').length === 1, null, 10000);
+    await waitApp(() => window.copytrack.mode === 'menu' && document.querySelectorAll('.academy-list:not(.ac-drills):not(.ac-mech) li.done').length === 1, null, 10000);
     await app(async () => { const { profile, saveProfile } = await import('/js/profile.js'); const p = profile(); p.academy = {}; p.coins = 0; saveProfile(); window.copytrack.ui.closeModal(); });
   });
 
   await test('académie, exercices évalués : point faible, consignes et objectifs, course mesurée (rejouée) et notée or, retour au menu', async () => {
     const btn = (label) => page.evaluate((l) => { const b = [...document.querySelectorAll('#modal-actions button')].find((x) => x.textContent.trim() === l); if (!b) throw new Error('bouton introuvable : ' + l); b.click(); }, label);
     await app(async () => { const { profile, saveProfile } = await import('/js/profile.js'); const p = profile(); p.drills = {}; p.coins = 0; saveProfile(); window.copytrack.academyMenu(); });
-    await waitApp(() => document.querySelectorAll('.ac-drills li').length === 4);
+    await waitApp(() => document.querySelectorAll('.ac-drills li').length === 6);
     assert.match(await page.evaluate(() => document.querySelector('.ac-weak').textContent), /Point faible : Trajectoire — exercice conseillé : Chicanes/);
     await app(() => document.querySelector('[data-drill="0"]').click());
     await waitApp(() => window.copytrack.ui.modalOpen && /Exercice · Chicanes/.test(document.getElementById('modal-title').textContent));
