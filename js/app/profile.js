@@ -94,6 +94,7 @@ export const profileMethods = {
       html += '</ul>';
     }
     box.innerHTML = html;
+    this._careerEndButton(box.querySelector('.career-summary'));      // (COMPLETE-013)
     for (const b of box.querySelectorAll('[data-rec]')) b.onclick = () => { this.audio.click(); this.openBuiltinHub(+b.dataset.rec, 'profile'); };
   },
 

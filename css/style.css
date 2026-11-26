@@ -1920,3 +1920,20 @@ body.ov-open .minimap { opacity: 0.4; }
   #garage-tabs .gtab { min-height: 32px; }
   #garage-tabs .gtab-sub { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
 }
+
+/* Fin de carrière (COMPLETE-013) : la conclusion, avec un générique qui apparaît ligne après ligne (coupé quand les animations sont réduites). */
+.career-end .ce-lead { margin: 0 0 10px; font-weight: 600; }
+.career-end .ce-finale { margin: 0 0 12px; font-size: 18px; }
+.career-end .ce-time { font-variant-numeric: tabular-nums; }
+.career-end .ce-grid b { text-align: right; }
+.career-end .ce-medals { display: inline-flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap; }
+.career-end .ce-medal { display: inline-flex; align-items: center; gap: 4px; }
+.career-end .ce-credits { list-style: none; margin: 0; padding: 12px 8px; text-align: center; display: grid; gap: 8px; border-top: 1px solid rgba(255, 255, 255, .12); color: var(--muted, #a99fd0); }
+.career-end .ce-credits .ce-big { color: var(--text, #fff); font-size: 18px; font-weight: 700; }
+.career-end .ce-credits li { opacity: 0; animation: ce-line 0.6s ease-out forwards; }
+.career-end .ce-credits li:nth-child(1) { animation-delay: .2s; } .career-end .ce-credits li:nth-child(2) { animation-delay: .9s; }
+.career-end .ce-credits li:nth-child(3) { animation-delay: 1.6s; } .career-end .ce-credits li:nth-child(4) { animation-delay: 2.3s; } .career-end .ce-credits li:nth-child(5) { animation-delay: 3s; }
+@keyframes ce-line { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .career-end .ce-credits li { animation: none; opacity: 1; } }
+body.reduce-motion .career-end .ce-credits li { animation: none; opacity: 1; }
+.career-end-btn { margin-top: 8px; }

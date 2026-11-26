@@ -45,7 +45,7 @@ export const screenMethods = {
       const r = getRecord('daily-' + dayKey());
       $('daily-best').textContent = r ? formatTime(r.time) : 'nouveau';
     }
-    if (name === 'tracks') this._renderTracks();
+    if (name === 'tracks') { this._renderTracks(); this._maybeCareerEnd(); }
     if (name === 'race-hub') this._renderHub();
     if (name === 'mytracks') this._renderMyTracks();
     if (name === 'community') this._renderCommunity(true);
@@ -148,7 +148,8 @@ export const screenMethods = {
       box.innerHTML = `<div class="cs-main"><b>${sm.pct} %</b><span>de la carrière</span></div>
         <div class="cs-bar"><i style="width:${sm.pct}%"></i></div>
         <div class="cs-stats">${sm.medals} / ${sm.total} médailles · ${sm.crystal} cristal · ${sm.goals} / ${sm.total} objectifs bonus</div>
-        ${sm.complete ? `<p class="cs-msg">✦ Carrière complète : ${sm.total} cristaux et ${sm.total} objectifs. Il n’y a plus rien à finir ici.</p>` : sm.finished ? '<p class="cs-msg">🏁 Carrière terminée : une médaille sur chaque circuit. Reste les cristaux et les objectifs bonus.</p>' : ''}`;
+        ${sm.complete ? `<p class="cs-msg">✦ Carrière complète : ${sm.total} cristaux et ${sm.total} objectifs. Chaque circuit est maîtrisé.</p>` : sm.finished ? '<p class="cs-msg">🏁 Carrière terminée : une médaille sur chaque circuit. Reste les cristaux et les objectifs bonus.</p>' : ''}`;
+      this._careerEndButton(box);      // (COMPLETE-013) la conclusion de la carrière : épreuve finale, bilan, générique
       list.appendChild(box);
     }
     // 0.15.0 : « Continuer la carrière » : le prochain circuit ouvert sans médaille (sinon le premier sans cristal), en un clic.
