@@ -1,5 +1,6 @@
 // Effets sonores synthétisés (Web Audio API). La musique est gérée à part (voir music.js).
 import { Music } from './music.js';
+import { engineTargets, TIMBRES, VEHICLES } from './vehicleSound.js';
 
 export class GameAudio {
   constructor() {
@@ -46,9 +47,14 @@ export class GameAudio {
     this.osc2.type = 'square';
     const g2 = ctx.createGain();
     g2.gain.value = 0.35;
+    this.g2 = g2;
+    // 0.21.0 (COMPLETE-017) : deux gains de passage (engMod : modulation d'amplitude de la moto ; engSwap : fondu lors d'une transformation) entre le filtre et le gain du moteur ;
+    // au repos ils valent 1 (la voiture sonne exactement comme avant).
+    this.engMod = ctx.createGain();
+    this.engSwap = ctx.createGain();
     this.osc1.connect(this.engFilter);
     this.osc2.connect(g2).connect(this.engFilter);
-    this.engFilter.connect(this.engGain).connect(this.master);
+    this.engFilter.connect(this.engMod).connect(this.engSwap).connect(this.engGain).connect(this.master);
     this.osc1.start();
     this.osc2.start();
 
@@ -58,10 +64,26 @@ export class GameAudio {
     this.wind = this._loopNoise('lowpass', 500, 0.7);
     // Pluie (environnements, E19 : envFx.js)
     this.rainLoop = this._loopNoise('highpass', 2600, 0.4);
+    // Couches propres aux véhicules (vehicleSound.js) : sillage et clapot (bateau), souffle (deltaplane) ; deux oscillateurs lents (modulation de la moto, clapot et rafales).
+    this.wake = this._loopNoise('bandpass', 900, 1.1, 0.37);
+    this.chop = this._loopNoise('lowpass', 420, 0.8, 0.81);
+    this.breath = this._loopNoise('bandpass', 700, 0.9, 1.23);
+    this.lfoAm = ctx.createOscillator();
+    this.lfoAm.frequency.value = 20;
+    this.lfoAmDepth = ctx.createGain(); this.lfoAmDepth.gain.value = 0;
+    this.lfoAm.connect(this.lfoAmDepth).connect(this.engMod.gain);
+    this.lfoSlow = ctx.createOscillator();
+    this.lfoSlow.frequency.value = 2.2;
+    this.chopMod = ctx.createGain(); this.chopMod.gain.value = 0;
+    this.breathMod = ctx.createGain(); this.breathMod.gain.value = 0;
+    this.lfoSlow.connect(this.chopMod).connect(this.chop.g.gain);
+    this.lfoSlow.connect(this.breathMod).connect(this.breath.g.gain);
+    this.lfoAm.start(); this.lfoSlow.start();
+    this._veh = null; this._timbre = null; this._pending = null;
     this.music.resume();
   }
 
-  _loopNoise(type, freq, q) {
+  _loopNoise(type, freq, q, offset = 0) {
     const ctx = this.ctx;
     const src = ctx.createBufferSource();
     src.buffer = this.noiseBuf;
@@ -73,7 +95,7 @@ export class GameAudio {
     const g = ctx.createGain();
     g.gain.value = 0;
     src.connect(f).connect(g).connect(this.master);
-    src.start();
+    if (offset) src.start(0, offset); else src.start();      // (les couches ajoutées en 0.21.0 démarrent ailleurs dans le bruit : pas de phase commune avec le vent)
     return { src, f, g };
   }
 
@@ -83,13 +105,26 @@ export class GameAudio {
   }
 
   // Voix du véhicule choisie par le joueur (custom.js : fx.engine, fx.pitch, fx.hornPitch). Purement sonore.
+  // `custom` : le joueur a choisi une forme d'onde (autre que celle par défaut) ; elle prime alors sur le timbre propre à la moto, au bateau et au deltaplane.
   setVoice(fx) {
     const WAVE = { default: 'sawtooth', saw: 'sawtooth', square: 'square', tri: 'triangle', sine: 'sine' };
-    this.voice = { wave: WAVE[fx && fx.engine] || 'sawtooth', pitch: (fx && fx.pitch) || 1, hornPitch: (fx && fx.hornPitch) || 1 };
-    if (this.osc1) this.osc1.type = this.voice.wave;
+    this.voice = { wave: WAVE[fx && fx.engine] || 'sawtooth', pitch: (fx && fx.pitch) || 1, hornPitch: (fx && fx.hornPitch) || 1, custom: !!(fx && fx.engine && fx.engine !== 'default' && WAVE[fx.engine]) };
+    if (this.osc1) this.osc1.type = this._wave1(this._timbre || 'car');
   }
 
-  // Mise à jour continue du moteur (appelée chaque image).
+  // Forme d'onde du premier oscillateur : celle de la voix du joueur pour la voiture (comme avant) ou si elle est choisie, sinon celle du véhicule.
+  _wave1(veh) { return veh === 'car' || (this.voice && this.voice.custom) ? (this.voice ? this.voice.wave : 'sawtooth') : TIMBRES[veh].wave1; }
+
+  // Applique le timbre d'un véhicule (formes d'onde, niveau du second oscillateur, résonance) : appelé quand le moteur est (presque) muet.
+  _applyTimbre(veh, t) {
+    this._timbre = veh;
+    this.osc1.type = this._wave1(veh);
+    this.osc2.type = TIMBRES[veh].wave2;
+    this.g2.gain.setValueAtTime(TIMBRES[veh].g2, t);
+    this.engFilter.Q.setValueAtTime(TIMBRES[veh].q, t);
+  }
+
+  // Mise à jour continue du moteur (appelée chaque image). state.vehicle : 'car' (par défaut), 'moto', 'boat' ou 'glider' (vehicleSound.js). Purement sonore : ne lit que l'état qu'on lui donne.
   engine(state) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
@@ -98,23 +133,38 @@ export class GameAudio {
       this.skid.g.gain.setTargetAtTime(0, t, 0.05);
       this.wind.g.gain.setTargetAtTime(0, t, 0.1);
       this.rainLoop.g.gain.setTargetAtTime(0, t, 0.2);
+      for (const l of [this.wake, this.chop, this.breath]) l.g.gain.setTargetAtTime(0, t, 0.12);
+      this.chopMod.gain.setTargetAtTime(0, t, 0.12); this.breathMod.gain.setTargetAtTime(0, t, 0.12); this.lfoAmDepth.gain.setTargetAtTime(0, t, 0.05);
+      this._veh = null; this._pending = null;                // la prochaine image avec un véhicule reprend à zéro (timbre posé tout de suite)
       return;
     }
-    const sp = Math.abs(state.speed);
-    const gears = [0, 16, 31, 46, 61, 76, 90, 999];   // 0.9.5 : calées sur la vitesse de pointe de 0.9.4 (95 m/s, 112 en boost)
-    let g = 0;
-    while (sp > gears[g + 1]) g++;
-    const frac = (sp - gears[g]) / (gears[g + 1] - gears[g]);
-    const rpm = Math.min(1.15, 0.25 + frac * 0.85);
-    const base = 55 + g * 6 + rpm * 120 + (state.boost ? 25 : 0);
-    const pm = this.voice ? this.voice.pitch : 1;
-    this.osc1.frequency.setTargetAtTime(base * pm, t, 0.03);
-    this.osc2.frequency.setTargetAtTime(base * 0.5 * pm, t, 0.03);
-    this.engFilter.frequency.setTargetAtTime(500 + rpm * 1500 + (state.throttle ? 600 : 0), t, 0.05);
-    const vol = (state.throttle ? 0.16 : 0.09) + rpm * 0.05;
-    this.engGain.gain.setTargetAtTime(vol, t, 0.05);
-    this.skid.g.gain.setTargetAtTime(Math.min(0.22, Math.max(0, state.slip - 3) * 0.03), t, 0.04);
-    this.wind.g.gain.setTargetAtTime(Math.min(0.3, sp * sp * 0.00006 + (state.draft || 0) * 0.07), t, 0.1);      // draft : aspiration derrière une voiture (feel.js), le vent siffle un peu plus
+    const veh = VEHICLES.includes(state.vehicle) ? state.vehicle : 'car';
+    if (veh !== this._veh) {
+      if (this._veh === null) { this._applyTimbre(veh, t); this.engSwap.gain.cancelScheduledValues(t); this.engSwap.gain.setValueAtTime(1, t); }
+      else {                                                  // transformation en course : le moteur plonge, le timbre change quand il est quasi muet, puis il remonte (≈ 0,3 s en tout)
+        this._pending = { veh, at: t + 0.1 };
+        this.engSwap.gain.cancelScheduledValues(t);
+        this.engSwap.gain.setTargetAtTime(0, t, 0.025);
+        this.engSwap.gain.setTargetAtTime(1, t + 0.12, 0.07);
+      }
+      this._veh = veh;
+    }
+    if (this._pending && t >= this._pending.at) { this._applyTimbre(this._pending.veh, t); this._pending = null; }
+    const T = engineTargets(veh, state, this.voice);
+    this.osc1.frequency.setTargetAtTime(T.f1, t, 0.03);
+    this.osc2.frequency.setTargetAtTime(T.f2, t, 0.03);
+    this.engFilter.frequency.setTargetAtTime(T.filt, t, 0.05);
+    this.engGain.gain.setTargetAtTime(T.vol, t, 0.05);
+    this.skid.g.gain.setTargetAtTime(T.skid, t, 0.04);
+    this.wind.g.gain.setTargetAtTime(T.wind, t, 0.1);      // draft : aspiration derrière une voiture (feel.js), le vent siffle un peu plus
+    // Couches de véhicule : lissées plus lentement que le moteur (un fondu entre deux véhicules, jamais une coupure).
+    this.engMod.gain.setTargetAtTime(1 - T.amDepth / 2, t, 0.05);
+    this.lfoAmDepth.gain.setTargetAtTime(T.amDepth / 2, t, 0.05);
+    this.lfoAm.frequency.setTargetAtTime(T.amHz, t, 0.05);
+    this.wake.g.gain.setTargetAtTime(T.wake, t, 0.12); this.wake.f.frequency.setTargetAtTime(T.wakeF, t, 0.1);
+    this.chop.g.gain.setTargetAtTime(T.chop, t, 0.12); this.chopMod.gain.setTargetAtTime(T.chopDepth, t, 0.12);
+    this.breath.g.gain.setTargetAtTime(T.breath, t, 0.12); this.breath.f.frequency.setTargetAtTime(T.breathF, t, 0.1); this.breathMod.gain.setTargetAtTime(T.breathDepth, t, 0.12);
+    this.lfoSlow.frequency.setTargetAtTime(veh === 'glider' ? T.gustHz : T.chopHz, t, 0.2);
   }
 
   // Bruit de la pluie (0 à 1, environnements E19) : continu, suit l'intensité de la course.

@@ -2,6 +2,7 @@
 import { CELL } from '../constants.js';
 import { PRIO } from '../hudMessages.js';
 import { scriptsAt } from '../scripts.js';
+import { musicPlan } from '../musicVariants.js';
 
 export const scriptMethods = {
   // Nouvel essai : tous les déclencheurs se réarment et le décor, la météo et la musique du circuit reviennent.
@@ -23,8 +24,8 @@ export const scriptMethods = {
   },
 
   _scriptsMusic(style) {
-    const m = this.app.audio.music;
-    if (style === 'none') m.stop(); else m.play(style === 'menu' ? 'menu' : 'game');
+    const m = this.app.audio.music, plan = musicPlan(this.track, this.opts, style);      // même règle qu'au lancement : la variante du décor, sauf multijoueur et Académie
+    if (plan.kind === 'none') m.stop(); else m.play(plan.kind, plan.decor);
   },
 
   _runScript(s) {

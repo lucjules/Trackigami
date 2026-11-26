@@ -5,12 +5,15 @@
 //   music.start();                // lance la boucle
 //   music.updateWithCarSpeed(0.7);// 0 = arrêt / menu, 1 = vitesse max ; > 1 ou boost : couche supplémentaire
 //   music.stop();
+//   music.start('chill', variant);   // (0.21.0, COMPLETE-006) une variante par décor (musicVariants.js, jouée par musicVariantEngine.js) ; sans variante, rien n'a changé
 //
 // Légèreté : un seul ordonnanceur à l'avance (setInterval 25 ms, 120 ms d'avance), aucun nœud permanent par note (oscillateurs et bruits
 // jetables, un tampon de bruit partagé), aucun travail dans la boucle de rendu : updateWithCarSpeed ne fait que viser des valeurs.
 //
 // Sidechain : à chaque kick, les bus « basse » et « synthés » s'abaissent puis remontent (GainNode programmé à l'avance, calé sur le kick).
 import { clamp } from './mathutil.js';
+import { variantMethods } from './musicVariantEngine.js';
+import { cleanBudget, DEFAULT_BUDGET } from './musicVariants.js';
 
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
@@ -35,8 +38,10 @@ const CHILL = [
 ];
 
 export class AudioEngine {
-  constructor({ volume = 0.5 } = {}) {
+  constructor({ volume = 0.5, seed } = {}) {
     this.ctx = null; this.running = false; this.volume = volume;
+    this.variant = null; this.budget = { ...DEFAULT_BUDGET }; this._live = []; this._held = false; this._rnd = null;
+    this._seed = Number.isFinite(seed) ? seed >>> 0 : null;                  // seed : bruit partagé reproductible (tests) ; sans lui, Math.random comme avant
     this.speed = 0; this.boost = false; this.mode = 'house';              // cibles (lissées côté audio)
     this._step = 0; this._next = 0; this._timer = null; this._bpm = BPM_BASE; this._bar = 0;
     this.stats = { scheduled: 0 };
@@ -60,28 +65,46 @@ export class AudioEngine {
     this.drums.gain.value = 0.9; this.bassBus.gain.value = 0.8; this.synthBus.gain.value = 0.5;
     // bruit blanc partagé (1 s)
     const n = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), d = n.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    if (this._seed === null) for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    else { let a = this._seed; for (let i = 0; i < d.length; i++) { a = (a + 0x6D2B79F5) >>> 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; d[i] = ((t ^ (t >>> 14)) >>> 0) / 2147483648 - 1; } }
     this.noise = n;
     return this;
   }
 
   // mode : 'house' (menu, groove French Touch à 124 BPM) ou 'chill' (courses, tempo lent et doux).
-  start(mode = 'house') {
+  // variant : (chill seulement) une variante de musicVariants.js ; absente, le chill d'origine.
+  start(mode = 'house', variant = null) {
     this.mode = mode;
+    this.variant = mode === 'chill' && variant ? variant : null;
     if (!this.ctx) this.init();
     if (!this.ctx || this.running) return;
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (this.ctx.state === 'suspended' && !this._held) this.ctx.resume();            // onglet masqué : on ne réveille pas le contexte (hold)
     this.running = true;
+    if (this.variant) this._vStart(this.variant);
     this._step = 0; this._bar = 0; this._next = this.ctx.currentTime + 0.06;
     const t = this.ctx.currentTime;
     this.out.gain.cancelScheduledValues(t); this.out.gain.setValueAtTime(this.out.gain.value, t); this.out.gain.linearRampToValueAtTime(this.volume, t + 0.6);
-    this._timer = setInterval(() => this._tick(), 25);
+    if (!this._held) this._timer = setInterval(() => this._tick(), 25);
   }
+
+  // Onglet masqué (main.js, visibilitychange) : la minuterie du séquenceur s'arrête, rien n'est programmé ni réveillé ; au retour elle repart de l'instant présent.
+  hold(on) {
+    on = !!on;
+    if (on === this._held) return;
+    this._held = on;
+    if (on) { clearInterval(this._timer); this._timer = null; return; }
+    if (this.running && this.ctx && !this._timer) { this._next = Math.max(this._next, this.ctx.currentTime + 0.06); this._timer = setInterval(() => this._tick(), 25); }
+  }
+
+  // Budget de voix (profil de qualité) : { voices, detail } ; pris en compte dès les prochaines notes.
+  setBudget(b) { this.budget = cleanBudget(b); }
 
   stop() {
     if (!this.running) return;
     this.running = false;
     clearInterval(this._timer); this._timer = null;
+    this._retire();
+    this.variant = null;                // (le menu qui suit une course règle son filtre comme avant : updateWithCarSpeed lit le mode et la variante AVANT start)
     const t = this.ctx.currentTime;
     this.out.gain.cancelScheduledValues(t); this.out.gain.setValueAtTime(this.out.gain.value, t); this.out.gain.linearRampToValueAtTime(0, t + 0.4);
   }
@@ -94,6 +117,13 @@ export class AudioEngine {
     this.speed = Math.min(1, r); this.boost = r > 1;
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
+    if (this.variant && this.mode === 'chill') {                                    // variante : la coupure du filtre maître monte avec la vitesse, entre les deux bornes de la variante
+      const [lo, hi] = this.variant.open;
+      this.lp.frequency.setTargetAtTime(lo * Math.pow(hi / lo, this.speed) * (this.boost ? 1.2 : 1), t, 0.25);
+      this.lp.Q.setTargetAtTime(0.8 + 0.32 * (1 - this.speed) + (this.boost ? 0.6 : 0), t, 0.3);
+      this.synthBus.gain.setTargetAtTime(0.18 + 0.5 * this.speed, t, 0.4);
+      return;
+    }
     // Menu / arrêt : passe-bas serré (≈ 300 Hz, kick et basse douce) ; en course il s'ouvre jusqu'à ≈ 9 kHz.
     const chill = this.mode === 'chill';
     const cutoff = chill ? 1400 + 3200 * this.speed : 300 * Math.pow(30, this.speed) * (this.boost ? 1.25 : 1);
@@ -103,12 +133,14 @@ export class AudioEngine {
   }
 
   // Tempo effectif : 124 BPM, jusqu'à +4 à pleine vitesse avec boost.
-  get bpm() { return this.mode === 'chill' ? 92 + 6 * this.speed : BPM_BASE + (this.boost ? BPM_BOOST : this.speed > 0.9 ? 2 : 0); }
+  get bpm() { if (this.variant && this.mode === 'chill') return this.variant.bpm + this.variant.span * this.speed + (this.boost ? 2 : 0); return this.mode === 'chill' ? 92 + 6 * this.speed : BPM_BASE + (this.boost ? BPM_BOOST : this.speed > 0.9 ? 2 : 0); }
 
   // ---- Ordonnanceur ------------------------------------------------------------------------------------------------------------
-  _tick() {
-    const ctx = this.ctx;
-    while (this._next < ctx.currentTime + 0.12) {
+  _tick() { this._advance(this.ctx.currentTime + 0.12); }
+
+  // Programme les pas jusqu'à l'instant `until` (secondes de l'horloge audio). Les tests hors ligne l'appellent avec la durée voulue avant le rendu.
+  _advance(until) {
+    while (this._next < until) {
       this._play(this._step, this._next);
       this._next += 60 / this.bpm / 4;                 // une double-croche
       if (++this._step >= 16) { this._step = 0; this._bar = (this._bar + 1) % BARS.length; }
@@ -147,6 +179,7 @@ export class AudioEngine {
   }
 
   _play(step, t) {
+    if (this.variant && this.mode === 'chill') return this._playVariant(step, t);
     if (this.mode === 'chill') return this._playChill(step, t);
     const s = this.speed, bar = BARS[this._bar];
     this.stats.scheduled++;
@@ -163,12 +196,12 @@ export class AudioEngine {
   }
 
   // Sidechain : le basse et les synthés plongent à chaque kick (≈ 8 % du volume) puis remontent en 0,2 s.
-  _duck(t) {
+  _duck(t, depth = 0.08) {
     for (const [bus, base] of [[this.bassBus, 0.8], [this.synthBus, null]]) {
       const g = bus.gain;
       const hi = base ?? Math.max(0.05, 0.18 + 0.5 * this.speed);
       g.cancelScheduledValues(t);
-      g.setValueAtTime(hi * 0.08, t);
+      g.setValueAtTime(hi * depth, t);
       g.linearRampToValueAtTime(hi, t + 0.2);
     }
   }
@@ -237,3 +270,5 @@ export class AudioEngine {
     o.connect(f); f.connect(g); g.connect(this.synthBus); o.start(t); o.stop(t + 0.14);
   }
 }
+
+Object.assign(AudioEngine.prototype, variantMethods);
