@@ -1,7 +1,7 @@
 // Musique par décor (COMPLETE-006) : node tools/test-musique.mjs   (npm test)
 //
 // Structurel et sur un FAUX AudioContext (tools/fake-audio.mjs) : ce test ne peut rien dire de ce qui s'entend. Le rendu réel (signal non nul, crête, empreinte spectrale, intensité) est dans
-// tools/test-browser-audio.mjs (Chromium, OfflineAudioContext) ; ce qui exige une écoute humaine est dans docs/audit/ECOUTE_MUSIQUE.md.
+// tools/test-browser-audio.mjs (Chromium, OfflineAudioContext) ; ce qui exige une écoute humaine est dans docs/ECOUTE-MUSIQUE.md.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test, finish } from './harness.mjs';

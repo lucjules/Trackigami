@@ -1,7 +1,7 @@
 // Sons propres à chaque véhicule (COMPLETE-017) : node tools/test-vehicules-son.mjs   (npm test)
 //
 // Paramètres (js/vehicleSound.js, pur) et branchement dans GameAudio (js/audio.js) sur un FAUX AudioContext (tools/fake-audio.mjs). Ce test ne peut pas juger ce qui s'entend : le rendu réel
-// (signal non nul, sans écrêtage, timbres distincts) est dans tools/test-browser-audio.mjs ; ce qui exige une écoute humaine est dans docs/audit/ECOUTE_MUSIQUE.md.
+// (signal non nul, sans écrêtage, timbres distincts) est dans tools/test-browser-audio.mjs ; ce qui exige une écoute humaine est dans docs/ECOUTE-MUSIQUE.md.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test, finish } from './harness.mjs';

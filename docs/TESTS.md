@@ -11,6 +11,13 @@ Tout se lance depuis la racine du dépôt. **Rien n'est désactivé** : un test 
 | `npm run test:sql` | les étapes `supabase/etape1…21-*.sql` (dont 15b et le retour arrière `etape15-retour.sql`) et `supabase/verify-prod.sql`, par sept scripts `tools/test-*-sql.sh`, sur un PostgreSQL local avec un faux schéma `auth` : RLS, droits, fonctions, limitation, et de la **concurrence réelle** (sessions `psql` simultanées avec entrelacements forcés : plafond de 2 000, meilleur temps, limitation de cadence). Le script échoue (code de sortie ≠ 0) si un test échoue | PostgreSQL (`psql`, `initdb`) |
 | `node tools/phys-fingerprint.mjs` | la physique n'a pas changé sans que `PHYS_VER` change (230 scénarios) ; `--update` après un changement voulu | Node |
 
+## Audio (0.21.0)
+
+- `tools/test-musique.mjs` (dans `npm test`) : les douze variantes (données, bornes, deux à deux distinctes, sélection déterministe, règles par écran), le menu et le chill d'origine **inchangés** (journal complet des appels Web Audio sur 12 s, comparé à celui du code d'avant : `tools/baseline-audio.mjs`), budget de voix par profil de qualité, aucune fuite de nœud sur 20 changements, séquenceur arrêté onglet masqué. Faux `AudioContext` : `tools/fake-audio.mjs`.
+- `tools/test-vehicules-son.mjs` (dans `npm test`) : la voiture sonne comme avant (formules d'origine recopiées), les timbres de la moto, du bateau et du deltaplane, la transformation en douceur, aucune création de nœud par `engine()`, aucune écriture dans la course.
+- `tools/test-browser-audio.mjs` (dans `npm run test:browser`) : rendu hors ligne dans Chromium (`OfflineAudioContext`) : signal non nul, crête < 1, empreinte spectrale distincte pour chaque variante et chaque timbre, intensité croissante avec la vitesse, nœuds réellement reliés à la sortie stables, application complète (variante du décor, menu, onglet masqué). `AUDIO_CAPTURE=1` n'affiche que les mesures du comportement par défaut (références figées sur le code d'avant).
+- Ce que ces tests ne jugent pas (justesse, équilibre, agrément, lassitude) : `docs/ECOUTE-MUSIQUE.md`, grille à remplir à l'écoute.
+
 ## Défauts connus : `bugConnu` (0.16.1)
 
 Les défauts de `docs/audit/AUDIT_COMPLET.md` qui ne sont pas encore corrigés peuvent être reproduits par des tests (à ce jour, aucun test hors `test-harnais` n'en garde un : tous ceux de l'audit sont devenus des tests de régression), pour que leur correction soit mesurable et que les phases qui touchent le noyau, le modèle ou les entrées ne cassent rien d'autre sans qu'on le voie.
