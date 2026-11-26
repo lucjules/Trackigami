@@ -28,6 +28,7 @@ import { isFavorite, toggleFavorite, cleanFavorites } from '../favorites.js';
 import { describeDaily, describeUser, describeCommunity, personalRecord, quickRaceIndex, describeVariant, hubCategories, EXTREME_LABEL } from '../trackDescriptor.js';
 import { createTrackMap } from '../ui/trackMap.js';
 import { isTraining } from '../hudProfile.js';
+import { ghostTarget } from '../ghostTarget.js';
 import { SURFACES } from '../pieces.js';
 import { mountLeaderboard } from '../ui/leaderboardPanel.js';
 import { thumbnail } from '../editorTools.js';
@@ -50,6 +51,9 @@ export function favRefOf(desc) {
 
 // Les commandes enregistrées d'un record se décodent-elles ? (le décodage lève sur du base64 invalide ou un enregistrement trop long)
 const readableInputs = (s) => { try { decodeInputs(s); return true; } catch { return false; } };
+
+// Le nom de la puce du fantôme de médaille selon la médaille visée (écrit en entier : les textes du jeu se cherchent dans le code pour être traduits).
+const GHOST_CHIP = { bronze: 'Fantôme bronze', argent: 'Fantôme argent', or: 'Fantôme or', cristal: 'Fantôme cristal' };
 
 export const raceHubMethods = {
   // Lance une course à partir d'un descripteur : c'est le seul chemin (cartes, hub, circuit suivant, course rapide). extra : fromHub, rivals.
@@ -192,7 +196,9 @@ export const raceHubMethods = {
     const rec = personalRecord(d, getRecord);
     const medal = rec && d.medals ? medalFor(medalTime(rec), d.medals) : null;
     const chips = [['ghost', 'Mon record', s.ghost !== false, !!rec]];
-    if (d.track.path && d.medals) chips.push(['ghostGold', 'Fantôme or', s.ghostGold !== false, true]);
+    // Le fantôme de médaille : celui de la prochaine médaille à gagner (ghostTarget.js), nommé comme elle ; plus rien à montrer une fois le cristal gagné (sauf « toujours l'or »).
+    const gt = d.track.path && d.medals ? ghostTarget({ trackKey: d.key, medals: d.medals, best: rec ? medalTime(rec) : null, mode: s.ghostMedal }) : null;
+    if (gt) chips.push(['ghostGold', GHOST_CHIP[gt.medal], s.ghostGold !== false, true]);
     if (d.key && getImportedGhost(d.key)) chips.push(['ghostImported', 'Fantôme importé', s.ghostImported !== false, true]);
     const rivals = [...h.rivals.entries()].sort((a, b) => a[0] - b[0]);
     const cats = hubCategories(h.base);

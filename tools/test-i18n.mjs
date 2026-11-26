@@ -199,6 +199,20 @@ test('messages de course, objectifs, médailles : les textes produits par le cod
   assert.equal(I.translate(GOALS.vehicle.label('glider')), 'Cross the finish by glider');
 });
 
+// COMPLETE-012 : l'objectif de CHAQUE circuit (84, tous types) a un texte anglais, et les nouveaux types se traduisent comme prévu.
+test('objectifs bonus variés : le texte de l\'objectif de chaque circuit est traduit', async () => {
+  const { goalLabel } = await import('../js/career.js');
+  const { BUILTIN_TRACKS } = await import('../js/tracks.js');
+  const left = BUILTIN_TRACKS.map((d) => [d.id, goalLabel(d.goal)]).filter(([, s]) => !I.hasTranslation(s) && I.translate(s) === s);
+  assert.deepEqual(left, [], 'sans traduction : ' + left.map((x) => x.join(' : ')).join(' | '));
+  const T = (g) => I.translate(goalLabel(g));
+  assert.equal(T({ id: 'air', t: 2.5 }), 'A single 2.5 s flight without touching the ground'); assert.equal(T({ id: 'speed', v: 250 }), 'Reach 250 km/h');
+  assert.equal(T({ id: 'section', a: 0, b: 1, t: 21.7 }), 'From the start to checkpoint 1 in under 21.7 s'); assert.equal(T({ id: 'section', a: 1, b: 2, t: 30 }), 'From checkpoint 1 to checkpoint 2 in under 30 s');
+  assert.equal(T({ id: 'section', a: 2, t: 36.6 }), 'From checkpoint 2 to the finish in under 36.6 s');
+  assert.equal(T({ id: 'turbo', n: 2, a: 1, b: 2 }), '2 mini-turbos from checkpoint 1 to checkpoint 2'); assert.equal(T({ id: 'turbo', n: 1, a: 1, b: 2 }), '1 mini-turbo from checkpoint 1 to checkpoint 2');
+  assert.equal(T({ id: 'turbo', n: 2 }), '2 mini-turbos'); assert.equal(T({ id: 'turbo', n: 1, b: 1 }), '1 mini-turbo from the start to checkpoint 1');
+});
+
 // (0.16.1, TECH-020) Les aides qui citent des touches suivent les liaisons du joueur : le texte change avec elles, sa traduction aussi.
 test('aides qui citent une touche liée (message « bloqué », fin de replay, barre du replay, boutons de la pause et de l\'arrivée) : traduites quelles que soient les touches', async () => {
   const { MSG } = await import('../js/hudMessages.js');

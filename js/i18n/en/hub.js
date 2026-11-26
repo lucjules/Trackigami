@@ -39,7 +39,7 @@ export default {
   'Mon record': 'My record',
   'Pas encore de temps : à toi d’ouvrir la voie.': 'No time yet: you get to blaze the trail.',
   'Fantômes': 'Ghosts',
-  'Fantôme or': 'Gold ghost',
+  'Fantôme or': 'Gold ghost', 'Fantôme bronze': 'Bronze ghost', 'Fantôme argent': 'Silver ghost', 'Fantôme cristal': 'Crystal ghost',
   'Fantôme importé': 'Imported ghost',
   'Pas encore de record sur ce circuit': 'No record on this track yet',
   'Retirer ce rival': 'Remove this rival',

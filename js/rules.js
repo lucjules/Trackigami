@@ -31,7 +31,7 @@ export function describeRules(rules) {
 // ---------------------------------------------------------------- modes
 export function sanitizeGoal(g) {
   const o = g && typeof g === 'object' ? g : {};
-  if (typeof o.id !== 'string' || !Object.hasOwn(GOALS, o.id)) return null;      // (hasOwn : « __proto__ » et « constructor » ne sont pas des objectifs)
+  if (typeof o.id !== 'string' || !Object.hasOwn(GOALS, o.id) || GOALS[o.id].circuit) return null;      // (hasOwn : « __proto__ » et « constructor » ne sont pas des objectifs ; COMPLETE-012 : ceux propres à un circuit de la carrière non plus)
   const out = { id: o.id };
   if (['perfect', 'turbo', 'rings'].includes(o.id)) out.n = int(o.n, 1, 9, 1);
   if (o.id === 'vehicle') out.v = ['moto', 'boat', 'glider', 'car'].includes(o.v) ? o.v : 'moto';

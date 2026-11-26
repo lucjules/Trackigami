@@ -72,7 +72,7 @@ if (process.argv[1] && process.argv[1].endsWith('medals.mjs') && process.argv.in
     console.log(`${id.padEnd(14)} ${t.length} temps, meilleur ${Math.min(...t).toFixed(2)} s   proposé ${JSON.stringify(m).replace(/"/g, '')}   écrit ${JSON.stringify(def.medals).replace(/"/g, '')}`);
     if (process.argv.includes('--ecrire')) { src = writeMedals(src, def, m); n++; }
   }
-  if (process.argv.includes('--ecrire')) { writeFileSync(path, src); console.log(n + ' circuits recalés sur des temps humains dans js/tracks.js (puis : node tools/golden.mjs --update ; npm run sw ; npm run build:function)'); }
+  if (process.argv.includes('--ecrire')) { writeFileSync(path, src); console.log(n + ' circuits recalés sur des temps humains dans js/tracks.js (puis : node tools/golden.mjs --update ; node tools/ghost-rythmes.mjs --update ; node tools/objectifs.mjs ; npm run sw ; npm run build:function)'); }
 } else if (process.argv[1] && process.argv[1].endsWith('medals.mjs')) {
   const args = process.argv.slice(2);
   const check = args.includes('--check');

@@ -117,6 +117,7 @@
   <link rel="modulepreload" href="js/theater/session.js">
   <link rel="modulepreload" href="js/theater/cameras.js">
   <link rel="modulepreload" href="js/envFx.js">
+  <link rel="modulepreload" href="js/runStats.js">
   <link rel="modulepreload" href="js/aids.js">
   <link rel="modulepreload" href="js/dmath.js">
   <link rel="modulepreload" href="js/ribbons.js">
@@ -137,6 +138,7 @@
   <link rel="modulepreload" href="js/categoriesFaisables.js">
   <link rel="modulepreload" href="js/ghostFormat.js">
   <link rel="modulepreload" href="js/physics/specs.js">
+  <link rel="modulepreload" href="js/pace.js">
   <link rel="modulepreload" href="js/rules.js">
   <link rel="modulepreload" href="js/net/room.js">
   <link rel="modulepreload" href="js/net/championship.js">
@@ -162,6 +164,7 @@
   <link rel="modulepreload" href="js/hudProfile.js">
   <link rel="modulepreload" href="js/mods.js">
   <link rel="modulepreload" href="js/favorites.js">
+  <link rel="modulepreload" href="js/ghostTarget.js">
   <link rel="modulepreload" href="js/analysis/trace.js">
   <link rel="modulepreload" href="js/analysis/reference.js">
   <link rel="modulepreload" href="js/analysis/coach.js">
@@ -194,6 +197,7 @@
   <link rel="modulepreload" href="js/analysis/events.js">
   <link rel="modulepreload" href="js/placement.js">
   <link rel="modulepreload" href="js/connect.js">
+  <link rel="modulepreload" href="js/ghostPaces.js">
   <link rel="modulepreload" href="js/sim/params.js">
   <link rel="modulepreload" href="js/sim/env.js">
   <link rel="modulepreload" href="js/physics/vehicles/moto2.js">
@@ -475,7 +479,8 @@
     <div class="prof-panel hidden" data-ppanel="game"><div class="panel form">
       <h3 class="opt-h">Courses</h3>
       <label><span>Afficher le fantôme du record</span><input type="checkbox" id="opt-ghost"></label>
-      <label><span>Fantôme de la médaille d'or (tant qu'elle n'est pas gagnée)</span><input type="checkbox" id="opt-ghostgold"></label>
+      <label><span>Fantôme de médaille (le pilote automatique, au temps de la médaille visée)</span><input type="checkbox" id="opt-ghostgold"></label>
+      <label title="La prochaine médaille à gagner : bronze, puis argent, or et cristal. « Toujours l'or » garde le fantôme or, même une fois l'or gagné. Circuits de la carrière et défi du jour seulement."><span>Quel fantôme de médaille</span><select id="opt-ghostmedal"><option value="next">La prochaine médaille à gagner</option><option value="or">Toujours l'or</option></select></label>
       <label><span>Fantôme importé (code d'un ami)</span><input type="checkbox" id="opt-ghostimp"></label>
       <label><span>Envoyer mes records aux classements en ligne</span><input type="checkbox" id="opt-onlinescores"></label>
       <label title="L'éditeur n'affiche que l'essentiel (droite et pentes, virages, départ, arrivée, checkpoint) pour commencer."><span>Éditeur guidé (l'essentiel seulement)</span><input type="checkbox" id="opt-editor-guided"></label>

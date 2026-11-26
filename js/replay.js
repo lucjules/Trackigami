@@ -3,6 +3,7 @@
 // Une commande = volant quantifié au centième + gaz / frein / réapparition.
 import { Simulation } from './simulation.js';
 import { Autopilot } from './autopilot.js';
+import { paceOptions } from './pace.js';
 import { b64encode, b64decode } from './track.js';
 import { PHYS_VER } from './version.js';
 import { MAX_RUN_STEPS } from './constants.js';
@@ -95,7 +96,8 @@ const VEH_IDS = ['car', 'moto', 'boat', 'glider'];
 
 export class GhostRunner {
   // ghost : enregistre aussi le fantôme (une pose tous les GHOST_EVERY pas, comme la course en direct) : c'est ce que la fonction serveur range avec un record.
-  constructor(track, { inputs = null, bot = false, latK = 0.8, ghost = false } = {}) {
+  // pace : rythme du pilote automatique (js/pace.js) ; absent, le pilote est celui d'avant (le fantôme or, à l'identique).
+  constructor(track, { inputs = null, bot = false, latK = 0.8, ghost = false, pace = null } = {}) {
     this.gRec = ghost ? [] : null;       // x, y, z, qx, qy, qz, qw par échantillon
     this.gVeh = [];                      // changements de véhicule : [image, id]
     this._q = [0, 0, 0, 1];
@@ -103,7 +105,7 @@ export class GhostRunner {
     this.phys = this.sim.phys;
     this.logic = this.sim.logic;
     this.rep = inputs ? decodeInputs(inputs) : null;
-    this.bot = bot && track.path ? new Autopilot(track.path, { latLimit: 56 * latK }) : null;
+    this.bot = bot && track.path ? new Autopilot(track.path, pace == null ? { latLimit: 56 * latK } : paceOptions(pace, track.path, 56 * latK)) : null;
     this.hist = new Float32Array(HIST_STRIDE * 1024);
     this.reset();
   }
