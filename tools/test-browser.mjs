@@ -904,7 +904,7 @@ try {
   });
 
   await test('profil, progression, paramètres : chaque entrée du menu ouvre son écran à onglets, tous les onglets s\'affichent sans erreur, « ← Retour » ramène au panneau', async () => {
-    const tour = { profile: ['account', 'friends', 'saves'], progress: ['records', 'level', 'stats', 'unlocks'], settings: ['audio', 'gfx', 'access', 'game', 'ui', 'controls'] };
+    const tour = { profile: ['account', 'friends', 'saves'], progress: ['records', 'level', 'stats', 'unlocks', 'mech'], settings: ['audio', 'gfx', 'access', 'game', 'ui', 'controls'] };
     for (const [hub, tabs] of Object.entries(tour)) {
       await click(`#menu [data-action="sub-${hub}"]`);
       await waitApp((h) => !document.getElementById('menu-sub-' + h).classList.contains('hidden') && document.getElementById('menu-tiles').classList.contains('hidden'), hub);

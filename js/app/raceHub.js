@@ -66,7 +66,7 @@ export const raceHubMethods = {
   // from : l'écran où revenir (tracks, mytracks, community, menu).
   openRaceHub(desc, { from = 'tracks' } = {}) {
     if (this._hub && this._hub.map) this._hub.map.dispose();
-    this._hub = { desc, base: desc.official || desc, from, rivals: new Map(), map: null, board: null };
+    this._hub = { desc, base: desc.official || desc, from, rivals: new Map(), map: null, board: null, newMech: this._hubTakeNewMech(desc) };      // newMech : la carte « Nouveau » (COMPLETE-007), montrée à cette ouverture seulement
     this.showScreen('race-hub');
     const play = $('hub-play');
     if (play && !play.disabled && matchMedia('(pointer: fine)').matches) play.focus({ preventScroll: true });
@@ -118,6 +118,7 @@ export const raceHubMethods = {
       if (bar) $('hub-sub').append(' ', bar);
     }
     this._renderHubFav();
+    this._renderHubNew();
     this._renderHubFacts();
     this._renderHubComments(d);
     this._renderHubMap();

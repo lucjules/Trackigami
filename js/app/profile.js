@@ -17,7 +17,7 @@ import { FILE_PREFIX } from '../version.js';
 // (this.profileTab) dit laquelle est ouverte. Les anciens noms d'onglet ('options') mènent au premier onglet des paramètres liés à l'image.
 export const HUBS = {
   profile: { title: 'Profil', tabs: [['account', 'Compte'], ['friends', 'Amis'], ['saves', 'Sauvegardes']] },
-  progress: { title: 'Progression', tabs: [['records', 'Records et médailles'], ['level', 'Niveau et licences'], ['stats', 'Statistiques'], ['unlocks', 'Déblocages']] },
+  progress: { title: 'Progression', tabs: [['records', 'Records et médailles'], ['level', 'Niveau et licences'], ['stats', 'Statistiques'], ['unlocks', 'Déblocages'], ['mech', 'Mécaniques']] },
   settings: { title: 'Paramètres', tabs: [['audio', 'Audio'], ['gfx', 'Graphismes'], ['access', 'Accessibilité'], ['game', 'Jeu'], ['ui', 'Interface'], ['controls', 'Commandes']] },
 };
 export const TAB_HUB = Object.fromEntries(Object.entries(HUBS).flatMap(([hub, h]) => h.tabs.map(([t]) => [t, hub])));
@@ -39,6 +39,7 @@ export const profileMethods = {
     else if (tab === 'records') this._renderRecords($('prog-records'));
     else if (tab === 'stats') this._renderStats($('prog-stats'));
     else if (tab === 'unlocks') this._renderUnlocks($('prog-unlocks'));
+    else if (tab === 'mech') this._renderMechIndex($('prog-mech'));      // (COMPLETE-007) index « Mécaniques découvertes »
     else if (tab === 'controls') { this._renderOptions(); this._renderControls(); }
     else this._renderOptions();                 // audio, graphismes, accessibilité, jeu, interface : les réglages sont remplis depuis les préférences
   },

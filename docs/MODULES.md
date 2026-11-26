@@ -10,6 +10,7 @@ La vue d'ensemble (principes, déterminisme, flux d'une course) est dans [ARCHIT
 | --- | --- |
 | `a11y.js` | Accessibilité (Trackigami Evolution, E22) : réduction des animations. Réglage `reduceMotion` : 'auto' suit le système (prefers-reduced-motion), 'on' réduit toujours, 'off' jamais. Réduites : transitions des écrans et des fenêtres coupées (classe body.reduce-motion, css/style.css), tremblements et effets de caméra du ressenti à zéro (race/camera.js). Rien ne change dans la course. |
 | `academy.js` | Académie : six leçons guidées, de très courts circuits qui apprennent UNE chose chacune (conduite, dérapage, mini-turbo, réception, plaque de transformation, obstacles), avec un objectif à réussir. Données et règles pures ; l'écran et le lancement sont dans app/academy.js. Aucune médaille, aucun record, aucune statistique : on s'entraîne. |
+| `academyMech.js` | Académie, leçons par famille de mécanique (COMPLETE-008) : voir plus bas (ajoutées à l'étape suivante). |
 | `account.js` | Comptes Trackigami : pseudo + mot de passe, sauvegarde cloud entre appareils. Les invités restent locaux. |
 | `accountRules.js` | Règles des comptes PARTAGÉES entre le jeu (js/account.js) et la fonction serveur « account-recovery » (supabase/functions/account-recovery) : pseudo, mot de passe, code de secours. |
 | `accountUi.js` | Fenêtres du COMPTE (Garage › Compte) : changer le mot de passe, créer / régénérer le code de secours, et le bloc d'état du code (COMPLETE-003). |
@@ -163,6 +164,7 @@ La vue d'ensemble (principes, déterminisme, flux d'une course) est dans [ARCHIT
 | `feedback.js` | Avis des testeurs dans le jeu (phase 4 de la 1.0) : la fenêtre « Donner mon avis » (questions : js/feedback.js ; serveur : supabase/etape19-avis.sql), ouverte depuis Paramètres et la barre du bas de l'accueil, et proposée UNE fois après quelques courses aux joueurs qui ont accepté les statistiques. |
 | `lab.js` | Laboratoire de comparaison (Trackigami Evolution, E20) : depuis la fiche d'un circuit, rejoue les commandes du record personnel sous deux réglages physiques (profils, véhicules v1 / v2, adhérence, pluie) et affiche l'écart secteur par secteur et le long du circuit. Le calcul est dans analysis/lab.js ; le circuit n'est jamais modifié. Ces méthodes s'ajoutent au prototype de App. |
 | `legal.js` | Pages légales dans le jeu (0.12.4) : confidentialité, mentions légales, règles de la communauté, crédits et licences (textes : js/legal.js), et export des données du joueur (js/dataExport.js). Ces méthodes s'ajoutent au prototype de App (voir main.js) : `this` est l'instance. |
+| `mechanics.js` | Mécaniques de jeu (COMPLETE-007), côté écrans : la carte « Nouveau » de la fiche d'un circuit (Race Hub) et l'index « Mécaniques découvertes » du profil (Progression › Mécaniques). |
 | `modes.js` | Modes de jeu, règles de partie et paquets (lot 13) : l'interface. Les règles et validations sont dans rules.js et mods.js. Ces méthodes s'ajoutent au prototype de App. |
 | `multi.js` | Multijoueur : salons (privés par code, ou publics), circuit commun, lobby, départ en course à plusieurs, classement du salon, championnat (manches). |
 | `profile.js` | Profil : compte, sauvegardes, import et export de sauvegarde. |
@@ -282,6 +284,7 @@ La vue d'ensemble (principes, déterminisme, flux d'une course) est dans [ARCHIT
 | `camera.js` | Caméras de la course : poursuite, capot, TV et orbite des replays, coupures, champ de vision. |
 | `finish.js` | Évènements de course (checkpoint, tour, arrivée), records, récompenses et écran de fin. |
 | `ghosts.js` | Fantômes : record personnel enregistré, fantômes simulés (or, importé), orientation et affichage. |
+| `mechanics.js` | Rappel discret des mécaniques en course (COMPLETE-007) : à l'approche de la PREMIÈRE pièce ou obstacle d'une mécanique que le joueur n'a encore jamais rencontrée en course, un court message de priorité « hint » (hudMessages.js : il ne coupe jamais un message en cours, un autre message le remplace) : « Nouveau · Verglas : peu d'adhérence… ». UNE seule fois par mécanique : une fois le message affiché, le niveau 2 est écrit dans le profil (mechanics.js : markMech) et la mécanique ne revient plus, dans aucune course ni sur aucun appareil (fusion = union). |
 | `net.js` | Multijoueur dans la course : voitures des autres joueurs et envoi de l'état local. |
 | `replayMode.js` | Mode replay : lecture à vitesse variable, pause, interface et fin du replay. |
 | `scriptsRun.js` | Exécution des scripts de circuit (lot 12) pendant la course : voir js/scripts.js. Effets visuels et sonores seulement. Ces méthodes s'ajoutent au prototype de RaceSession. |

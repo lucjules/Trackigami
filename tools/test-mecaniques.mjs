@@ -13,6 +13,11 @@ import { mergeProfile } from '../js/cloudsave.js';
 import { buildExport } from '../js/dataExport.js';
 import * as I from '../js/i18n.js';
 import enDict from '../js/i18n/en.js';
+import { profile, saveProfile } from '../js/profile.js';
+import { mechanicsMethods } from '../js/app/mechanics.js';
+import { mechanicsRaceMethods, mechHintsAllowed, nearSite, HINT_SECONDS } from '../js/race/mechanics.js';
+import { MessageGate, PRIO } from '../js/hudMessages.js';
+import { describeBuiltin } from '../js/trackDescriptor.js';
 
 const builtins = BUILTIN_TRACKS.map((d) => ({ def: d, track: buildBuiltin(d) }));
 
@@ -139,5 +144,119 @@ test('l\'export des données du joueur contient les mécaniques découvertes (le
   const out = await buildExport({ meta: { game: 'T' }, local, uid: null, now: () => new Date('2026-11-26T10:00:00Z') });
   assert.deepEqual(out.device.profile.mech, { ice: 2, boost: 1 });
 });
+
+console.log('Carte « Nouveau » (fiche) : une seule fois par mécanique');
+const fakeApp = () => ({ builtins: builtins.map((b, i) => ({ ...b, key: 'b-' + b.def.id, index: i })), ...mechanicsMethods });
+const resetProfile = () => { const p = profile(); delete p.mech; p.stats = { races: 0, earned: 0 }; saveProfile(); return p; };
+test('profil neuf : la carte liste les mécaniques du circuit ; rouvrir la fiche ne la remontre pas ; le circuit suivant ne montre que ses nouveautés ; un circuit verrouillé ne consomme rien', () => {
+  const p = resetProfile(), app = fakeApp();
+  const d0 = { track: builtins[0].track }, d1 = { track: builtins[1].track };
+  const first = app._hubTakeNewMech(d0);
+  assert.deepEqual(first, mechanicsOf(builtins[0].track));
+  assert.equal(first.length, 4);
+  assert.ok(first.every((id) => mechLevel(p, id) === 1), 'vue (niveau 1), pas encore rencontrée en course');
+  assert.deepEqual(app._hubTakeNewMech(d0), [], 'une seule fois');
+  const second = app._hubTakeNewMech(d1);
+  assert.deepEqual(second, mechanicsOf(builtins[1].track).filter((id) => !first.includes(id)));
+  assert.deepEqual(app._hubTakeNewMech({ track: builtins[5].track, locked: 'Chapitre verrouillé' }), [], 'verrouillé : rien consommé');
+  assert.ok(mechanicsOf(builtins[5].track).some((id) => mechLevel(p, id) === 0), 'les mécaniques du circuit verrouillé restent à découvrir');
+  assert.deepEqual(app._hubTakeNewMech(null), []);
+});
+test('profil existant (records sur les deux premiers circuits) : migration au premier passage, aucune carte pour ce qu\'il connaît déjà, ses données intactes', () => {
+  const p = resetProfile(); p.coins = 77; p.medals = { 'b-eclats': 2 }; saveProfile();
+  const app = fakeApp();
+  const known = new Set(['b-eclats', 'b-canyon']);
+  seedMech(profile(), app.builtins, (k) => known.has(k)); saveProfile();       // (le flux de l'application : _mechSeed lit les records du stockage ; la règle est celle-ci)
+  const old = new Set([...mechanicsOf(builtins[0].track), ...mechanicsOf(builtins[1].track)]);
+  assert.deepEqual(app._hubTakeNewMech({ track: builtins[0].track }), [], 'connu : pas de carte');
+  assert.deepEqual(app._hubTakeNewMech({ track: builtins[1].track }), []);
+  assert.deepEqual(app._hubTakeNewMech({ track: builtins[2].track }), mechanicsOf(builtins[2].track).filter((id) => !old.has(id)), 'seule la nouveauté d\'un circuit encore jamais joué');
+  assert.equal(profile().coins, 77); assert.deepEqual(profile().medals, { 'b-eclats': 2 });
+});
+test('descripteur de circuit officiel : le verrou du chapitre est bien lu (locked) par la fiche', () => {
+  const d = describeBuiltin(builtins[0].def ? { def: builtins[0].def, track: builtins[0].track, index: 0, key: 'b-eclats' } : null, { total: 84 });
+  assert.equal(d.locked, null);
+  assert.ok(d.track === builtins[0].track);
+});
+
+console.log('Rappel en course : discret, jamais sur un message important, une seule fois');
+// Une « course » minimale : la position de la voiture, le verrou de messages du vrai HUD (hudMessages.js) et une horloge que le test fait avancer.
+let clock = 0;
+const realNow = performance.now.bind(performance);
+const setClock = (ms) => { clock = ms; };
+function fakeRace(track, extra = {}) {
+  const gate = new MessageGate(), shown = [];
+  const hud = { message(text, dur, prio) { if (!gate.offer(text, dur * 1000, prio, clock)) return false; shown.push(text); return true; } };
+  const r = { track, demo: false, replay: null, multi: null, opts: {}, phys: { pos: { x: 0, y: 0, z: 0 } }, app: { _mechSeed() {}, ui: { hud } }, ...extra, ...mechanicsRaceMethods };
+  return { r, gate, shown, hud };
+}
+const drive = (race, pts, stepMs = 100) => { for (const q of pts) { race.r.phys.pos.x = q[0]; race.r.phys.pos.y = q[1]; race.r.phys.pos.z = q[2]; clock += stepMs; race._tick && race._tick(); race.r._mechTick(); } };
+performance.now = () => clock;
+test('une course du premier circuit sur un profil neuf : chaque mécanique est annoncée UNE fois, à son approche, les unes après les autres, puis plus jamais (nouvel essai, autre course)', () => {
+  const p = resetProfile(); setClock(10000);
+  const tr = builtins[0].track, race = fakeRace(tr);
+  race.r._mechSetup();
+  assert.deepEqual(race.r._mech.pending.map((e) => e.id).sort(), mechanicsOf(tr).sort());
+  drive(race, tr.path.map((q) => [q[0], q[1], q[2]]), 200);
+  const want = mechanicsOf(tr).map((id) => mechReminder(MECH_BY_ID[id]));
+  assert.ok(race.shown.length >= 1, 'au moins un rappel');
+  assert.equal(new Set(race.shown).size, race.shown.length, 'aucun rappel répété : ' + race.shown.join(' | '));
+  for (const t of race.shown) assert.ok(want.includes(t), t);
+  const met = discoveredMechanics(p).filter((id) => mechLevel(p, id) === 2);
+  assert.equal(met.length, race.shown.length, 'chaque rappel montré écrit le niveau 2');
+  // Nouvel essai, puis autre session : ce qui a été annoncé ne revient pas
+  const again = fakeRace(tr); again.r._mechSetup();
+  assert.deepEqual(again.r._mech ? again.r._mech.pending.map((e) => e.id).sort() : [], mechanicsOf(tr).filter((id) => !met.includes(id)).sort(), 'seules les non annoncées reviennent');
+});
+test('un message important en cours bloque le rappel (jamais dessus) ; la mécanique reste à découvrir tant qu\'elle n\'a pas pu être annoncée', () => {
+  resetProfile(); setClock(50000);
+  const tr = scriptTrack('x', 'start S2.i S3 finish'), race = fakeRace(tr);
+  race.r._mechSetup();
+  const site = mechanicSites(tr).ice[0];
+  race.r.phys.pos.x = site.x; race.r.phys.pos.y = site.y; race.r.phys.pos.z = site.z;
+  assert.equal(race.hud.message('Hors piste', 1.0, PRIO.penalty), true);
+  race.r._mechTick();
+  assert.deepEqual(race.shown, ['Hors piste'], 'refusé : un message important est affiché');
+  assert.equal(mechLevel(profile(), 'ice'), 0, 'pas marqué : jamais annoncé');
+  setClock(clock + 1200); race.r._mechTick();
+  assert.equal(race.shown.length, 2, 'le message important est fini : le rappel part');
+  assert.equal(race.shown[1], mechReminder(MECH_BY_ID.ice));
+  assert.equal(mechLevel(profile(), 'ice'), 2);
+  // un autre message (même modeste) remplace le rappel : il est le plus discret
+  assert.equal(race.hud.message('Moteur coupé', 0.9, PRIO.info), true);
+});
+test('une mécanique dépassée sans avoir pu être annoncée n\'est plus annoncée dans cette course, mais reste à découvrir pour la suivante', () => {
+  resetProfile(); setClock(90000);
+  const tr = scriptTrack('x', 'start S2.i S6 finish'), race = fakeRace(tr);
+  race.r._mechSetup();
+  const site = mechanicSites(tr).ice[0];
+  race.r.phys.pos.x = site.x; race.r.phys.pos.y = site.y; race.r.phys.pos.z = site.z;
+  race.hud.message('Piques', 5, PRIO.penalty);
+  race.r._mechTick();
+  race.r.phys.pos.z += 600; race.r._mechTick();
+  assert.equal(race.r._mech.pending.length, 0, 'abandonné pour cette course');
+  assert.equal(mechLevel(profile(), 'ice'), 0);
+  const next = fakeRace(tr); next.r._mechSetup();
+  assert.deepEqual(next.r._mech.pending.map((e) => e.id), ['ice'], 'la course suivante l\'annonce');
+});
+test('règle du circuit ou logique (aucun site) : annoncé dès le départ ; contextes sans rappel : démonstration, replay, multijoueur, Académie, essai de l\'éditeur, mode libre', () => {
+  resetProfile(); setClock(200000);
+  const tr = scriptTrack('x', 'start S2 finish'); tr.setParams({ veh0: 'moto' });
+  const race = fakeRace(tr); race.r._mechSetup(); race.r._mechTick();
+  assert.deepEqual(race.shown, [mechReminder(MECH_BY_ID.moto)]);
+  for (const extra of [{ demo: true }, { replay: {} }, { multi: {} }, { opts: { academy: { index: 0 } } }, { opts: { fromEditor: true } }, { opts: { mode: 'x' } }, { opts: { theater: true } }]) {
+    resetProfile(); const q = fakeRace(tr, extra); q.r._mechSetup();
+    assert.equal(q.r._mech, null, JSON.stringify(extra)); assert.equal(mechHintsAllowed(q.r), false);
+  }
+});
+test('nearSite : à l\'approche d\'un site seulement (rayon + 36 m) ; sans site, toujours', () => {
+  const sites = [{ x: 0, y: 0, z: 0, r: 16 }];
+  assert.equal(nearSite(sites, 0, 0, 40), true);
+  assert.equal(nearSite(sites, 0, 0, 53), false);
+  assert.equal(nearSite(sites, 0, 60, 0), false, 'un niveau très différent : pas à portée');
+  assert.equal(nearSite([], 999, 999, 999), true);
+  assert.ok(HINT_SECONDS >= 3 && HINT_SECONDS <= 6);
+});
+performance.now = realNow;
 
 await finish('Tous les tests des mécaniques passent.');

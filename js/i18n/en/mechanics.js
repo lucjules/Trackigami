@@ -10,6 +10,19 @@ export default {
   'Logique et pièces mobiles': 'Logic and moving pieces',
   'Nouveau · {n:t} : {s:t}': 'New · {n}: {s}',
 
+  // ---------------------------------------------------------------- carte « Nouveau », index
+  '🆕 Nouveau sur ce circuit': '🆕 New on this track',
+  'Et {n:w} de plus : voir l’index.': 'And {n} more: see the index.',
+  'Mécaniques découvertes': 'Discovered mechanics',
+  '📖 Mécaniques': '📖 Mechanics',
+  'Mécaniques': 'Mechanics',
+  'ce que tu as découvert, et comment s’en servir': 'what you have discovered, and how to use it',
+  '{n:w} / {total:w} mécaniques découvertes. Chaque mécanique est présentée à sa première rencontre ; retrouve ici ce qu’elle fait et comment t’en servir.': '{n} / {total} mechanics discovered. Each mechanic is introduced the first time you meet it; find here what it does and how to use it.',
+  'À découvrir': 'To discover',
+  'Elle apparaîtra dans un circuit de la carrière.': 'It will show up on a career track.',
+  '✓ rencontrée': '✓ met',
+  '🎓 Leçon · {name:t}': '🎓 Lesson · {name}',
+
   // ---------------------------------------------------------------- revêtements
   'Accélérateur': 'Accelerator',
   'roule dessus pour une poussée de vitesse': 'drive over it for a burst of speed',

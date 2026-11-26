@@ -94,15 +94,18 @@ class Hud {
     if (pop) { e.classList.remove('pop'); void e.offsetWidth; e.classList.add('pop'); }
   }
 
-  // prio : voir hudMessages.js (un message moins important ne coupe pas le courant ; pas de répétition immédiate).
+  // prio : voir hudMessages.js (un message moins important ne coupe pas le courant ; pas de répétition immédiate). Renvoie true si le message est affiché (false : refusé par le verrou).
+  // prio hint : le rappel discret d'une mécanique (petit, sans italique : css .hud-msg.hint).
   message(text, dur = 1.5, prio = PRIO.info) {
     const e = this.el.msg;
-    if (!text) { clearTimeout(this._msgT); e.classList.remove('on'); this.gate.offer('', 0, 0, 0); return; }
-    if (!this.gate.offer(text, dur * 1000, prio, performance.now())) return;
+    if (!text) { clearTimeout(this._msgT); e.classList.remove('on'); this.gate.offer('', 0, 0, 0); return false; }
+    if (!this.gate.offer(text, dur * 1000, prio, performance.now())) return false;
     e.textContent = text;
+    e.classList.toggle('hint', prio === PRIO.hint);
     e.classList.add('on');
     clearTimeout(this._msgT);
     this._msgT = setTimeout(() => e.classList.remove('on'), dur * 1000);
+    return true;
   }
 }
 

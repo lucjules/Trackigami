@@ -434,6 +434,8 @@ kbd {
   white-space: nowrap;
 }
 .hud-msg.on { opacity: 1; }
+/* Rappel d'une mécanique (COMPLETE-007) : plus petit et plus discret que les messages de course ; il passe à la ligne sur un petit écran. */
+.hud-msg.hint { top: auto; bottom: 22%; font-size: 15px; font-weight: 600; font-style: normal; background: rgba(20, 12, 44, 0.5); max-width: min(560px, 86vw); white-space: normal; text-align: center; }
 
 .hud-hint {
   position: absolute;
@@ -1466,6 +1468,19 @@ body.hud-editing > section, body.hud-editing #touch { display: none !important; 
 .hub-facts dd { margin: 0; font-variant-numeric: tabular-nums; }
 .hub-medals { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .hub-desc { margin: 10px 0 0; overflow-wrap: anywhere; }
+/* Mécaniques (COMPLETE-007) : la carte « Nouveau » de la fiche et l'index du profil. */
+.hub-new { background: var(--panel); border: 1px solid var(--cyan); border-radius: 14px; padding: 12px 16px; }
+.hub-new h3 { margin: 0 0 8px; font-size: 18px; font-style: italic; }
+.mech-cards, .mech-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.mech-cards li, .mech-row { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; align-items: start; }
+.mech-ico { font-size: 24px; line-height: 1.2; text-align: center; }
+.mech-cards p, .mech-row p { margin: 2px 0 0; overflow-wrap: anywhere; }
+.mech-row.locked { opacity: 0.55; }
+.mech-row .btn { margin-top: 6px; }
+.mech-more { margin: 8px 0 0; }
+.mech-bar { height: 6px; margin: 6px 0 10px; border-radius: 3px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+.mech-bar i { display: block; height: 100%; background: linear-gradient(90deg, #5ff2ff, #ffd23e); }
+.mech-index { max-height: 70vh; overflow-y: auto; }
 .goal-done { color: var(--good); }
 .hub-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .hub-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; min-width: 0; }

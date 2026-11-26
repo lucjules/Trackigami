@@ -3,8 +3,10 @@
 // Règles :
 //  - un message n'en remplace un autre que s'il est au moins aussi important ; un message mineur ne coupe pas un message important ;
 //  - le même message n'est pas répété dans la seconde qui suit ;
-//  - ce qui se voit ou s'entend déjà (ressort, anneau, mini-turbo, réception réussie) n'a plus de message.
-export const PRIO = { info: 1, event: 2, penalty: 3, final: 4 };
+//  - ce qui se voit ou s'entend déjà (ressort, anneau, mini-turbo, réception réussie) n'a plus de message ;
+//  - hint (COMPLETE-007) : le rappel « Nouveau » d'une mécanique, le plus discret : il ne coupe JAMAIS un message en cours (offer renvoie false : l'appelant le retente plus tard)
+//    et n'importe quel autre message le remplace.
+export const PRIO = { hint: 0, info: 1, event: 2, penalty: 3, final: 4 };
 
 export class MessageGate {
   constructor() { this.until = 0; this.prio = 0; this.text = ''; this.at = new Map(); }

@@ -31,6 +31,7 @@ import { finishMethods } from './race/finish.js';
 import { replayMethods } from './race/replayMode.js';
 import { scriptMethods } from './race/scriptsRun.js';
 import { trainingMethods } from './race/training.js';
+import { mechanicsRaceMethods } from './race/mechanics.js';
 import { theaterMethods } from './theater/session.js';
 import { theaterCameraMethods } from './theater/cameras.js';
 import { EnvFx } from './envFx.js';
@@ -192,6 +193,7 @@ export class RaceSession {
     this.countShown = -1;
     this.acc = 0;
     this._stuckT = 0; this._stuckSaid = false;
+    this._mechSetup();      // rappel des mécaniques jamais rencontrées (race/mechanics.js : COMPLETE-007)
     this.ghostRec = [];
     this.ghostVeh = [];          // changements de véhicule du fantôme enregistré : [image, id]
     this.finishT = 0;
@@ -319,6 +321,7 @@ export class RaceSession {
     this._orient();
     if (this.multi && ++this.netTick % SEND_EVERY_STEPS === 0) { this._updateProgress(); this._sendNet(this.state === 'finished' && !this._dnf ? F_FINISHED : 0); }
     if (this.state === 'racing' && !this.demo && !this.replay && this.tick % 12 === 0) this._checkWay();
+    if (this._mech && this.state === 'racing' && this.tick % 12 === 6) this._mechTick();      // (COMPLETE-007) rappel discret d'une mécanique nouvelle, à son approche
     const ev = this.phys.ev;
     if (this.state === 'racing') this.stats.step(this.phys, this.logic.steps + 1);      // (le chrono avance dans sim.score, plus bas : ce pas est le pas n° steps + 1, comme les temps de passage)
     // Voiture immobile alors que le joueur accélère depuis 3 s (elle est prise au piège : ralentisseur, bateau au sec, rebond sur place, nez dans une paroi…) : on lui rappelle
@@ -768,4 +771,4 @@ export class RaceSession {
 }
 
 // Les familles de méthodes vivent dans race/ ; elles s'ajoutent au prototype (`this` est l'instance).
-Object.assign(RaceSession.prototype, cameraMethods, ghostMethods, netMethods, finishMethods, replayMethods, scriptMethods, trainingMethods, theaterMethods, theaterCameraMethods);
+Object.assign(RaceSession.prototype, cameraMethods, ghostMethods, netMethods, finishMethods, replayMethods, scriptMethods, trainingMethods, mechanicsRaceMethods, theaterMethods, theaterCameraMethods);
