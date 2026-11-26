@@ -9971,7 +9971,8 @@ var BUILTIN_TRACKS = [
     profil: "speedway",
     appris: "D\xE9part : tapis roulant \xE0 +200 km/h entre deux fa\xE7ades, sans booster. Au programme : tr\xE8s grands virages relev\xE9s, avenue large sous un portique, chicane rapide, wall-ride sur une tour, grand S, croisement travers\xE9 deux fois (deux virages g\xE9ants relev\xE9s).",
     goal: {
-      id: "nowall"
+      id: "speed",
+      v: 310
     },
     opts: {
       l: 4
@@ -10139,7 +10140,8 @@ var BUILTIN_TRACKS = [
     profil: "speedway",
     appris: "D\xE9part : un booster \u2192 la vall\xE9e s\u2019\xE9largit aussit\xF4t (route de 56 m). Au programme : trois routes larges sous des portiques, virages g\xE9ants au-dessus de 200 km/h, chicanes rapides, wall-ride en slalom entre deux blocs, bifurcation : voie directe ou grand saut.",
     goal: {
-      id: "nowall"
+      id: "speed",
+      v: 250
     },
     opts: {
       l: 8
@@ -10380,7 +10382,8 @@ var BUILTIN_TRACKS = [
     profil: "rollercoaster",
     appris: "D\xE9part : trois boosters \u2192 deux loopings d\xE9cal\xE9s. Au programme : wall-rides des deux c\xF4t\xE9s, un bloc sur chaque mur, chicane longue, grand looping, avenue large sous un portique, looping modulaire, plongeon \xE0 38\xB0, tube qui tourne.",
     goal: {
-      id: "norespawn"
+      id: "air",
+      t: 2
     },
     opts: {
       l: 12
@@ -10871,7 +10874,8 @@ var BUILTIN_TRACKS = [
     profil: "speedway",
     appris: "D\xE9part : un booster et un S relev\xE9. Au programme : route large sous un portique, tr\xE8s grands virages relev\xE9s, chicane rapide, wall-ride, descente, grand S, tube qui tourne dans la coul\xE9e.",
     goal: {
-      id: "nowall"
+      id: "speed",
+      v: 240
     },
     opts: {
       l: 12
@@ -11111,7 +11115,9 @@ var BUILTIN_TRACKS = [
     profil: "rollercoaster",
     appris: "D\xE9part : trois boosters \u2192 directement un looping modulaire. Au programme : h\xE9lice de 16 niveaux, plongeon \xE0 38\xB0, wall-rides et chicanes, tube qui tourne, bifurcation : tout droit ou par le mur, trois loopings modulaires de hauteurs diff\xE9rentes.",
     goal: {
-      id: "norespawn"
+      id: "section",
+      a: 2,
+      t: 36.6
     },
     opts: {
       l: 2
@@ -11331,7 +11337,10 @@ var BUILTIN_TRACKS = [
     profil: "rollercoaster",
     appris: "D\xE9part : au plafond, dans les racines, trois boosters puis le mur gauche. Au programme : slalom plafond-murs, plongeon \xE0 38\xB0, looping modulaire, route large sous un portique, tube qui tourne, double looping.",
     goal: {
-      id: "norespawn"
+      id: "section",
+      a: 1,
+      b: 2,
+      t: 22.9
     },
     opts: {
       l: 10
@@ -11397,7 +11406,10 @@ var BUILTIN_TRACKS = [
     profil: "technique",
     appris: "D\xE9part : descente \xE0 38\xB0 vers le glacier. Au programme : lacets sur la glace, route \xE9troite entre des stalagmites, wall-ride, bosse aimant\xE9e, chicanes serr\xE9es, croisement travers\xE9 deux fois.",
     goal: {
-      id: "norespawn"
+      id: "turbo",
+      n: 2,
+      a: 1,
+      b: 2
     },
     opts: {
       l: 12
@@ -11478,7 +11490,10 @@ var BUILTIN_TRACKS = [
     profil: "technique",
     appris: "D\xE9part : booster puis mont\xE9e en lacets. Au programme : \xE9pingles sans bordures, quai \xE9troit entre des colonnes, wall-ride, chicane de tunnels, chicanes serr\xE9es, croisement travers\xE9 deux fois.",
     goal: {
-      id: "norespawn"
+      id: "turbo",
+      n: 2,
+      a: 1,
+      b: 2
     },
     opts: {
       l: 2
@@ -11547,7 +11562,10 @@ var BUILTIN_TRACKS = [
     profil: "technique",
     appris: "D\xE9part : plaque de d\xE9rive, booster. Au programme : \xE9pingles en d\xE9rive, route \xE9troite entre des colonnes de basalte, wall-ride, chicanes serr\xE9es, croisement travers\xE9 deux fois.",
     goal: {
-      id: "norespawn"
+      id: "turbo",
+      n: 2,
+      a: 1,
+      b: 2
     },
     opts: {
       l: 6
@@ -11630,7 +11648,10 @@ var BUILTIN_TRACKS = [
     profil: "technique",
     appris: "D\xE9part : dans un tunnel du temple, deux virages serr\xE9s. Au programme : all\xE9e de colonnes, tube, lacets en spirale, chicane de tunnels, route \xE9troite, chicanes serr\xE9es, saut ou d\xE9tour en T, arche, croisement travers\xE9 deux fois.",
     goal: {
-      id: "norespawn"
+      id: "turbo",
+      n: 1,
+      a: 1,
+      b: 2
     },
     opts: {
       l: 8
@@ -11804,7 +11825,8 @@ var BUILTIN_TRACKS = [
     profil: "rollercoaster",
     appris: "D\xE9part : tire-bouchon \xE0 gauche d\xE8s la deuxi\xE8me case. Au programme : double looping, chicanes longues, wall-ride en bosse (monter, redescendre), wall-ride \xE0 droite, tube qui tourne, looping modulaire, route large, plongeon.",
     goal: {
-      id: "norespawn"
+      id: "speed",
+      v: 250
     },
     opts: {
       l: 10
@@ -11885,7 +11907,9 @@ var BUILTIN_TRACKS = [
     profil: "rollercoaster",
     appris: "D\xE9part : tire-bouchon d\xE8s la troisi\xE8me case. Au programme : double h\xE9lice (mont\xE9e, descente), double looping, route large sous un portique, wall-rides des deux c\xF4t\xE9s, chicanes longues, looping modulaire.",
     goal: {
-      id: "norespawn"
+      id: "section",
+      a: 1,
+      t: 54.2
     },
     opts: {
       l: 2
@@ -11961,7 +11985,9 @@ var BUILTIN_TRACKS = [
     profil: "rollercoaster",
     appris: "D\xE9part : trois boosters \u2192 tube, puis la chemin\xE9e (mur de quatre niveaux). Au programme : plongeon, grand looping, wall-ride en bosse (monter, redescendre), wall-ride, looping modulaire, route large, tube qui tourne, route \xE9troite.",
     goal: {
-      id: "norespawn"
+      id: "section",
+      a: 1,
+      t: 43.4
     },
     opts: {
       l: 2
@@ -12043,7 +12069,8 @@ var BUILTIN_TRACKS = [
     profil: "rollercoaster",
     appris: "D\xE9part : quatre boosters \u2192 triple looping. Au programme : wall-rides des deux c\xF4t\xE9s, un bloc sur chaque mur, chicane longue, double looping, looping modulaire, tube qui tourne, plongeon \xE0 38\xB0, route large sous un portique.",
     goal: {
-      id: "norespawn"
+      id: "speed",
+      v: 245
     },
     opts: {
       l: 8
@@ -12137,7 +12164,10 @@ var BUILTIN_TRACKS = [
     profil: "rollercoaster",
     appris: "D\xE9part : trois boosters \u2192 mont\xE9e verticale (mont\xE9e en L, mur, sommet). Au programme : wall-rides, deux loopings modulaires, arche mur \u2192 plafond \u2192 mur, route large, bifurcation saut ou mur, tube qui tourne, virages g\xE9ants, arche pleine entre deux murs.",
     goal: {
-      id: "norespawn"
+      id: "section",
+      a: 2,
+      b: 3,
+      t: 33.3
     },
     opts: {
       l: 3
@@ -12214,7 +12244,10 @@ var BUILTIN_TRACKS = [
     profil: "speedway",
     appris: "D\xE9part : deux boosters puis un tube, entre deux murs de la station. Au programme : deux tours de l\u2019anneau, quatre tr\xE8s grands virages relev\xE9s, chicanes, route large sous un portique, wall-ride.",
     goal: {
-      id: "nowall"
+      id: "section",
+      a: 1,
+      b: 2,
+      t: 30.2
     },
     opts: {
       l: 6
@@ -12379,7 +12412,8 @@ var BUILTIN_TRACKS = [
     profil: "speedway",
     appris: "D\xE9part : tr\xE8s grand virage relev\xE9 sans booster, puis trois boosters. Au programme : virages relev\xE9s en couronne, deux routes larges sous des portiques, chicane rapide, wall-ride en slalom entre deux blocs, grand S, tube qui tourne.",
     goal: {
-      id: "nowall"
+      id: "speed",
+      v: 240
     },
     opts: {
       l: 6
@@ -12470,7 +12504,10 @@ var BUILTIN_TRACKS = [
     profil: "speedway",
     appris: "D\xE9part : deux boosters, mont\xE9e douce. Au programme : deux tours du crat\xE8re, quatre tr\xE8s grands virages relev\xE9s, wall-ride, route large sous un portique, chicanes rapides et longues.",
     goal: {
-      id: "nowall"
+      id: "section",
+      a: 0,
+      b: 1,
+      t: 22.4
     },
     opts: {
       l: 6
@@ -12537,7 +12574,10 @@ var BUILTIN_TRACKS = [
     profil: "technique",
     appris: "D\xE9part : poudreuse, booster. Au programme : vent lat\xE9ral, \xE9pingles, route \xE9troite entre des piliers, chicanes serr\xE9es, wall-ride, poudreuse, croisement travers\xE9 deux fois.",
     goal: {
-      id: "norespawn"
+      id: "turbo",
+      n: 1,
+      a: 1,
+      b: 2
     },
     opts: {
       l: 8
@@ -12619,7 +12659,8 @@ var BUILTIN_TRACKS = [
     profil: "rollercoaster",
     appris: "D\xE9part : trois boosters \u2192 lift hill acc\xE9l\xE9r\xE9. Au programme : viaduc au sommet, saut ou d\xE9tour en T, plongeon, grand looping, wall-ride en bosse (monter, redescendre), wall-ride \xE0 droite, looping modulaire, avenue large sous un portique, tube qui tourne.",
     goal: {
-      id: "norespawn"
+      id: "air",
+      t: 2
     },
     opts: {
       l: 2
@@ -12957,7 +12998,10 @@ var BUILTIN_TRACKS = [
     profil: "technique",
     appris: "D\xE9part : sur une plateforme de la station. Au programme : \xE9pingles, coursive \xE9troite entre des piliers, lacets en S, wall-ride, chicanes serr\xE9es, croisement travers\xE9 deux fois.",
     goal: {
-      id: "norespawn"
+      id: "turbo",
+      n: 2,
+      a: 1,
+      b: 2
     },
     opts: {
       l: 6
@@ -13118,7 +13162,10 @@ var BUILTIN_TRACKS = [
     profil: "technique",
     appris: "D\xE9part : booster puis un courant. Au programme : lacets en S, passage \xE9troit entre des coraux, pont de verre, chicanes serr\xE9es, wall-ride, croisement travers\xE9 deux fois.",
     goal: {
-      id: "norespawn"
+      id: "turbo",
+      n: 1,
+      a: 1,
+      b: 2
     },
     opts: {
       l: 6
@@ -13200,7 +13247,8 @@ var BUILTIN_TRACKS = [
     profil: "rollercoaster",
     appris: "D\xE9part : trois boosters \u2192 wall-ride sur la coque. Au programme : double looping, wall-rides des deux c\xF4t\xE9s, un bloc sur chaque mur, looping modulaire, route large, tube qui tourne, passage \xE9troit, plongeon.",
     goal: {
-      id: "norespawn"
+      id: "speed",
+      v: 250
     },
     opts: {
       l: 12
@@ -13389,7 +13437,9 @@ var BUILTIN_TRACKS = [
     profil: "rollercoaster",
     appris: "D\xE9part : plongeon dans les abysses puis grand looping. Au programme : wall-rides des deux c\xF4t\xE9s, chicanes longues, remont\xE9e en h\xE9lice, looping modulaire, route large, tube qui tourne.",
     goal: {
-      id: "norespawn"
+      id: "section",
+      a: 1,
+      t: 37.3
     },
     opts: {
       l: 22
@@ -13481,7 +13531,8 @@ var BUILTIN_TRACKS = [
     profil: "speedway",
     appris: "D\xE9part : deux boosters et un pont de verre. Au programme : tr\xE8s grands virages relev\xE9s, route large sous un portique, chicane rapide, wall-ride, grand S, croisement travers\xE9 deux fois, boucle qui plonge et remonte.",
     goal: {
-      id: "nowall"
+      id: "speed",
+      v: 265
     },
     opts: {
       l: 6
@@ -13655,7 +13706,10 @@ var BUILTIN_TRACKS = [
     profil: "technique",
     appris: "D\xE9part : bifurcation, voie de droite acc\xE9l\xE9r\xE9e. Au programme : lacets en S, passage \xE9troit entre des piliers, ralentisseurs, chicanes serr\xE9es, bumper, wall-ride, croisement travers\xE9 deux fois, piques.",
     goal: {
-      id: "norespawn"
+      id: "turbo",
+      n: 2,
+      a: 1,
+      b: 2
     },
     opts: {
       l: 6
@@ -13748,7 +13802,8 @@ var BUILTIN_TRACKS = [
     profil: "rollercoaster",
     appris: "D\xE9part : deux boosters et une h\xE9lice montante. Au programme : chicane longue, triple looping, wall-rides des deux c\xF4t\xE9s, un bloc sur chaque mur, route large sous un portique, piques escamotables, tube qui tourne, plongeon.",
     goal: {
-      id: "norespawn"
+      id: "air",
+      t: 2
     },
     opts: {
       l: 10
@@ -14034,7 +14089,10 @@ var BUILTIN_TRACKS = [
     profil: "technique",
     appris: "D\xE9part : deux boosters, ralentisseurs, \xE9pingles en S. Au programme : passage \xE9troit entre des piliers, moteur coup\xE9, marteau, wall-ride, chicanes serr\xE9es, piques, croisement travers\xE9 deux fois, bumper.",
     goal: {
-      id: "norespawn"
+      id: "turbo",
+      n: 2,
+      a: 1,
+      b: 2
     },
     opts: {
       l: 8
@@ -14298,7 +14356,10 @@ var BUILTIN_TRACKS = [
     profil: "technique",
     appris: "D\xE9part : deux boosters et une rafale. Au programme : lacets dans le vent, passage \xE9troit entre des piliers, chicanes serr\xE9es, wall-ride, murets coupe-vent, croisement travers\xE9 deux fois.",
     goal: {
-      id: "norespawn"
+      id: "turbo",
+      n: 1,
+      a: 1,
+      b: 2
     },
     opts: {
       l: 6
@@ -14381,7 +14442,8 @@ var BUILTIN_TRACKS = [
     profil: "rollercoaster",
     appris: "D\xE9part : trois boosters, gravit\xE9 r\xE9duite et grand looping. Au programme : chicanes longues, wall-ride en bosse \xE0 droite (monter, redescendre), wall-ride \xE0 gauche, looping modulaire, route large, tube qui tourne, passage \xE9troit, plongeon.",
     goal: {
-      id: "norespawn"
+      id: "air",
+      t: 3
     },
     opts: {
       l: 10
@@ -14462,7 +14524,8 @@ var BUILTIN_TRACKS = [
     profil: "speedway",
     appris: "D\xE9part : deux boosters, vent lat\xE9ral, tr\xE8s grand virage relev\xE9 sans bordures. Au programme : murs coupe-vent, route large sous un portique, chicane rapide, wall-ride, grand S, tube qui tourne.",
     goal: {
-      id: "nowall"
+      id: "speed",
+      v: 240
     },
     opts: {
       l: 6
@@ -14718,7 +14781,10 @@ var BUILTIN_TRACKS = [
     profil: "technique",
     appris: "D\xE9part : vrille avec inversion de gravit\xE9, on roule au plafond. Au programme : lacets au plafond, retour au sol, passage \xE9troit entre des stalactites, chicanes serr\xE9es, wall-ride, croisement travers\xE9 deux fois.",
     goal: {
-      id: "norespawn"
+      id: "turbo",
+      n: 1,
+      a: 1,
+      b: 2
     },
     opts: {
       l: 8
@@ -14873,7 +14939,8 @@ var BUILTIN_TRACKS = [
     profil: "speedway",
     appris: "D\xE9part : trois boosters puis un S en miroir. Au programme : route large sous un portique, chicane rapide, wall-ride, pont de verre entre deux murs-miroirs, grand S, tube qui tourne \xE0 gauche puis \xE0 droite.",
     goal: {
-      id: "nowall"
+      id: "speed",
+      v: 240
     },
     opts: {
       l: 6
@@ -14949,7 +15016,9 @@ var BUILTIN_TRACKS = [
     profil: "rollercoaster",
     appris: "D\xE9part : booster, descente, vrille vers le plafond. Au programme : pentes au plafond, retour au sol, double looping, chicanes longues, wall-ride en bosse (monter, redescendre), wall-ride \xE0 droite, route large, looping modulaire, tube qui tourne.",
     goal: {
-      id: "norespawn"
+      id: "section",
+      a: 1,
+      t: 33.5
     },
     opts: {
       l: 10
@@ -15028,7 +15097,10 @@ var BUILTIN_TRACKS = [
     profil: "technique",
     appris: "D\xE9part : booster et verre tr\xE8s glissant, \xE9pingles en S. Au programme : passage \xE9troit entre des stalactites, chicanes serr\xE9es, wall-ride, pyramides de cristal, croisement travers\xE9 deux fois.",
     goal: {
-      id: "norespawn"
+      id: "turbo",
+      n: 1,
+      a: 1,
+      b: 2
     },
     opts: {
       l: 6
@@ -15222,7 +15294,10 @@ var BUILTIN_TRACKS = [
     ],
     appris: "D\xE9part : trois boosters \u2192 trois cases. Au programme : piques escamotables en travers de la route : on passe quand elles sont rentr\xE9es. Puis chicanes longues, croisement travers\xE9 deux fois (un virage g\xE9ant relev\xE9), passage \xE9troit.",
     goal: {
-      id: "norespawn"
+      id: "section",
+      a: 1,
+      b: 2,
+      t: 29.3
     },
     opts: {
       l: 6
@@ -15492,7 +15567,9 @@ var BUILTIN_TRACKS = [
     ],
     appris: "D\xE9part : cinq boosters \u2192 vague. Au programme : la route bouge, un ascenseur (la dalle monte puis redescend) et une glissi\xE8re. Puis chicanes longues, petit looping modulaire, route large sous un portique.",
     goal: {
-      id: "nowall"
+      id: "section",
+      a: 1,
+      t: 22.6
     },
     opts: {
       l: 6
@@ -15743,7 +15820,10 @@ var BUILTIN_TRACKS = [
     ],
     appris: "D\xE9part : deux boosters \u2192 un virage relev\xE9. Au programme : trois tours d\u2019une boucle courte, quatre tr\xE8s grands virages relev\xE9s, chicanes longues, route large ; la ligne sert de point de retour \xE0 chaque tour.",
     goal: {
-      id: "nowall"
+      id: "section",
+      a: 0,
+      b: 1,
+      t: 21.7
     },
     opts: {
       l: 4
@@ -15815,7 +15895,8 @@ var BUILTIN_TRACKS = [
     ],
     appris: "D\xE9part : quatre boosters \u2192 virage relev\xE9. Au programme : vent constant et rafales qui poussent par \xE0-coups (selon le cap, il aide ou freine), tr\xE8s grands virages relev\xE9s, wall-ride, route large, chicanes.",
     goal: {
-      id: "norespawn"
+      id: "speed",
+      v: 250
     },
     opts: {
       l: 8
@@ -15851,7 +15932,10 @@ var BUILTIN_TRACKS = [
     ],
     appris: "D\xE9part : deux boosters \u2192 \xE9pingles. Au programme : plaques de givre sur les lignes droites (on les \xE9vite ou on les traverse droit), route \xE9troite, wall-ride, croisement travers\xE9 deux fois, descente.",
     goal: {
-      id: "nowall"
+      id: "turbo",
+      n: 2,
+      a: 1,
+      b: 2
     },
     opts: {
       l: 6
@@ -15950,7 +16034,9 @@ var BUILTIN_TRACKS = [
     ],
     appris: "D\xE9part : deux boosters, deux cases. Au programme : un interrupteur ouvre la porte devant (elle se referme derri\xE8re, au checkpoint), un second ouvre la derni\xE8re porte et fait appara\xEEtre le pont de l\u2019arriv\xE9e.",
     goal: {
-      id: "norespawn"
+      id: "section",
+      a: 1,
+      t: 21.3
     },
     opts: {
       l: 6
@@ -16071,7 +16157,10 @@ var BUILTIN_TRACKS = [
     ],
     appris: "D\xE9part : trois boosters \u2192 vague. Au programme : deux ascenseurs et deux glissi\xE8res, chacun \xE0 son rythme (on lit le mouvement avant d\u2019y entrer), tr\xE8s grands virages, chicanes longues, route large.",
     goal: {
-      id: "nowall"
+      id: "section",
+      a: 1,
+      b: 2,
+      t: 12.7
     },
     opts: {
       l: 6
@@ -16181,7 +16270,10 @@ var BUILTIN_TRACKS = [
     ],
     appris: "D\xE9part : tube de lancement. Au programme : sous la pluie, une moto, un ascenseur et une glissi\xE8re, un interrupteur qui ouvre la porte, un autre qui fait appara\xEEtre un pont : les deux chapitres d\u2019un coup.",
     goal: {
-      id: "norespawn"
+      id: "section",
+      a: 1,
+      b: 2,
+      t: 15.3
     },
     opts: {
       l: 6
@@ -19877,6 +19969,21 @@ function dailyChallenge(day = dayKey()) {
   return null;
 }
 
+// js/pace.js
+var BASE_V_CAP = 52;
+var BASE_STEER_MARGIN = 0.85;
+var PACE_MIN = 0.3;
+var PACE_MAX = 1.6;
+function paceOptions(pace, path, latLimit) {
+  const p = Math.max(PACE_MIN, Math.min(PACE_MAX, +pace || 1));
+  const base = path && path.pilot && path.pilot.vCap || BASE_V_CAP;
+  return {
+    latLimit: latLimit * p,
+    steerMargin: BASE_STEER_MARGIN * p,
+    vCap: base * (p < 1 ? 0.5 + 0.5 * p : p)
+  };
+}
+
 // js/ghostFormat.js
 var GHOST_EVERY = 4;
 var GHOST_STRIDE = 7;
@@ -20009,7 +20116,8 @@ var VEH_IDS = [
 ];
 var GhostRunner = class {
   // ghost : enregistre aussi le fantôme (une pose tous les GHOST_EVERY pas, comme la course en direct) : c'est ce que la fonction serveur range avec un record.
-  constructor(track, { inputs = null, bot = false, latK = 0.8, ghost = false } = {}) {
+  // pace : rythme du pilote automatique (js/pace.js) ; absent, le pilote est celui d'avant (le fantôme or, à l'identique).
+  constructor(track, { inputs = null, bot = false, latK = 0.8, ghost = false, pace = null } = {}) {
     this.gRec = ghost ? [] : null;
     this.gVeh = [];
     this._q = [
@@ -20022,9 +20130,9 @@ var GhostRunner = class {
     this.phys = this.sim.phys;
     this.logic = this.sim.logic;
     this.rep = inputs ? decodeInputs(inputs) : null;
-    this.bot = bot && track.path ? new Autopilot(track.path, {
+    this.bot = bot && track.path ? new Autopilot(track.path, pace == null ? {
       latLimit: 56 * latK
-    }) : null;
+    } : paceOptions(pace, track.path, 56 * latK)) : null;
     this.hist = new Float32Array(HIST_STRIDE * 1024);
     this.reset();
   }
@@ -21182,4 +21290,4 @@ Deno.serve(createHandler({
   serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   allowedOrigin: Deno.env.get("ALLOWED_ORIGIN") ?? "*"
 }));
-globalThis.__COPYTRACK_BUILD__ = "36aaa12c9150ba34";
+globalThis.__COPYTRACK_BUILD__ = "53a0c8d652005072";

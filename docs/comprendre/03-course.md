@@ -22,7 +22,7 @@ Changer d'écran passe par `App._dispose()` (`main.js:183`) : `session.dispose()
 Classe découpée en familles de méthodes (`Object.assign`, `race.js:733`) : `race/camera.js`, `race/ghosts.js`, `race/net.js`, `race/finish.js`, `race/replayMode.js`, `race/scriptsRun.js`, `race/training.js`, `theater/session.js`, `theater/cameras.js`.
 
 ### Construction (`race.js:42`)
-Dans cet ordre : aides à la conduite (`aids.js` : clé déplacée vers `~v1.as-1`, médailles retirées), `TrackView` (maillage, ajouté à `scenery.trackGroup`), `scenery.setTrack` (décor, ambiance), **`Simulation`**, `EnvFx`, modèle de la voiture (`createCar(profile().loadout)`), traces, voiture fantôme du record, pilote automatique (démo), replay (`decodeInputs`), fantômes simulés (`_setupGhosts` : or si la médaille d'or n'est pas gagnée et que le circuit a une ligne `track.path`, fantôme importé si même `PHYS_VER`), adversaires (multijoueur), mini-carte, rivaux, caméras, `loadRecord`, **`restart()`**, HUD d'entraînement, Theater.
+Dans cet ordre : aides à la conduite (`aids.js` : clé déplacée vers `~v1.as-1`, médailles retirées), `TrackView` (maillage, ajouté à `scenery.trackGroup`), `scenery.setTrack` (décor, ambiance), **`Simulation`**, `EnvFx`, modèle de la voiture (`createCar(profile().loadout)`), traces, voiture fantôme du record, pilote automatique (démo), replay (`decodeInputs`), fantômes simulés (`_setupGhosts` : le fantôme de la **prochaine médaille à gagner** — `ghostTarget.js`, rythme du pilote calibré dans `ghostPaces.js` — si le circuit a une ligne `track.path` et des médailles, ou le fantôme or d'avant avec le réglage « toujours l'or » ; fantôme importé si même `PHYS_VER`), adversaires (multijoueur), mini-carte, rivaux, caméras, `loadRecord`, **`restart()`**, HUD d'entraînement, Theater.
 
 ### Machine à états (`this.state`)
 ```
@@ -33,7 +33,7 @@ racing ⇄ paused (Échap / pause ; jamais en multijoueur ; aussi _autoPause : o
 demo, replay : démarrent directement en 'racing'
 ```
 - `restart()` (`:151`) : `sim.start(spawn)` (grille de départ en championnat), nouvel `InputRecorder`, `tick = 0`, stats, particules, traces, HUD.
-- `respawn(fromInput)` (`:215`) : `sim.rewind({ keepClock: multi })`, historique du fantôme enregistré tronqué, stats ramenées à l'instantané du checkpoint (`statsSnap`), voiture et caméra recalées (`_camCut`), en multijoueur compteur de téléportation et 2 s de protection.
+- `respawn(fromInput)` (`:215`) : `sim.rewind({ keepClock: multi })`, historique du fantôme enregistré tronqué, stats ramenées à l'instantané du checkpoint (`RunStats.respawn`, `js/runStats.js`), voiture et caméra recalées (`_camCut`), en multijoueur compteur de téléportation et 2 s de protection.
 
 ### Une image de course (`update`, `:461`)
 1. Commandes de session : pause, recommencer, retour au checkpoint, caméra, klaxon.
@@ -59,7 +59,7 @@ demo, replay : démarrent directement en 'racing'
 
 Ces effets **ne modifient jamais** l'état physique : ils lisent `phys` et écrivent dans l'audio, les particules, la caméra (`shake`), la manette et le HUD. `Math.random` n'y sert qu'au visuel.
 
-Compteurs de course (`this.stats` : chocs, réapparitions, réceptions parfaites, turbos, anneaux, mauvais sens) : lus par l'objectif bonus de carrière, l'expérience, la télémétrie, le coach.
+Compteurs de course (`this.stats`, un `RunStats` : chocs, réapparitions, réceptions parfaites, turbos et leur pas, anneaux, vol le plus long, vitesse maximale, mauvais sens) : lus par l'objectif bonus de carrière, l'expérience, la télémétrie, le coach.
 
 ### Rendu d'une image (`render`, `:541`)
 Synchronisation de la logique du circuit (`_logicSync` : visibilité des groupes, effets), pièces mobiles et obstacles au chrono interpolé (`view.updateMoving(obsT)`), lampes, dalles brisées (`view.setBroken` quand `phys.brokenVer` change), voiture interpolée (`slerp` de `prevQuat → quat`), roues, roulis, flammes, traces de pneus, étincelles, traînée, sillage, fantômes (`_renderGhost`, `_renderSimGhosts`, `_renderRivals`), **caméra** (`_cameraRender`), mini-carte, voitures distantes, `scenery.update`, ressenti (`_feelUpdate` : aspiration, croisements, vibrations), scripts de circuit, **moteur et musique** (`audio.engine`, `music.setSpeed`), **HUD** (chrono, vitesse, lignes de vitesse).
@@ -69,7 +69,7 @@ Synchronisation de la logique du circuit (`_logicSync` : visibilité des groupes
 | Quoi | Source | Comment il roule |
 | --- | --- | --- |
 | Fantôme du record | `record.ghost` (poses tous les 4 pas, format compact `G2`) | **relu** au chrono du joueur (`race/ghosts.js : _drawRecorded`) |
-| Fantôme or | `GhostRunner({ bot: true })` : pilote automatique, **simulé en direct** sur le même `Track` | `poseAt(logic.steps)` : historique ; un retour au checkpoint relit une ligne plus ancienne |
+| Fantôme de médaille (or : celui d'avant) | `GhostRunner({ bot: true, pace })` : pilote automatique (`pace` absent = le fantôme or d'avant), **simulé en direct** sur le même `Track` | `poseAt(logic.steps)` : historique ; un retour au checkpoint relit une ligne plus ancienne |
 | Fantôme importé (`SHG1:`) | `GhostRunner({ inputs })` | idem |
 | Rivaux du classement | poses téléchargées (`setRivals`) | relus comme le fantôme du record |
 | Replay en jeu | `opts.replay.inputs` | **`RaceSession` elle-même** rejoue ses commandes par `_stepOnce` (`race/replayMode.js:8`), vitesse ×0,25 à ×4, export vidéo |

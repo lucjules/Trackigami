@@ -3,7 +3,7 @@
 Jeu de course contre-la-montre **low-poly** dans le navigateur, avec éditeur de circuits.
 C'est un jeu original : décors, véhicules, pièces, musique et circuits ont été conçus pour ce projet.
 
-Version actuelle : **bêta 0.17.0** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
+Version actuelle : **bêta 0.18.0** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
 
 ## Jouer
 
@@ -31,11 +31,11 @@ Le jeu s'**installe comme une application** (bouton d'installation du navigateur
 - **Communauté** : onglet **Cette semaine** (circuits où le plus de pilotes différents ont couru), **Circuit de la semaine**, **difficulté estimée** (◆◇) sur chaque carte et à la publication. **Titres** affichés au classement, **exclusifs** du garage qui se méritent (défis du jour, Atelier, Académie) et **collections** à thème (+100 ◆).
 - **Partage** : un lien de **défi** (« Partager mon fantôme » › « Copier le lien ») ouvre directement la course contre ton fantôme ; le **replay** s'exporte en **vidéo WebM** (bouton 🎬 de la barre de replay).
 - **Académie** : six leçons guidées de deux minutes (conduite, dérapage, mini-turbo en série, réception parfaite, plaque de transformation, obstacles), chacune avec un objectif ; l'éditeur démarre en **mode guidé** (l'essentiel seulement) pour un nouveau joueur.
-- **Carrière** : un chapitre s'ouvre avec 4 médailles dans le précédent (l'Atelier bonus : dans le premier) ; chaque circuit a un **objectif bonus** ★ (sans toucher de muret, réceptions parfaites, mini-turbos, anneaux, finir en moto…) qui rapporte 50 pièces.
+- **Carrière** : un chapitre s'ouvre avec 4 médailles dans le précédent (l'Atelier bonus : dans le premier) ; chaque circuit a un **objectif bonus** ★ qui reprend ce qu'il enseigne (un vol d'au moins *t* s, une vitesse à atteindre, une section sous un temps, des mini-turbos dans une section, finir en moins de *t* s, réceptions parfaites, anneaux, finir en moto…) et qui rapporte 50 pièces une seule fois.
 - **Défi du jour** : un circuit généré à partir de la date, le même pour tout le monde, vérifié par le pilote automatique.
 - **Médailles** Bronze / Argent / Or / Cristal, chronos intermédiaires, réapparition au dernier checkpoint.
 - **Replays — Replay Theater** : chaque course est enregistrée (commandes seulement, la physique est déterministe) et se revoit à l'identique, de ×0,25 à ×4. Le Theater ajoute une **barre de temps** (aller et venir, secteurs et incidents marqués), jusqu'à **trois courses à comparer** sur la piste (ancien record, fantôme or, record mondial, rivaux), les caméras **libre** et **cinématique** en plus des caméras TV et orbite, et un **panneau d'analyse** (trajectoires sur la carte, vitesses, écarts, secteurs).
-- **Fantômes** : ton record, le fantôme de la médaille d'or (tant qu'elle n'est pas gagnée) et le fantôme d'un ami, importé par un code `SHG1:` partageable.
+- **Fantômes** : ton record, le **fantôme de la prochaine médaille à gagner** (bronze, puis argent, or et cristal : le pilote automatique, réglé pour finir au seuil de chaque médaille ; réglage « toujours l'or » pour garder le fantôme or d'avant) et le fantôme d'un ami, importé par un code `SHG1:` partageable. Cartes de la carrière et défi du jour seulement (il faut une ligne de course : pas sur les circuits de joueurs).
 
 ### Pièces
 
@@ -194,7 +194,7 @@ La clé secrète n'est jamais dans le jeu : seule la fonction serveur l'utilise,
    Un changement de physique impose aussi d'incrémenter `PHYS_VER` : la procédure complète est dans [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#changer-la-physique-la-procédure).
 3. **Redéployer la fonction `submit-score`** dans Supabase avec le nouveau `index.ts` (depuis la 0.16.3 : le workflow `.github/workflows/deploiement.yml`, ordre base → fonctions → site, `docs/DEPLOIEMENT.md`) : sans cela, les temps des circuits changés sont refusés en ligne.
 4. Les records d'un circuit repartent de zéro dès que son tracé change (la clé de classement contient son empreinte) : rien à nettoyer côté base.
-5. Si le temps d'un circuit change volontairement : `node tools/golden.mjs --update`, puis `node tools/medals.mjs --check` pour revoir ses médailles.
+5. Si le temps d'un circuit change volontairement : `node tools/golden.mjs --update`, puis `node tools/medals.mjs --check` pour revoir ses médailles ; si ses médailles ou son tracé changent, les rythmes de ses fantômes de médaille aussi : `node tools/ghost-rythmes.mjs --update` (et `node tools/objectifs.mjs` pour vérifier que son objectif reste réalisable).
 6. Publier : fusionner sur `main` (déploiement ordonné tests → fonction → barrière → site : [docs/DEPLOIEMENT.md](docs/DEPLOIEMENT.md) ; sinon, GitHub Pages sert le dossier racine de la branche) ; le numéro de version est dans `js/version.js` et `package.json` (les deux doivent concorder, un test le vérifie).
 
 ## Commandes par défaut

@@ -6,7 +6,7 @@
 // `checkDef(def)` est LA définition de « circuit bien fait » : tools/test-niveaux.mjs l'applique à tous les circuits à profil, et l'atelier
 // l'applique aux candidats avant qu'ils entrent dans js/tracks.js. Chaque défaut renvoyé est une phrase lisible.
 import { buildBuiltin, BUILTIN_TRACKS } from '../js/tracks.js';
-import { PROFILS } from '../js/career.js';
+import { PROFILS, goalLabel } from '../js/career.js';
 import { GEN_IDS, PIECE_ORDER, PIECES } from '../js/pieces.js';
 import { checkTrack } from '../js/editorTools.js';
 import { orientationIssues } from '../js/joins.js';
@@ -17,6 +17,7 @@ import { isDefaultAmbiance } from '../js/ambiance.js';
 import { runTrack, profile, asciiMap } from './lab.mjs';
 import { proposeFrom } from './medals.mjs';
 import { spacingFails } from './checkpoints-espacement.mjs';
+import { checkGoal } from './objectifs.mjs';
 
 // (0.9.74 : et les pièces des étapes 1 à 5 : chicanes, plaques, largeurs, carrefours, looping modulaire, tube en virage)
 const NEW = new Set([...GEN_IDS, 'hugecurve', 'steep4', 'bankBig', 'giantcurve', ...PIECE_ORDER.slice(PIECE_ORDER.indexOf('sbend'))]);
@@ -162,6 +163,8 @@ export function checkDef(def) {
   if (g.id === 'perfect' && S.perfects < g.n) f.push(`objectif ${g.n} réceptions parfaites : le pilote en fait ${S.perfects}`);
   if (g.id === 'rings' && S.rings < g.n) f.push(`objectif ${g.n} anneaux : le pilote en passe ${S.rings}`);
   if (g.id === 'vehicle' && S.vehicle !== g.v) f.push(`objectif véhicule ${g.v} : le pilote arrive en ${S.vehicle}`);
+  // COMPLETE-012 : vol, vitesse, section, mini-turbos en section : une course qui les remplit existe (pilote automatique, ou geste du mini-turbo de tools/objectifs-recettes.json)
+  if (['air', 'speed', 'section', 'turbo'].includes(g.id) && !checkGoal(def).ok) f.push(`objectif « ${goalLabel(g)} » : aucune course du pilote (ou du geste du mini-turbo, tools/objectifs-recettes.json) ne le remplit`);
   // partage
   const back = Track.decode(tr.encode());
   if (back.tiles.length !== tr.tiles.length || back.signature() !== tr.signature()) f.push('le code SHW ne se recharge pas à l\'identique');
