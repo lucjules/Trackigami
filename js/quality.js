@@ -14,33 +14,34 @@ export const PROFILE_ORDER = ['ultra', 'high', 'medium', 'low', 'potato', 'ultra
 
 // shadow : taille de la carte d'ombres (0 = aucune ombre) ; decor : 'full' | 'reduced' | 'none' (décor autour du circuit ET décorations
 // du créateur, hors obstacles) ; fpsCap : images dessinées par seconde au plus (la physique, elle, tourne toujours à fond) ;
+// audio : budget de la musique { voices : sources sonores vivantes au plus, detail : 'full' | 'lean' | 'min' } (musicVariants.js) ;
 // lean : on supprime aussi les extras de course (traînée, traces de pneus, étincelles) ; pixelated : on agrandit l'image sans lissage ; mat : matériaux 'standard' | 'lambert' | 'basic' ; sky : 'full' (shader) | 'flat' (aplat de couleur).
 export const PROFILES = {
   ultra: {
     name: 'ultra', label: 'Ultra', pixelRatio: { min: 1.5, max: 2 }, shadow: 4096, shadowType: 'pcfsoft', env: 0.55, tone: 'neutral', exposure: 1.05, lights: { point: 6, spot: 3 },
-    terrainSeg: 190, decor: 'full', mat: 'standard', sky: 'full', hills: 1, fogScale: 1, far: 5000, particles: 1,
+    terrainSeg: 190, decor: 'full', mat: 'standard', sky: 'full', hills: 1, fogScale: 1, far: 5000, particles: 1, audio: { voices: 36, detail: 'full' },
   },
   high: {
     name: 'high', label: 'Haute', pixelRatio: { min: 1, max: 2 }, shadow: 2048, shadowType: 'pcfsoft', env: 0, tone: 'none', exposure: 1, lights: { point: 4, spot: 2 },
-    terrainSeg: 110, decor: 'full', mat: 'standard', sky: 'full', hills: 1, fogScale: 1, far: 5000, particles: 1,
+    terrainSeg: 110, decor: 'full', mat: 'standard', sky: 'full', hills: 1, fogScale: 1, far: 5000, particles: 1, audio: { voices: 30, detail: 'full' },
   },
   medium: {
     name: 'medium', label: 'Moyenne', pixelRatio: { min: 0.75, max: 1.25 }, shadow: 1024, shadowType: 'pcf', env: 0, tone: 'none', exposure: 1, lights: { point: 2, spot: 1 },
-    terrainSeg: 90, decor: 'full', mat: 'standard', sky: 'full', hills: 1, fogScale: 1, far: 5000, particles: 0.8,
+    terrainSeg: 90, decor: 'full', mat: 'standard', sky: 'full', hills: 1, fogScale: 1, far: 5000, particles: 0.8, audio: { voices: 24, detail: 'full' },
   },
   low: {
     name: 'low', label: 'Basse', pixelRatio: { min: 0.6, max: 1 }, shadow: 0, shadowType: 'pcf', env: 0, tone: 'none', exposure: 1, lights: { point: 0, spot: 0 },
-    terrainSeg: 70, decor: 'reduced', mat: 'lambert', sky: 'full', hills: 1, fogScale: 0.8, far: 3000, particles: 0.5,
+    terrainSeg: 70, decor: 'reduced', mat: 'lambert', sky: 'full', hills: 1, fogScale: 0.8, far: 3000, particles: 0.5, audio: { voices: 18, detail: 'lean' },
   },
   potato: {
     name: 'potato', label: 'Potato', pixelRatio: { min: 0.5, max: 0.65 }, shadow: 0, shadowType: 'pcf', env: 0, tone: 'none', exposure: 1, lights: { point: 0, spot: 0 },
-    terrainSeg: 24, decor: 'none', mat: 'basic', sky: 'flat', hills: 0, fogScale: 0.45, far: 1400, particles: 0.25,
+    terrainSeg: 24, decor: 'none', mat: 'basic', sky: 'flat', hills: 0, fogScale: 0.45, far: 1400, particles: 0.25, audio: { voices: 12, detail: 'lean' },
   },
   // Pour les ordinateurs minuscules (Raspberry Pi…) : image ~3x moins définie et agrandie en gros pixels, 30 images/s dessinées,
   // horizon à 450 m dans le brouillard, terrain réduit à un damier de 4 cases, aucun décor, aucune particule, aucune traînée.
   ultrapotato: {
     name: 'ultrapotato', label: 'Ultra Potato', pixelRatio: { min: 0.28, max: 0.34 }, shadow: 0, shadowType: 'pcf', env: 0, tone: 'none', exposure: 1, lights: { point: 0, spot: 0 },
-    terrainSeg: 4, decor: 'none', mat: 'basic', sky: 'flat', hills: 0, fogScale: 0.16, far: 450, particles: 0, fpsCap: 30, lean: true, pixelated: true,
+    terrainSeg: 4, decor: 'none', mat: 'basic', sky: 'flat', hills: 0, fogScale: 0.16, far: 450, particles: 0, fpsCap: 30, lean: true, pixelated: true, audio: { voices: 8, detail: 'min' },
   },
 };
 
@@ -247,6 +248,7 @@ export class QualityManager {
     h.scenery.renderer = r;
     h.scenery.setQuality(p);
     if (h.particles) h.particles.setScale?.(p.particles);
+    h.setAudioBudget?.(p.audio);      // budget de voix de la musique (musicVariants.js : cleanBudget) : allégé en Potato
     // Décorations du créateur (hors obstacles) : masquées en Potato ; les vues déjà construites sont refaites.
     h.setLights?.(p.lights);
     const lk = (q) => (q ? q.point + ',' + q.spot : '');

@@ -29,6 +29,7 @@ import { Telemetry } from './telemetry.js';
 import { ErrorReport } from './errorReport.js';
 import { ghostFromHash } from './replay.js';
 import { QualityManager, PROFILE_LABELS, wantAntialias } from './quality.js';
+import { musicPlan } from './musicVariants.js';
 import { multiMethods } from './app/multi.js';
 import { academyMethods } from './app/academy.js';
 import { competitionMethods } from './app/competition.js';
@@ -75,7 +76,7 @@ class App {
     this.particles = new Particles(this.scene);
     this.quality = new QualityManager({
       renderer: this.renderer, scene: this.scene, camera: this.camera, scenery: this.scenery, particles: this.particles,
-      resize: () => this._resize(), views: () => (this.session && this.session.view ? [this.session.view] : []), setDecoHidden: (v) => { renderOptions.hideDecos = !!v; }, setLights: (b) => { renderOptions.lightBudget = b || { point: 0, spot: 0 }; },
+      resize: () => this._resize(), views: () => (this.session && this.session.view ? [this.session.view] : []), setDecoHidden: (v) => { renderOptions.hideDecos = !!v; }, setLights: (b) => { renderOptions.lightBudget = b || { point: 0, spot: 0 }; }, setAudioBudget: (b) => { if (this.audio) this.audio.music.setBudget(b); },
     });
     this.input = new Input();
     this.telemetry = new Telemetry({ store: { get: getJSON, set: setJSON }, send: (events) => online.logRuns(events), enabled: () => this.settings.telemetry === true });
@@ -161,6 +162,7 @@ class App {
   _onVisibility() {
     const hidden = document.visibilityState === 'hidden';
     if (hidden) this._autoPause();
+    if (this.audio) this.audio.music.hold(hidden);      // le séquenceur de la musique s'arrête (aucune minuterie de 25 ms dans un onglet masqué) et ne réveille pas le contexte
     const ctx = this.audio && this.audio.ctx;
     if (!ctx || typeof ctx.suspend !== 'function') return;
     if (hidden && ctx.state === 'running') { this._audioHeld = true; ctx.suspend().catch(() => {}); }
@@ -238,9 +240,9 @@ class App {
     this.ui.setMode('race');
     $('replay-bar').classList.add('hidden');
     try { this.session = new RaceSession(this, track, opts); } catch (e) { this._raceBuildFailed(e, opts); return; }
-    // Musique du circuit : celle de l'auteur (ambiance.js) ou le chill de course ; en multijoueur ou en leçon, toujours le chill.
-    const mus = !(opts && (opts.multi || opts.academy)) && track.ambiance ? track.ambiance.music : '';
-    if (mus === 'none') this.audio.music.stop(); else this.audio.music.play(mus === 'menu' ? 'menu' : 'game');
+    // Musique du circuit : celle de l'auteur (ambiance.js) ou la musique de course du décor (musicVariants.js) ; en multijoueur ou en leçon, toujours le chill d'origine.
+    const plan = musicPlan(track, opts);
+    if (plan.kind === 'none') this.audio.music.stop(); else this.audio.music.play(plan.kind, plan.decor);
     this._resize();
   }
 
