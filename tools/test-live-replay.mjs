@@ -21,6 +21,7 @@ import { test, finish, precondition } from './harness.mjs';
 import { Track } from '../js/track.js';
 import { replayRun, verifyRun } from '../js/verify.js';
 import { GhostRunner } from '../js/replay.js';
+import { RunStats } from '../js/runStats.js';
 import { PHYS_VER } from '../js/version.js';
 import { ghostTarget } from '../js/ghostTarget.js';
 import { BUILTIN_TRACKS } from '../js/tracks.js';
@@ -166,7 +167,7 @@ async function finishRace() {
   return page.evaluate(() => {
     const L = window.__lr, S = L.S, A = window.copytrack;
     const run = S.opts.mode ? { inputs: S.recorder.encode(), time: S.logic.time } : S.lastRun;      // (mode de jeu : ni record ni lastRun, l'enregistreur reste)
-    return { inputs: run.inputs, time: run.time, liveTime: S.logic.time, rSpeed: L.rSpeed.slice(), rVeh: (L.rVeh || []).slice(), vehicle: S.phys.vehicle, splits: S.logic.splits.slice(), code: S.track.encode(), key: L.key, trace: L.trace.slice(), inputRespawns: L.inputRespawns, autoRespawns: L.autoRespawns, rBack: L.rBack.slice(), ticks: S.tick, statsRespawns: S.stats.respawns, finishShown: !document.getElementById('finish').classList.contains('hidden'), mode: A.mode };
+    return { inputs: run.inputs, time: run.time, liveTime: S.logic.time, rSpeed: L.rSpeed.slice(), rVeh: (L.rVeh || []).slice(), vehicle: S.phys.vehicle, splits: S.logic.splits.slice(), code: S.track.encode(), key: L.key, trace: L.trace.slice(), inputRespawns: L.inputRespawns, autoRespawns: L.autoRespawns, rBack: L.rBack.slice(), ticks: S.tick, statsRespawns: S.stats.respawns, liveStats: S.stats.final(S.phys, S.logic), finishShown: !document.getElementById('finish').classList.contains('hidden'), mode: A.mode };
   });
 }
 async function release() {
@@ -200,6 +201,26 @@ function compareLiveToReplay(d) {
   assert.equal(worst, 0, 'écart de position maximal');
   assert.ok(g.logic.finished && g.done, 'le rejeu est arrivé en même temps que la course');
   assert.equal(g.k, n, 'même nombre de pas');
+  compareStats(d);
+}
+
+// COMPLETE-012 : les statistiques de course (RunStats : objectifs bonus) comptées EN DIRECT par la session et celles recomptées sur le rejeu des commandes enregistrées (le moteur du serveur, un autre
+// processus) sont les mêmes, retours au checkpoint compris (touche R avant ou après un checkpoint, réapparitions automatiques) : vol le plus long, vitesse maximale, mini-turbos et leurs pas, chocs, etc.
+function compareStats(d) {
+  const g = new GhostRunner(Track.decode(d.code), { inputs: d.inputs }), st = new RunStats();
+  let early = false, late = false, cps = 0;
+  const rw = g.sim.rewind.bind(g.sim);
+  g.sim.rewind = (...a) => { const r = rw(...a); if (early) st.respawn(); else late = true; return r; };      // retour demandé (avant le pas) ou décidé par la course (après lui) : comme RaceSession
+  while (!g.done) {
+    early = !!(g.rep.flags[g.k] & 4); late = false;
+    g.step();
+    st.step(g.phys, g.logic.steps);
+    const nc = g.logic.splits.length; if (nc > cps) st.checkpoint(); cps = nc;
+    if (late) st.respawn();
+  }
+  const got = st.final(g.phys, g.logic), want = d.liveStats;
+  for (const k of ['airBest', 'vmax', 'wallHits', 'respawns', 'perfects', 'turbos', 'rings', 'steps', 'time', 'vehicle', 'via']) assert.equal(got[k], want[k], 'statistiques de course : ' + k);
+  for (const k of ['turboAt', 'perfectAt', 'splits']) assert.deepEqual(got[k], want[k], 'statistiques de course : ' + k);
 }
 
 // [circuit, nom, graine, amplitude du bruit, réapparitions automatiques exigées]. Bruit 0,2 : conduite propre, seulement les touches R. Bruit 0,5 : conduite maladroite, la course

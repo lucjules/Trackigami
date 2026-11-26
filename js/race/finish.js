@@ -175,7 +175,7 @@ export const finishMethods = {
     // Objectif bonus (carrière).
     let goal = null;
     if (this.opts.goal && !this.opts.spawn) {
-      const met = goalMet(this.opts.goal, { ...this.stats, vehicle: this.phys.vehicle, time });
+      const met = goalMet(this.opts.goal, { ...this.stats.final(this.phys, this.logic), time });
       const already = goalDone(this.opts.goalKey);
       const coins = met ? completeGoal(this.opts.goalKey) : 0;
       if (coins) app.ui.updateCoins();

@@ -76,6 +76,18 @@ export default {
   'deltaplane': 'glider',
   'voiture': 'car',
   'Finir en moins de {t:w} s': 'Finish in under {t} s',
+  // COMPLETE-012 : objectifs liés à ce que le circuit enseigne (vol, vitesse, section, mini-turbos dans une section)
+  'Un seul vol de {t:w} s sans toucher le sol': 'A single {t} s flight without touching the ground',
+  'Atteindre {v:w} km/h': 'Reach {v} km/h',
+  'Du départ au point {b:w} en moins de {t:w} s': 'From the start to checkpoint {b} in under {t} s',
+  'Du point {a:w} au point {b:w} en moins de {t:w} s': 'From checkpoint {a} to checkpoint {b} in under {t} s',
+  'Du point {a:w} à l\'arrivée en moins de {t:w} s': 'From checkpoint {a} to the finish in under {t} s',
+  '{n:w} mini-turbo du départ au point {b:w}': '{n} mini-turbo from the start to checkpoint {b}',
+  '{n:w} mini-turbos du départ au point {b:w}': '{n} mini-turbos from the start to checkpoint {b}',
+  '{n:w} mini-turbo du point {a:w} au point {b:w}': '{n} mini-turbo from checkpoint {a} to checkpoint {b}',
+  '{n:w} mini-turbos du point {a:w} au point {b:w}': '{n} mini-turbos from checkpoint {a} to checkpoint {b}',
+  '{n:w} mini-turbo du point {a:w} à l\'arrivée': '{n} mini-turbo from checkpoint {a} to the finish',
+  '{n:w} mini-turbos du point {a:w} à l\'arrivée': '{n} mini-turbos from checkpoint {a} to the finish',
 
   // ---------------------------------------------------------------- difficulté
   'Très facile': 'Very easy',

@@ -34,6 +34,7 @@ import { trainingMethods } from './race/training.js';
 import { theaterMethods } from './theater/session.js';
 import { theaterCameraMethods } from './theater/cameras.js';
 import { EnvFx } from './envFx.js';
+import { RunStats } from './runStats.js';
 import { DrivingAids, aidsActive, aidedKey, steerCurve } from './aids.js';
 
 const CAR_COLOR = '#ffd23e';   // éclat quand la voiture retrouve sa forme d'origine (les plaques ont la couleur de leur revêtement : SURFACES)
@@ -185,8 +186,7 @@ export class RaceSession {
     this._pendingRespawn = false;
     this._finishGen = (this._finishGen || 0) + 1;      // jeton de génération (TECH-018) : une réponse asynchrone d'une arrivée précédente de CETTE session est périmée
     this._stepping = false; this.unverifiable = false;      // un nouvel essai repart d'un enregistrement vierge : plus d'incident à reporter
-    this.stats = { wallHits: 0, respawns: 0, perfects: 0, turbos: 0, rings: 0 };
-    this.statsSnap = { perfects: 0, turbos: 0, rings: 0 };     // compteurs au dernier checkpoint : un retour (R) les annule
+    this.stats = new RunStats({ goal: this.opts.goal });     // compteurs de course (runStats.js) ; un retour au checkpoint (R) annule ce qui a été compté après lui
     for (const g of this.ghosts) g.car.group.visible = false;      // (le fantôme est une suite déterministe : sa course, déjà calculée, est relue, pas rejouée)
     this.countT = 0;
     this.countShown = -1;
@@ -226,13 +226,12 @@ export class RaceSession {
   respawn(fromInput = false) {
     if (this.state !== 'racing') return;
     if (fromInput) this._pendingRespawn = true;
-    this.stats.respawns++;
     // Retour au dernier checkpoint : le chrono revient au temps de ce checkpoint (solo). En multijoueur il continue de
     // tourner : la téléportation coûte tout le temps perdu, et le compteur de téléportation prévient les autres joueurs.
     const r = this.sim.rewind({ keepClock: !!this.multi });      // (remet aussi la voiture au point de retour, avec son véhicule et sa gravité)
     if (this._train) this._trainRespawn();
     if (this.aids) this.aids.reset(this.phys);
-    Object.assign(this.stats, this.statsSnap);       // les réceptions, turbos et anneaux d'après le checkpoint ne comptent plus
+    this.stats.respawn();       // une réapparition de plus ; les réceptions, turbos, anneaux, vols et vitesses d'après le checkpoint ne comptent plus
     if (this.multi) { this.teleSeq = (this.teleSeq + 1) & 255; this._jumped = true; this.protectUntil = this.tick + 240; }
     this._wayJump = true; this._wayN = 0;       // 2 s sans collision après un retour au checkpoint
     const steps = this.logic.steps;
@@ -321,12 +320,7 @@ export class RaceSession {
     if (this.multi && ++this.netTick % SEND_EVERY_STEPS === 0) { this._updateProgress(); this._sendNet(this.state === 'finished' && !this._dnf ? F_FINISHED : 0); }
     if (this.state === 'racing' && !this.demo && !this.replay && this.tick % 12 === 0) this._checkWay();
     const ev = this.phys.ev;
-    if (this.state === 'racing') {
-      if (ev.wall > 4) this.stats.wallHits++;
-      if (ev.landQ === 'perfect') this.stats.perfects++;
-      if (ev.miniTurbo) this.stats.turbos++;
-      if (ev.ring) this.stats.rings++;
-    }
+    if (this.state === 'racing') this.stats.step(this.phys, this.logic.steps + 1);      // (le chrono avance dans sim.score, plus bas : ce pas est le pas n° steps + 1, comme les temps de passage)
     // Voiture immobile alors que le joueur accélère depuis 3 s (elle est prise au piège : ralentisseur, bateau au sec, rebond sur place, nez dans une paroi…) : on lui rappelle
     // le retour au checkpoint. Simple message : aucun effet sur la course ni sur son enregistrement (une fois par blocage ; réarmé quand la voiture a repris de la vitesse).
     if (this.state === 'racing' && !this.demo && !this.replay) {
@@ -477,7 +471,7 @@ export class RaceSession {
     return pts;
   }
 
-  _snapStats() { const s = this.stats; this.statsSnap = { perfects: s.perfects, turbos: s.turbos, rings: s.rings }; }
+  _snapStats() { this.stats.checkpoint(); }
 
   update(dt) {
     const app = this.app;

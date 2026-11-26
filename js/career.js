@@ -3,6 +3,8 @@
 // précédent. Chaque circuit a un objectif bonus qui rapporte des pièces une fois.
 import { profile, saveProfile, addCoins } from './profile.js';
 import { CAREER_ORDER, CHAPTER_KEYS, DECORS } from './themes.js';
+import { DT } from './constants.js';
+import { countBetween } from './runStats.js';
 
 export const CHAPTER_SIZE = 6;
 export const UNLOCK_MEDALS = 4;
@@ -58,16 +60,29 @@ export function nextBuiltinIndex(i, total) {
   return a !== b && ((CHAPTERS[b] && CHAPTERS[b].bonus) || (CHAPTERS[a] && CHAPTERS[a].bonus)) ? null : n;
 }
 
-// Objectifs bonus.
+// Objectifs bonus. COMPLETE-012 : en plus des anciens (muret, réapparition, réceptions, mini-turbos, anneaux, véhicule, temps), des objectifs qui reprennent ce que le circuit enseigne :
+//   air      { t }              un seul vol d'au moins t s (le plus long vol sans toucher le sol : stats.airBest)
+//   speed    { v }              atteindre v km/h (stats.vmax)
+//   section  { a, b?, t }       la section entre le point de passage a et b (0 = le départ ; b absent = l'arrivée) en moins de t s : temps de passage, ceux de la fiche du circuit
+//   turbo    { n, a?, b? }      avec a et/ou b : n mini-turbos DANS cette section seulement (sans eux : sur toute la course, comme avant)
+// Les nouveaux objectifs (circuit: true) sont propres aux circuits de la carrière : ils n'ont pas de sens dans un mode de jeu libre (rules.js : sanitizeGoal les refuse).
+// Mesures : stats de course (runStats.js : le même code en direct et dans tools/objectifs.mjs, qui vérifie que chaque objectif est réalisable).
+const sec = (g) => (g.a > 0 ? (g.b != null ? `du point ${g.a} au point ${g.b}` : `du point ${g.a} à l'arrivée`) : `du départ au point ${g.b}`);
 export const GOALS = {
   nowall: { label: 'Finir sans toucher de muret' },
   norespawn: { label: 'Finir sans réapparition' },
   perfect: { label: (n) => `${n} réception${n > 1 ? 's' : ''} parfaite${n > 1 ? 's' : ''}` },
-  turbo: { label: (n) => `${n} mini-turbo${n > 1 ? 's' : ''}` },
+  turbo: { label: (n, g) => (g && (g.a > 0 || g.b != null) ? `${n} mini-turbo${n > 1 ? 's' : ''} ${sec(g)}` : `${n} mini-turbo${n > 1 ? 's' : ''}`) },
   rings: { label: (n) => `Passer dans ${n} anneau${n > 1 ? 'x' : ''} turbo` },
   vehicle: { label: (v) => `Franchir l'arrivée en ${{ moto: 'moto', boat: 'bateau', glider: 'deltaplane', car: 'voiture' }[v] || v}` },
   under: { label: (t) => `Finir en moins de ${t} s` },
+  air: { label: (t) => `Un seul vol de ${t} s sans toucher le sol`, circuit: true },
+  speed: { label: (v) => `Atteindre ${v} km/h`, circuit: true },
+  section: { label: (t, g) => `${sec(g)[0].toUpperCase()}${sec(g).slice(1)} en moins de ${t} s`, circuit: true },
 };
+
+// Les objectifs d'un mode de jeu libre (rules.js, app/modes.js) : tous sauf ceux propres à un circuit.
+export const MODE_GOAL_IDS = Object.keys(GOALS).filter((id) => !GOALS[id].circuit);
 
 export function goalFor(def, index) {
   if (def.goal) return def.goal;
@@ -78,20 +93,30 @@ export function goalFor(def, index) {
 export function goalLabel(goal) {
   const G = GOALS[goal.id];
   if (!G) return '';
-  return typeof G.label === 'function' ? G.label(goal.n ?? goal.v ?? goal.t) : G.label;
+  return typeof G.label === 'function' ? G.label(goal.n ?? goal.v ?? goal.t, goal) : G.label;
 }
 
+// st : { wallHits, respawns, perfects, turbos, rings, airBest, vmax, turboAt, vehicle, time, steps, splits } (runStats.js : final).
 export function goalMet(goal, st) {
   switch (goal.id) {
     case 'nowall': return st.wallHits === 0;
     case 'norespawn': return st.respawns === 0;
     case 'perfect': return st.perfects >= (goal.n || 1);
-    case 'turbo': return st.turbos >= (goal.n || 1);
+    case 'turbo': return (goal.a > 0 || goal.b != null ? countBetween(st.turboAt || [], st.splits || [], st.steps, goal.a || 0, goal.b) : st.turbos) >= (goal.n || 1);
     case 'rings': return st.rings >= (goal.n || 1);
     case 'vehicle': return st.vehicle === goal.v;
     case 'under': return st.time <= goal.t;
+    case 'air': return (st.airBest || 0) >= goal.t - 1e-9;
+    case 'speed': return (st.vmax || 0) * 3.6 >= goal.v - 1e-9;
+    case 'section': return sectionTime(goal, st) <= goal.t + 1e-9;
     default: return false;
   }
+}
+
+// Le temps (s) de la section d'un objectif ; Infinity si un de ses points de passage n'a pas été pris.
+export function sectionTime(goal, st) {
+  const a = goal.a > 0 ? (st.splits || [])[goal.a - 1] : 0, b = goal.b != null ? (st.splits || [])[goal.b - 1] : st.steps;
+  return a == null || b == null || !(b > a) ? Infinity : (b - a) * DT;
 }
 
 export function goalDone(key) {

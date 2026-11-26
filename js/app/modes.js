@@ -2,7 +2,7 @@
 import { h } from '../dom.js';
 import { listModes, saveMode, deleteMode, listMyTracks, newId, MODES_MAX } from '../storage.js';
 import { Track } from '../track.js';
-import { GOALS, goalLabel, goalMet } from '../career.js';
+import { MODE_GOAL_IDS, goalLabel, goalMet } from '../career.js';
 import { profile, saveProfile, owns, setLoadout } from '../profile.js';
 import { DEFAULT_LOADOUT } from '../cosmetics.js';
 import { sanitizeUi } from '../uitheme.js';
@@ -115,7 +115,7 @@ export const modesMethods = {
     const name = h('input', { type: 'text', maxlength: 24, value: m.name });
     const desc = h('input', { type: 'text', maxlength: 100, value: m.desc, placeholder: 'Description (facultative)' });
     const goalBox = h('div', {});
-    const GOAL_OPTS = [['', 'Aucun objectif'], ...Object.keys(GOALS).map((id) => [id, goalLabel(sanitizeGoal({ id, n: 2, v: 'moto', t: 60 }))])];
+    const GOAL_OPTS = [['', 'Aucun objectif'], ...MODE_GOAL_IDS.map((id) => [id, goalLabel(sanitizeGoal({ id, n: 2, v: 'moto', t: 60 }))])];
     const drawGoal = () => {
       goalBox.replaceChildren();
       goalBox.appendChild(row('Objectif', sel(GOAL_OPTS, m.goal ? m.goal.id : '', (v) => { m.goal = v ? sanitizeGoal({ id: v, n: 2, v: 'moto', t: 60 }) : null; drawGoal(); })));
