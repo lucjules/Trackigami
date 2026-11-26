@@ -529,7 +529,7 @@ export class RaceSession {
       }
       if (this.state === 'countdown') {
         if (this.multi) this._netIdle(dt);          // TECH-089 (b) : la voiture sur la grille est envoyée aux autres pendant le décompte
-        app.audio.engine({ speed: 0, throttle: input.drive().throttle, slip: 0, boost: false });
+        app.audio.engine({ speed: 0, throttle: input.drive().throttle, slip: 0, boost: false, vehicle: this.phys.vehicle });
         return this.render(dt, 1);
       }
     }
@@ -682,7 +682,7 @@ export class RaceSession {
     if (this.state === 'racing') this._scriptsUpdate();
     // Audio & HUD
     if (this.state === 'racing') {
-      app.audio.engine({ speed: p.fwdSpeed, throttle: !!inp.throttle, slip: p.grounded ? p.slip : 0, boost: boosting, draft: this._feel.slip * this._feelScale() });
+      app.audio.engine({ speed: p.fwdSpeed, throttle: !!inp.throttle, slip: p.grounded ? p.slip : 0, boost: boosting, draft: this._feel.slip * this._feelScale(), vehicle: p.vehicle });
       app.audio.music.setSpeed(boosting ? 1.2 : Math.min(1, Math.max(0, p.fwdSpeed) / 50));
     }
     if (!this.demo) {
