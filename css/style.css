@@ -1095,6 +1095,21 @@ body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after 
 .career-summary .cs-bar i { display: block; height: 100%; background: linear-gradient(90deg, #5ff2ff, #ffd23e); }
 .career-summary .cs-msg { margin: 8px 0 0; font-weight: 600; }
 .career-summary.complete { border-color: #ffd23e; background: rgba(255, 210, 62, .1); }
+/* COMPLETE-013 : épreuve finale, conclusion de la carrière, générique. Le défilement du générique s'arrête quand les animations sont réduites (classe reduce-motion du corps : réglage ou système, a11y.js). */
+.career-end { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.career-end .cs-msg { margin: 0; }
+.ending-page .end-lead { margin: 0 0 10px; font-weight: 600; }
+.ending-page .end-finale { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px; background: rgba(255, 210, 62, .1); border: 1px solid rgba(255, 210, 62, .4); }
+.ending-page .end-finale .end-time { margin-left: auto; }
+.ending-page.complete .end-finale { border-color: #ffd23e; }
+.modal-panel.ending #modal-body { max-height: 60vh; overflow-y: auto; }
+.end-credits { height: 120px; overflow: hidden; position: relative; border-radius: 10px; background: rgba(0, 0, 0, .25); text-align: center; }
+.end-credits .roll { padding: 120px 12px 20px; animation: end-roll 28s linear 1; animation-fill-mode: forwards; }
+.end-credits h4 { margin: 14px 0 2px; color: #ffd23e; }
+.end-credits p { margin: 0; }
+@keyframes end-roll { from { transform: translateY(0); } to { transform: translateY(calc(-100% + 120px)); } }
+body.reduce-motion .end-credits { overflow-y: auto; }
+body.reduce-motion .end-credits .roll { animation: none; padding-top: 12px; }
 .ch-badge { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: rgba(95, 242, 255, .18); color: #5ff2ff; }
 .ch-badge.perfect { background: rgba(255, 210, 62, .2); color: #ffd23e; }
 .ch-badge.crystal { background: rgba(185, 166, 255, .25); color: #d9ccff; }
