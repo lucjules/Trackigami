@@ -164,7 +164,7 @@ test('index.html : tout texte et toute infobulle statiques sont traduits', () =>
 
 // Libellés des données : chaque texte affiché au joueur doit avoir une entrée (la traduction identique, ex. « Blizzard », compte).
 test('données : circuits, décors, obstacles, profils, chapitres, médailles, cosmétiques, pièces, familles, décorations, leçons, titres', async () => {
-  const mods = await Promise.all(['tracks', 'themes', 'obstacles', 'career', 'medals', 'cosmetics', 'pieces', 'decoData', 'families', 'decoPackData', 'ambiance', 'difficulty', 'rewards', 'academy', 'prefabs', 'quality', 'hudMessages'].map((m) => import(`../js/${m}.js`)));
+  const mods = await Promise.all(['tracks', 'themes', 'obstacles', 'career', 'medals', 'cosmetics', 'pieces', 'decoData', 'families', 'decoPackData', 'ambiance', 'difficulty', 'rewards', 'academy', 'academyMech', 'mechanics', 'skills', 'prefabs', 'quality', 'hudMessages'].map((m) => import(`../js/${m}.js`)));
   const KEYS = new Set(['label', 'hint', 'tip', 'desc', 'name', 'param', 'title', 'text', 'appris']);
   const miss = new Set(), seen = new Set();
   const check = (s) => { if (/[A-Za-zÀ-ÿ]{2}/.test(s) && !I.hasTranslation(s)) miss.add(s); };

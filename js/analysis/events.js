@@ -1,8 +1,9 @@
 // Bilan des évènements d'une course (analysis/trace.js) : chocs, réapparitions, réceptions, mini-turbos, temps en l'air. Module pur.
 export function summarize(trace) {
-  const c = { walls: 0, respawns: 0, perfect: 0, badLandings: 0, turbos: 0, airTime: 0, vmax: 0, cps: 0 };
+  const c = { walls: 0, shocks: 0, respawns: 0, perfect: 0, badLandings: 0, turbos: 0, airTime: 0, vmax: 0, cps: 0 };
   for (const e of trace.events) {
     if (e.k === 'wall') c.walls++;
+    else if (e.k === 'shock') c.shocks++;
     else if (e.k === 'respawn') c.respawns++;
     else if (e.k === 'land') { if (e.q === 2) c.perfect++; else if (e.q === 0) c.badLandings++; }
     else if (e.k === 'turbo') c.turbos++;

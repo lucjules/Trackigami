@@ -4,6 +4,7 @@
 //
 // Champs publics (ce que lit goalMet, avec `vehicle`, `time` et `splits` ajoutés à l'arrivée par final()) :
 //   wallHits, respawns, perfects, turbos, rings   compteurs (déjà là avant COMPLETE-012)
+//   shocks       chocs contre un obstacle animé ou un bumper (COMPLETE-008) : un seul compte tant que les contacts se suivent à moins d'une demi-seconde ; jamais défaits par un retour au checkpoint
 //   airBest      le plus long vol sans toucher le sol (s) ; en cours de vol, le vol en cours compte
 //   vmax         vitesse maximale (m/s)
 //   turboAt      pas de course (logic.steps) de chaque mini-turbo : « n mini-turbos entre deux points de passage »
@@ -13,12 +14,15 @@
 // pas au vol, ni à la vitesse, ni à la case d'après. Les chocs (wallHits) et les réapparitions, eux, restent comptés.
 import { DT, CELL, LEVEL_H } from './constants.js';
 
+const SHOCK_GAP = Math.round(0.5 / DT);
+
 export class RunStats {
   #snap;
   #air = 0;
+  #shockAt = -1e9;
   #via;
   constructor({ goal = null } = {}) {
-    this.wallHits = 0; this.respawns = 0; this.perfects = 0; this.turbos = 0; this.rings = 0;
+    this.wallHits = 0; this.respawns = 0; this.perfects = 0; this.turbos = 0; this.rings = 0; this.shocks = 0;
     this.airBest = 0; this.vmax = 0; this.turboAt = []; this.perfectAt = []; this.via = false;
     this.#via = goal && goal.id === 'via' ? goal : null;
     this.#snap = this.#take();
@@ -31,6 +35,7 @@ export class RunStats {
   step(phys, steps) {
     const ev = phys.ev;
     if (ev.wall > 4) this.wallHits++;
+    if (ev.shock > 0) { if (steps - this.#shockAt > SHOCK_GAP) this.shocks++; this.#shockAt = steps; }      // (steps : le pas de course ; SHOCK_GAP : une demi-seconde)
     if (ev.landQ === 'perfect') { this.perfects++; this.perfectAt.push(steps); }
     if (ev.miniTurbo) { this.turbos++; this.turboAt.push(steps); }
     if (ev.ring) this.rings++;

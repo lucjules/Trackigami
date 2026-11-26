@@ -2,7 +2,7 @@
 // la course et le serveur), puis mesurée par l'analyse : temps et vitesse moyenne dans des zones du circuit, chocs, réceptions, mini-turbos.
 // Le jeu et les tests mesurent donc exactement la même chose. Module pur, sans DOM (tools/test-skills.mjs).
 //
-//   measureRun(track, inputs, { zones }) -> { finished, time, walls, respawns, perfect, bad, turbos, turboLv, zoneTime, zoneSpeed, trace }
+//   measureRun(track, inputs, { zones }) -> { finished, time, walls, shocks, airTime, respawns, perfect, bad, turbos, turboLv, zoneTime, zoneSpeed, trace }
 //     zones : [[a, b], …] indices de pièces du circuit (la zone va du centre de la pièce a au centre de la pièce b, mesurés sur la ligne du circuit)
 //   drillAdvice(drill, mesure, track, grade)   le conseil du bilan (coach face à la référence dans les zones, ou d'après le geste)
 import { traceFromInputs, traceFromBot } from './trace.js';
@@ -42,7 +42,7 @@ export function measureRun(track, inputs, { zones = [] } = {}) {
     if (ok) { zoneTime = tt; zoneSpeed = (dd / tt) * 3.6; }
   }
   return {
-    finished: trace.finished, time: trace.time, walls: S.walls, respawns: S.respawns, perfect: S.perfect, bad: S.badLandings,
+    finished: trace.finished, time: trace.time, walls: S.walls, shocks: S.shocks, airTime: S.airTime, respawns: S.respawns, perfect: S.perfect, bad: S.badLandings,
     turbos: S.turbos, turboLv, zoneTime, zoneSpeed, trace,
   };
 }
@@ -57,6 +57,7 @@ export const DRILL_HINT = {
   'turbo-slow': 'Le renforcé y est, mais l’arrivée est trop lente : redresse dès que les étincelles changent de couleur et remets les gaz.',
   'land-bad': '{n} réception(s) ratée(s) : la voiture a décollé en tournant, ou s’est posée trop piquée. Redresse avant le bord, et freine en l’air (aérofrein) pour arrêter sa rotation.',
   'land-ok': 'Réceptions correctes mais pas parfaites : décolle tout droit, volant au centre, et freine en l’air (aérofrein) pour arriver à la pente de la réception.',
+  'shocks-n': '{n} choc(s) contre un obstacle : observe son rythme avant de passer, ralentis ou attends si besoin.',
   zone: 'Dans la zone mesurée, le pilote de référence va plus vite : {tip}',
   best: 'Note maximale : tu vas aussi vite que la référence. Essaie de battre ta meilleure mesure.',
 };
@@ -70,6 +71,7 @@ export function drillAdvice(d, m, track, grade = 0) {
     if (m.time > d.limit) return fill('turbo-slow');
     return fill('best');
   }
+  if (d.measure === 'shocks') return m.shocks > 0 ? fill('shocks-n', { n: m.shocks }) : fill('best');
   if (d.measure === 'landings') return m.perfect >= 3 ? fill('best') : m.bad > 0 ? fill('land-bad', { n: m.bad }) : fill('land-ok');
   // Zones : le conseil du coach face à la référence (le pilote automatique au niveau de l'or), s'il tombe dans une zone de l'exercice ; sinon la consigne.
   if (m.trace && m.trace.ref && m.trace.ref.source === 'path') {

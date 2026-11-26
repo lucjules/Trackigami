@@ -10,6 +10,7 @@ import tracks from './en/tracks.js';
 import custom from './en/custom.js';
 import hub from './en/hub.js';
 import legal from './en/legal.js';
+import mechanics from './en/mechanics.js';
 
-export const PARTS = { shell, race, online, editor, pieces, data, tracks, custom, hub, legal };
+export const PARTS = { shell, race, online, editor, pieces, data, tracks, custom, hub, legal, mechanics };
 export default Object.assign({}, ...Object.values(PARTS));

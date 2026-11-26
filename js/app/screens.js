@@ -151,7 +151,6 @@ export const screenMethods = {
         ${sm.complete ? `<p class="cs-msg">✦ Carrière complète : ${sm.total} cristaux et ${sm.total} objectifs. Chaque circuit est maîtrisé.</p>` : sm.finished ? '<p class="cs-msg">🏁 Carrière terminée : une médaille sur chaque circuit. Reste les cristaux et les objectifs bonus.</p>' : ''}`;
       this._careerEndButton(box);      // (COMPLETE-013) la conclusion de la carrière : épreuve finale, bilan, générique
       list.appendChild(box);
-      this._maybeShowEnding();      // la conclusion de la carrière s'ouvre d'elle-même la toute première fois
     }
     // 0.15.0 : « Continuer la carrière » : le prochain circuit ouvert sans médaille (sinon le premier sans cristal), en un clic.
     {

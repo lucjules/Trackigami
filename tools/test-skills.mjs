@@ -144,6 +144,60 @@ test('une course non finie n’a pas de note, ni de mesure', () => {
   for (const d of DRILLS) { assert.equal(gradeDrill(d, { finished: false }), 0); assert.equal(valueOf(d, { finished: false }), null); }
 });
 
+// COMPLETE-008 : deux exercices de plus (mur : vitesse moyenne ; obstacles animés : nombre de chocs). Course scriptée : le pilote automatique à une vitesse visée (vCap, m/s), retenu `delay` s sur la ligne.
+function driveV(track, { vCap = 52, delay = 0 } = {}) {
+  const sim = new Simulation(track), rec = new InputRecorder();
+  sim.start();
+  const bot = new Autopilot(track.path, { vCap });
+  bot.reset(sim.phys);
+  for (let i = 0; i < 90 / DT; i++) {
+    let inp = bot.control(sim.phys);
+    if (i * DT < delay) inp = { throttle: false, brake: true, steer: 0, drift: false };
+    inp.steer = quantSteer(inp.steer);
+    rec.push(inp, false);
+    const ev = sim.step(inp);
+    if (sim.lost) return null;
+    if (ev && ev.type === 'finish') return rec.encode();
+  }
+  return null;
+}
+const gradeV = (d, o) => { const tr = build(d), inputs = driveV(tr, o); assert.ok(inputs, `${d.id} : la course scriptée finit`); const m = measureRun(tr, inputs, d); return { g: gradeDrill(d, m), m }; };
+test('mur (COMPLETE-008) : plus le pilote garde de vitesse sur le mur, meilleure est la note (34 m/s visés : rien ; 38 : bronze ; 46 : argent ; 52 : or), mesurée sur la course rejouée', () => {
+  const d = drillById('murs');
+  assert.equal(d.skill, 'trajectoire'); assert.equal(d.measure, 'zoneSpeed');
+  const r = [34, 38, 46, 52].map((v) => gradeV(d, { vCap: v }));
+  assert.deepEqual(r.map((x) => x.g), [0, 1, 2, 3], r.map((x) => Math.round(x.m.zoneSpeed)).join(' / ') + ' km/h');
+  assert.ok(r.every((x) => x.m.finished && x.m.respawns === 0 && x.m.walls === 0), 'jamais de choc ni de réapparition : c\'est la vitesse qui est notée');
+  assert.ok(r[0].m.zoneSpeed > 100, 'même sans note, la voiture tient sur le mur');
+  assert.match(describeMeasure(d, r[3].m), /km\/h de moyenne/);
+  assert.equal(drillAdvice(d, r[1].m, build(d), 1).length > 20, true);
+});
+test('obstacles animés (COMPLETE-008) : 0 choc : or ; 1 choc : argent ; 2 ou 3 chocs : bronze — démontré en retenant le même pilote 0,25 s, 0,5 s ou 0,75 s sur la ligne ; la mesure vient de la trace rejouée', () => {
+  const d = drillById('animes');
+  assert.equal(d.measure, 'shocks'); assert.equal(goalTexts(d).length, 3); assert.deepEqual(goalTexts(d), ['3 chocs au plus contre les obstacles', '1 choc au plus', 'Aucun choc']);
+  const r = [0.25, 0.75, 0.5].map((delay) => gradeV(d, { delay }));
+  assert.deepEqual(r.map((x) => x.m.shocks), [2, 1, 0], 'chocs mesurés dans la trace');
+  assert.deepEqual(r.map((x) => x.g), [1, 2, 3]);
+  assert.ok(r.every((x) => x.m.respawns === 0 && x.m.finished), 'un choc ne fait pas réapparaître');
+  assert.equal(valueOf(d, r[0].m), 2); assert.match(describeMeasure(d, r[1].m), /1 choc contre les obstacles/);
+  assert.match(drillAdvice(d, r[0].m, build(d), 1), /2 choc\(s\)/); assert.match(drillAdvice(d, r[2].m, build(d), 3), /Note maximale/);
+  // un meilleur résultat = MOINS de chocs : la meilleure mesure gardée va dans ce sens
+  const p = profile(); p.drills = {}; saveProfile();
+  recordDrill(d.id, 2, 1); assert.equal(drillBest(d.id), 1);
+  recordDrill(d.id, 1, 2); assert.equal(drillBest(d.id), 1, 'un choc de plus ne remplace pas la meilleure mesure');
+  recordDrill(d.id, 3, 0); assert.equal(drillBest(d.id), 0);
+  p.drills = {}; saveProfile();
+});
+test('les deux nouveaux exercices sont de la compétence « Trajectoire » : son niveau est la meilleure note de ses trois exercices ; le point faible et le conseil les connaissent', () => {
+  const p = profile(); p.drills = {}; saveProfile();
+  assert.deepEqual(DRILLS.filter((x) => x.skill === 'trajectoire').map((x) => x.id), ['chicanes', 'murs', 'animes']);
+  recordDrill('animes', 3, 0);
+  assert.equal(skillLevel('trajectoire'), 3);
+  assert.ok(weakestDrill().skill.id !== 'trajectoire');
+  assert.ok(['chicanes', 'murs', 'animes'].includes(drillForTip('slow-corner').drill.id));
+  p.drills = {}; saveProfile();
+});
+
 console.log('Profil et conseils');
 test('une note s’enregistre ; les pièces récompensent chaque note atteinte une seule fois ; la meilleure mesure est gardée dans le bon sens', () => {
   const p = profile(); p.drills = {}; p.coins = 0; saveProfile();

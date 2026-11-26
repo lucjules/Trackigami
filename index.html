@@ -56,6 +56,7 @@
   <link rel="modulepreload" href="js/app/lab.js">
   <link rel="modulepreload" href="js/app/rewards.js">
   <link rel="modulepreload" href="js/app/careerEnd.js">
+  <link rel="modulepreload" href="js/app/mechanics.js">
   <link rel="modulepreload" href="js/app/community.js">
   <link rel="modulepreload" href="js/app/screens.js">
   <link rel="modulepreload" href="js/app/settings.js">
@@ -115,6 +116,7 @@
   <link rel="modulepreload" href="js/race/replayMode.js">
   <link rel="modulepreload" href="js/race/scriptsRun.js">
   <link rel="modulepreload" href="js/race/training.js">
+  <link rel="modulepreload" href="js/race/mechanics.js">
   <link rel="modulepreload" href="js/theater/session.js">
   <link rel="modulepreload" href="js/theater/cameras.js">
   <link rel="modulepreload" href="js/envFx.js">
@@ -148,12 +150,14 @@
   <link rel="modulepreload" href="js/net/resume.js">
   <link rel="modulepreload" href="js/ui/trackMap.js">
   <link rel="modulepreload" href="js/academy.js">
+  <link rel="modulepreload" href="js/academyMech.js">
   <link rel="modulepreload" href="js/skills.js">
   <link rel="modulepreload" href="js/analysis/drill.js">
   <link rel="modulepreload" href="js/progression.js">
   <link rel="modulepreload" href="js/analysis/lab.js">
   <link rel="modulepreload" href="js/mutations.js">
   <link rel="modulepreload" href="js/careerEnd.js">
+  <link rel="modulepreload" href="js/mechanics.js">
   <link rel="modulepreload" href="js/verify.js">
   <link rel="modulepreload" href="js/editorTools.js">
   <link rel="modulepreload" href="js/authorProof.js">
@@ -291,7 +295,7 @@
           <button data-action="daily" class="btn menu-entry"><b>Défi du jour</b><small id="daily-best"></small></button>
           <button data-action="community" class="btn menu-entry"><b>Circuits de la communauté</b><small>les circuits publiés par les joueurs</small></button>
           <button data-action="modes" class="btn menu-entry"><b>Modes</b><small>règles, défis et paquets</small></button>
-          <button data-action="academy" class="btn menu-entry"><b>Académie</b><small>6 leçons guidées</small></button>
+          <button data-action="academy" class="btn menu-entry"><b>Académie</b><small>14 leçons guidées</small></button>
         </div>
       </div>
       <div class="menu-panel hidden" id="menu-sub-create" role="group" aria-labelledby="mp-create">
@@ -318,6 +322,7 @@
           <button data-action="tab-level" class="btn menu-entry"><b>Niveau et licences</b><small>expérience, licences, défis de maîtrise</small></button>
           <button data-action="tab-stats" class="btn menu-entry"><b>Statistiques</b><small>courses, pièces, séries</small></button>
           <button data-action="tab-unlocks" class="btn menu-entry"><b>Déblocages</b><small>chapitres, titres, récompenses</small></button>
+          <button data-action="tab-mech" class="btn menu-entry"><b>Mécaniques</b><small>ce que tu as découvert, et comment s’en servir</small></button>
         </div>
       </div>
       <div class="menu-panel hidden" id="menu-sub-profile" role="group" aria-labelledby="mp-profile">
@@ -372,6 +377,7 @@
           </div>
         </div>
         <ul class="hub-legend" id="hub-legend"></ul>
+        <div class="hub-new hidden" id="hub-new"></div>
         <div class="hub-facts" id="hub-facts"></div>
       </div>
       <aside class="hub-side">
@@ -438,6 +444,7 @@
     <div class="prof-panel hidden" data-ppanel="records"><div class="panel form" id="prog-records"></div></div>
     <div class="prof-panel hidden" data-ppanel="stats"><div class="panel form" id="prog-stats"></div></div>
     <div class="prof-panel hidden" data-ppanel="unlocks"><div class="panel form" id="prog-unlocks"></div></div>
+    <div class="prof-panel hidden" data-ppanel="mech"><div class="panel form" id="prog-mech"></div></div>
     <div class="prof-panel hidden" data-ppanel="audio"><div class="panel form">
       <label><span>Langue</span><select id="opt-lang" data-i18n="off"></select></label>
       <h3 class="opt-h">Son</h3>
