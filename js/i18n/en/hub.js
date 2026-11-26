@@ -340,7 +340,8 @@ export default {
   '🪪 {l:t} obtenue ! (Progression)': '🪪 {l} earned! (Progress)',
   'Menthe': 'Mint', 'Traînée violette': 'Violet trail', 'Or pâle': 'Pale gold', 'Plasma': 'Plasma',
   'Atteindre le niveau 5': 'Reach level 5', 'Atteindre le niveau 10': 'Reach level 10', 'Atteindre le niveau 20': 'Reach level 20', 'Atteindre le niveau 30': 'Reach level 30',
-  'Traînée azur': 'Azure trail', 'Traînée jade': 'Jade trail', 'Nova': 'Nova', 'Rubis': 'Ruby', 'Or pulsé': 'Pulsing gold', 'Diamant': 'Diamond',
+  // COMPLETE-016 : récompenses de niveau 15 à 50
+  'Azur': 'Azure', 'Traînée solaire': 'Solar trail', 'Rubis': 'Ruby', 'Traînée jade': 'Jade trail', 'Améthyste': 'Amethyst', 'Prisme': 'Prism',
   'Atteindre le niveau 15': 'Reach level 15', 'Atteindre le niveau 25': 'Reach level 25', 'Atteindre le niveau 35': 'Reach level 35',
   'Atteindre le niveau 40': 'Reach level 40', 'Atteindre le niveau 45': 'Reach level 45', 'Atteindre le niveau 50': 'Reach level 50',
   // ---------------------------------------------------------------- Social, saisons, secteurs (0.9.37)

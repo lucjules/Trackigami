@@ -1,189 +1,150 @@
-// Fin de carrière (COMPLETE-013) : définition de « carrière terminée / complète », épreuve finale, bilan EXACT, conclusion montrée une seule fois, fusion, textes, accessibilité.
-// node tools/test-fin-carriere.mjs   (npm test)   ; l'écran réel (deux langues, animations réduites) : tools/test-browser-fin.mjs (npm run test:browser).
-// Le bilan est comparé à un calcul INDÉPENDANT (ici, à partir des seuils de médailles des circuits et de temps choisis par le test), jamais à une valeur écrite en dur.
+// Fin de carrière (COMPLETE-013) : définition de « carrière complète », bilan exact, écran de fin affiché une fois, fusion entre appareils, texte anglais.
+// node tools/test-fin-carriere.mjs   (npm test). L'affichage dans un vrai navigateur (deux langues, animations réduites) : tools/test-browser-fin-carriere.mjs.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { join, dirname } from 'node:path';
 import { test, finish } from './harness.mjs';
-import { BUILTIN_TRACKS } from '../js/tracks.js';
-import { medalFor, MEDALS } from '../js/medals.js';
-import { careerSummary } from '../js/career.js';
-import { FINALE_ID, finaleIndexOf, careerEnded, careerComplete, finaleReady, remainingBeforeFinale, careerBilan, formatSpan, endingSeen, credits } from '../js/ending.js';
-import { mergeProgress } from '../js/progression.js';
-import { mergeProfile } from '../js/cloudsave.js';
-import { profile, saveProfile } from '../js/profile.js';
+import { device } from './fake-supabase.mjs';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const read = (f) => readFileSync(join(root, f), 'utf8');
-const N = BUILTIN_TRACKS.length;
-const FIN = finaleIndexOf(BUILTIN_TRACKS);
+device('A');
+const { BUILTIN_TRACKS } = await import('../js/tracks.js');
+const { getRecord, saveRecord, medalTime, clearRecords } = await import('../js/storage.js');
+const { medalFor, MEDALS } = await import('../js/medals.js');
+const { profile, saveProfile } = await import('../js/profile.js');
+const { goalDone } = await import('../js/career.js');
+const { careerRows, careerReport, shouldShowCareerEnd, markCareerEnd, careerEndSeen, mergeCareerEnd, FINALE_ID } = await import('../js/careerEnd.js');
+const { mergeProfile } = await import('../js/cloudsave.js');
+const read = (f) => readFileSync(new URL('../' + f, import.meta.url), 'utf8');
 
-// Profils synthétiques : un temps par circuit, choisi par rapport à ses seuils ; l'entrée (médaille, temps, objectif) est calculée ICI, sans passer par ending.js.
-const timeFor = (def, tier) => (tier == null ? null : tier === 'plus' ? def.medals.bronze + 5 : def.medals[tier] - 0.123);     // 'plus' : plus lent que le bronze : pas de médaille
-const entriesOf = (tiers, goals) => BUILTIN_TRACKS.map((def, i) => {
-  const t = timeFor(def, tiers(i)), m = t == null ? null : medalFor(t, def.medals);
-  return { medal: m ? m.id : null, time: m ? t : null, goal: !!goals(i) };
+const builtins = BUILTIN_TRACKS.map((def, i) => ({ def, key: `b-${def.id}-synth${i}` }));
+const N = builtins.length;
+// Profil synthétique : tier(i) = niveau de médaille voulu sur le circuit i (0 cristal … 3 bronze), null = pas de record ; goal(i) = objectif réussi.
+function setup(tier, goal = () => false, races = 0) {
+  const p = profile();
+  clearRecords();
+  p.goals = {}; p.stats = { races, earned: 0 }; delete p.careerEnd;
+  builtins.forEach((b, i) => {
+    const t = tier(i);
+    if (t != null) { assert.ok(saveRecord(b.key, { time: b.def.medals[MEDALS[t].id] - 0.0001 * (i % 7), pv: 1, date: 1 })); }
+    if (goal(i)) p.goals[b.key + '#goal'] = 1;
+  });
+  saveProfile();
+  return p;
+}
+const rowsNow = () => careerRows(builtins, { getRecord, medalTime, medalFor, goalDone });
+// Calcul INDÉPENDANT : directement depuis les records du disque et les seuils de médailles des circuits, sans passer par careerRows/careerReport.
+function independent() {
+  let ms = 0, timed = 0, med = 0, goals = 0;
+  const by = { cristal: 0, or: 0, argent: 0, bronze: 0 };
+  builtins.forEach((b) => {
+    const raw = getRecord(b.key);
+    if (raw) {
+      const t = Math.min(raw.time, raw.bt > 0 ? raw.bt : raw.time);
+      ms += Math.round(t * 1000); timed++;
+      const tier = ['cristal', 'or', 'argent', 'bronze'].find((id) => t <= b.def.medals[id] + 1e-6);
+      if (tier) { by[tier]++; med++; }
+    }
+    if (profile().goals[b.key + '#goal']) goals++;
+  });
+  return { ms, timed, med, goals, by };
+}
+
+console.log('Définition et bilan');
+test('l’épreuve finale est un circuit existant (« Grande Finale », le dernier) ; il y a 84 circuits', () => {
+  assert.equal(N, 84);
+  const f = builtins.filter((b) => b.def.id === FINALE_ID);
+  assert.equal(f.length, 1); assert.equal(f[0].def.name, 'Grande Finale'); assert.equal(builtins.indexOf(f[0]), N - 1);
 });
-const PROFILES = {
-  vide: entriesOf(() => null, () => false),
-  moitie: entriesOf((i) => (i < N / 2 ? 'or' : null), (i) => i % 5 === 0),
-  fini: entriesOf((i) => ['bronze', 'argent', 'or', 'cristal'][i % 4], (i) => i % 3 === 0),
-  completCristaux: entriesOf(() => 'cristal', () => true),
-  finiSaufFinale: entriesOf((i) => (i === FIN ? 'plus' : 'bronze'), () => false),
-  finaleSeule: entriesOf((i) => (i === FIN ? 'or' : null), () => false),
+const cases = {
+  'carrière vide': { tier: () => null, finished: false, complete: false },
+  'carrière à moitié finie': { tier: (i) => (i < N / 2 ? 2 : null), goal: (i) => i % 3 === 0, races: 120, finished: false, complete: false },
+  'carrière finie (bronze partout)': { tier: () => 3, races: 400, finished: true, complete: false },
+  'carrière finie, un seul circuit sans médaille': { tier: (i) => (i === N - 1 ? null : 3), finished: false, complete: false },
+  'carrière complète avec cristaux et objectifs': { tier: () => 0, goal: () => true, races: 999, finished: true, complete: true },
+  'carrière mélangée (cristal, or, argent, bronze)': { tier: (i) => i % 4, goal: (i) => i % 2 === 0, races: 77, finished: true, complete: false },
 };
-
-console.log('Définition');
-test('l’épreuve finale est « Grande Finale » : circuit existant, le dernier de la liste, chapitre « Grandes Manœuvres » (aucun circuit n’est modifié : tools/test-cles-officielles.mjs)', () => {
-  assert.equal(FINALE_ID, 'finale');
-  assert.equal(FIN, N - 1);
-  assert.equal(BUILTIN_TRACKS[FIN].name, 'Grande Finale');
-  assert.equal(BUILTIN_TRACKS[FIN].chapitre, 'manoeuvres');
-  assert.equal(finaleIndexOf([]), -1);
-  assert.equal(finaleIndexOf([{ def: { id: 'x' } }, { def: { id: 'finale' } }]), 1, 'accepte aussi les circuits de l’application (b.def.id)');
+for (const [name, c] of Object.entries(cases)) {
+  test(`${name} : détection et bilan exacts (comparés à un calcul indépendant)`, () => {
+    setup(c.tier, c.goal, c.races || 0);
+    const r = careerReport(rowsNow(), profile().stats), ind = independent();
+    assert.equal(r.total, N);
+    assert.equal(r.finished, c.finished, 'carrière finie');
+    assert.equal(r.complete, c.complete, 'carrière complète au sens strict');
+    assert.equal(r.medals, ind.med); assert.deepEqual(r.byMedal, ind.by); assert.equal(r.crystal, ind.by.cristal);
+    assert.equal(r.goals, ind.goals); assert.equal(r.timed, ind.timed);
+    assert.equal(r.totalTime, ind.timed ? ind.ms / 1000 : null);
+    assert.equal(r.races, c.races || 0);
+    assert.equal(r.medals, Object.values(r.byMedal).reduce((a, b) => a + b, 0), 'les médailles par palier s’additionnent');
+    assert.equal(r.finale.name, 'Grande Finale');
+  });
+}
+test('le bilan ne dépend que des données locales : le module est pur (aucun réseau)', () => {
+  const src = read('js/careerEnd.js') + read('js/app/careerEnd.js');
+  assert.ok(!/fetch\(|XMLHttpRequest|online\.|WebSocket|sendBeacon/.test(src));
+  assert.deepEqual(Object.keys(careerReport([], {})).includes('totalTime'), true);
+  assert.equal(careerReport([], {}).finished, false, 'aucun circuit : jamais « finie »');
 });
-test('carrière terminée = une médaille sur CHAQUE circuit (la définition de career.careerSummary) ; complète = en plus un cristal et un objectif partout', () => {
-  const exp = { vide: [false, false], moitie: [false, false], fini: [true, false], completCristaux: [true, true], finiSaufFinale: [false, false], finaleSeule: [false, false] };
-  for (const [k, e] of Object.entries(PROFILES)) {
-    assert.deepEqual([careerEnded(e), careerComplete(e)], exp[k], k);
-    const sm = careerSummary(e.map((x) => x.medal), e.filter((x) => x.goal).length);      // la définition déjà utilisée par l’écran des circuits
-    assert.deepEqual([careerEnded(e), careerComplete(e)], [sm.finished, sm.complete], k + ' : même définition que careerSummary');
+
+console.log('Écran de fin : une fois, rejouable');
+test('il s’ouvre une seule fois (date gardée dans le profil), se rouvre à la demande, jamais avant la fin', () => {
+  const p = setup(() => 3);
+  const fin = careerReport(rowsNow(), p.stats).finished;
+  assert.equal(shouldShowCareerEnd(p, fin), true);
+  assert.equal(markCareerEnd(p, 12345), true); assert.equal(p.careerEnd, 12345);
+  assert.equal(shouldShowCareerEnd(p, fin), false, 'déjà vu : plus tout seul');
+  assert.equal(markCareerEnd(p, 99999), false); assert.equal(p.careerEnd, 12345, 'la date de la première fois ne bouge pas');
+  assert.equal(careerEndSeen(p), true);
+  const q = setup((i) => (i === 0 ? null : 3));
+  assert.equal(shouldShowCareerEnd(q, careerReport(rowsNow(), q.stats).finished), false, 'carrière non finie : rien');
+  for (const bad of [0, -5, NaN, 'x', null, undefined]) assert.equal(careerEndSeen({ careerEnd: bad }), false);
+});
+test('le câblage : ouverture à l’écran des circuits, bouton « Revoir » (circuits, Progression › Records), jamais pendant une fenêtre ouverte', () => {
+  const scr = read('js/app/screens.js'), app = read('js/app/careerEnd.js'), prof = read('js/app/profile.js'), main = read('js/main.js');
+  assert.match(scr, /this\._renderTracks\(\); this\._maybeCareerEnd\(\)/);
+  assert.match(scr, /_careerEndButton\(box\)/); assert.match(prof, /_careerEndButton\(/);
+  assert.match(main, /careerEndMethods/);
+  assert.match(app, /classList\.contains\('hidden'\)/);
+  assert.ok(!/Il n’y a plus rien à finir ici/.test(scr), 'le message de fin abrupt a disparu');
+});
+
+console.log('Fusion entre appareils');
+test('careerEnd : la date la plus ancienne l’emporte, des deux côtés, dans les deux ordres ; rien d’ajouté à un profil qui n’en a pas', () => {
+  const a = { id: 'X', careerEnd: 500, coins: 1 }, b = { id: 'X', careerEnd: 200, coins: 2 }, c = { id: 'X', coins: 3 };
+  assert.equal(mergeProfile(a, b).careerEnd, 200); assert.equal(mergeProfile(b, a).careerEnd, 200);
+  assert.equal(mergeProfile(a, c).careerEnd, 500); assert.equal(mergeProfile(c, a).careerEnd, 500);
+  assert.equal('careerEnd' in mergeProfile(c, { id: 'X', coins: 4 }), false);
+  assert.deepEqual(mergeCareerEnd({ careerEnd: 'x' }, { careerEnd: -3 }), {});
+  assert.equal(mergeProfile({ ...a, careerEnd: 'abîmé' }, b).careerEnd, 200, 'une valeur abîmée est ignorée');
+});
+test('careerEnd est une donnée de progression du profil : elle suit le compte (profil synchronisé), n’est pas propre à l’appareil, et part dans l’export', async () => {
+  const { DEVICE_ONLY_KEYS, dumpAll } = await import('../js/storage.js');
+  assert.ok(!DEVICE_ONLY_KEYS.some((k) => /career/i.test(k)) && DEVICE_ONLY_KEYS.includes('vproof'));
+  const p = setup(() => 3); markCareerEnd(p, 777); saveProfile();
+  const dump = dumpAll({ portability: true });
+  assert.match(dump.profile, /"careerEnd":777/);
+});
+
+console.log('Textes');
+test('chaque texte français de l’écran de fin a sa traduction anglaise', async () => {
+  const I = await import('../js/i18n.js');
+  const { default: EN } = await import('../js/i18n/en.js').catch(() => ({ default: null }));
+  const dict = EN || (await import('../js/i18n/en.js')).EN || {};
+  I.resetDictionary(); I.register(dict); I.setLang('en');
+  const src = read('js/app/careerEnd.js');
+  for (const fr of ['🏁 Carrière accomplie', 'Bilan de ta carrière', 'Épreuve finale', 'Circuits terminés', 'Temps cumulé de tes meilleurs temps', 'Circuits chronométrés', 'Niveau du pilote', 'Générique',
+    'Merci d’avoir joué jusqu’au bout !', '🏁 Rejouer l’épreuve finale', 'Crédits et licences', '🎬 Conclusion de la carrière', '🎬 Revoir la conclusion de la carrière',
+    'Moteur 3D : three.js · Police : Chakra Petch', 'Musique et sons : synthétisés en direct par le jeu']) {
+    assert.ok(src.includes(fr), 'texte présent dans l’écran : ' + fr);
+    assert.notEqual(I.translate(fr), fr, 'non traduit : ' + fr);
   }
-  assert.equal(careerEnded([]), false, 'aucun circuit : rien n’est terminé');
+  assert.equal(I.translate('Tu as une médaille sur chacun des 84 circuits de la carrière : elle est terminée.'), 'You have a medal on each of the 84 career tracks: it is finished.');
+  assert.equal(I.translate('Il te reste 3 circuits sans médaille pour terminer la carrière.'), '3 tracks still have no medal before the career is finished.');
+  assert.equal(I.translate('✦ Carrière complète : 84 cristaux et 84 objectifs. Chaque circuit est maîtrisé.'), '✦ Career complete: 84 crystals and 84 goals. Every track is mastered.');
+  I.resetDictionary(); I.setLang('fr');
 });
-test('un seul circuit sans médaille suffit à ne pas être terminé, quel qu’il soit', () => {
-  for (const i of [0, 1, 40, FIN - 1, FIN]) {
-    const e = PROFILES.completCristaux.map((x, j) => (j === i ? { ...x, medal: null, time: null } : x));
-    assert.equal(careerEnded(e), false, 'circuit ' + i);
-  }
-});
-test('épreuve finale « à finir » : tous les autres circuits ont une médaille et pas elle ; jamais pour une carrière terminée ni à moitié faite', () => {
-  assert.equal(finaleReady(PROFILES.finiSaufFinale, FIN), true);
-  assert.equal(remainingBeforeFinale(PROFILES.finiSaufFinale, FIN), 0);
-  for (const k of ['vide', 'moitie', 'fini', 'completCristaux', 'finaleSeule']) assert.equal(finaleReady(PROFILES[k], FIN), false, k);
-  assert.equal(finaleReady(PROFILES.finiSaufFinale, -1), false);
-  assert.equal(remainingBeforeFinale(PROFILES.moitie, FIN), PROFILES.moitie.filter((x, i) => i !== FIN && !x.medal).length);
-  assert.equal(remainingBeforeFinale(PROFILES.finaleSeule, FIN), N - 1, 'la finale seule ne compte pas parmi les circuits restants');
-});
-
-console.log('Bilan exact');
-test('le bilan de chaque profil synthétique égale un calcul indépendant (médailles par palier, cristaux, objectifs, temps cumulé, temps de référence battus)', () => {
-  for (const [k, e] of Object.entries(PROFILES)) {
-    const b = careerBilan(e, FIN, { races: 123, level: 17 });
-    // calcul indépendant : boucles et seuils, sans les fonctions de ending.js
-    const want = { cristal: 0, or: 0, argent: 0, bronze: 0 };
-    let goals = 0, sum = 0, timed = 0;
-    BUILTIN_TRACKS.forEach((def, i) => {
-      const t = timeFor(...[def, { vide: () => null, moitie: (j) => (j < N / 2 ? 'or' : null), fini: (j) => ['bronze', 'argent', 'or', 'cristal'][j % 4], completCristaux: () => 'cristal', finiSaufFinale: (j) => (j === FIN ? 'plus' : 'bronze'), finaleSeule: (j) => (j === FIN ? 'or' : null) }[k](i)]);
-      if (t != null) {
-        if (t <= def.medals.cristal + 1e-6) want.cristal++; else if (t <= def.medals.or + 1e-6) want.or++; else if (t <= def.medals.argent + 1e-6) want.argent++; else if (t <= def.medals.bronze + 1e-6) want.bronze++;
-        if (t <= def.medals.bronze + 1e-6) { sum += t; timed++; }
-      }
-      if (e[i].goal) goals++;
-    });
-    assert.deepEqual(b.medals, want, k);
-    assert.equal(b.crystals, want.cristal);
-    assert.equal(b.medalled, want.cristal + want.or + want.argent + want.bronze, k);
-    assert.equal(b.beaten, want.cristal + want.or, k + ' : temps de référence battus (or ou cristal)');
-    assert.equal(b.goals, goals, k);
-    assert.ok(Math.abs(b.time - sum) < 1e-9, k + ' : temps cumulé');
-    assert.equal(b.timed, timed);
-    assert.equal(b.timeComplete, timed === N);
-    assert.equal(b.total, N);
-    assert.deepEqual([b.races, b.level], [123, 17]);
-    assert.deepEqual([b.ended, b.complete], [careerEnded(e), careerComplete(e)]);
-  }
-});
-test('« complète avec cristaux » : N cristaux, N objectifs, aucune autre médaille ; le temps cumulé est la somme des temps de cristal choisis', () => {
-  const b = careerBilan(PROFILES.completCristaux, FIN);
-  assert.deepEqual(b.medals, { cristal: N, or: 0, argent: 0, bronze: 0 });
-  assert.equal(b.goals, N);
-  assert.ok(Math.abs(b.time - BUILTIN_TRACKS.reduce((a, d) => a + d.medals.cristal - 0.123, 0)) < 1e-6);
-  assert.equal(b.complete, true);
-  assert.deepEqual(b.finale, { medal: 'cristal', time: BUILTIN_TRACKS[FIN].medals.cristal - 0.123 });
-});
-test('profil vide : tout à zéro, rien d’inventé ; carrière à moitié finie : les compteurs suivent', () => {
-  const b = careerBilan(PROFILES.vide, FIN);
-  assert.deepEqual([b.medalled, b.crystals, b.goals, b.beaten, b.time, b.timed, b.ended, b.complete, b.timeComplete], [0, 0, 0, 0, 0, 0, false, false, false]);
-  assert.deepEqual(b.finale, { medal: null, time: null });
-  assert.equal(careerBilan([], -1).total, 0);
-  const h = careerBilan(PROFILES.moitie, FIN);
-  assert.equal(h.medalled, PROFILES.moitie.filter((x) => x.medal).length);
-  assert.equal(h.goals, PROFILES.moitie.filter((x) => x.goal).length);
-});
-test('les valeurs étranges ne cassent rien : temps nul, négatif, non fini, médaille inconnue, entrée vide', () => {
-  const b = careerBilan([{ medal: 'or', time: 0, goal: true }, { medal: 'x', time: -3 }, { medal: 'bronze', time: Infinity }, null, { medal: 'cristal', time: 10.5 }], -1);
-  assert.deepEqual([b.medals.or, b.medals.bronze, b.medals.cristal, b.goals, b.time, b.timed], [1, 1, 1, 1, 10.5, 1]);
-});
-test('temps cumulé écrit en heures, minutes, secondes, séparateur décimal de la langue ; ne perd pas la seconde', () => {
-  assert.equal(formatSpan(0), '0,000 s');
-  assert.equal(formatSpan(59.9996), '1 min 00,000 s');
-  assert.equal(formatSpan(75.5), '1 min 15,500 s');
-  assert.equal(formatSpan(3600 + 23 * 60 + 45.678), '1 h 23 min 45,678 s');
-  assert.equal(formatSpan(3600 + 23 * 60 + 45.678, 'en'), '1 h 23 min 45.678 s');
-  assert.equal(formatSpan(7200), '2 h 00 min 00,000 s');
-  assert.equal(formatSpan(NaN), '0,000 s');
-});
-
-console.log('Une seule fois, fusion des appareils');
-test('conclusion vue : un profil qui ne l’a pas vue ne porte aucun champ ; la fusion de deux appareils garde la PLUS ANCIENNE date, dans les deux sens', () => {
-  assert.equal(endingSeen({}), false); assert.equal(endingSeen({ endSeen: 0 }), false); assert.equal(endingSeen({ endSeen: 5 }), true);
-  assert.deepEqual(mergeProgress({}, {}), {}, 'rien d’ajouté à un profil qui n’en avait pas');
-  assert.equal(mergeProgress({ endSeen: 900 }, { endSeen: 400 }).endSeen, 400);
-  assert.equal(mergeProgress({ endSeen: 400 }, { endSeen: 900 }).endSeen, 400);
-  assert.equal(mergeProgress({ endSeen: 400 }, {}).endSeen, 400, 'vue sur un seul appareil : vue partout');
-  assert.equal('endSeen' in mergeProgress({ endSeen: 'x' }, { endSeen: -4 }), false, 'valeurs abîmées ignorées');
-  const m = mergeProfile({ coins: 1, endSeen: 900 }, { coins: 1 }), n = mergeProfile({ coins: 1 }, { coins: 1, endSeen: 700 });
-  assert.equal(m.endSeen, 900); assert.equal(n.endSeen, 700);
-  assert.equal(mergeProfile({ coins: 1, endSeen: 900 }, { coins: 1, endSeen: 100 }).endSeen, 100);
-});
-test('le champ du profil survit à un enregistrement / une relecture (profil réel), et se retrouve dans l’export des données et la sauvegarde partagée', () => {
-  const p = profile(); p.endSeen = 4242; saveProfile();
-  assert.equal(profile().endSeen, 4242);
-  // le profil entier part dans les sauvegardes et l’export (clé « profile » : ni propre à l’appareil, ni filtrée champ par champ) : storage.DEVICE_ONLY_KEYS ne contient pas de clé de progression
-  const stor = read('js/storage.js');
-  assert.doesNotMatch(stor.match(/SECRET_DEVICE_KEYS\s*=\s*\[[^\]]*\]/)[0], /profile|endSeen/);
-  assert.match(read('js/cloudsave.js'), /mergeProgress\(a, b\)/);
-  delete p.endSeen; saveProfile();
-});
-
-console.log('Interface, textes, accessibilité');
-test('le message de fin abrupt a disparu (français et anglais) ; les textes de la conclusion existent dans les deux langues', async () => {
-  const scr = read('js/app/screens.js');
-  assert.doesNotMatch(scr, /plus rien à finir/);
-  assert.doesNotMatch(read('js/i18n/en/shell.js'), /plus rien à finir/);
-  const en = (await import('../js/i18n/en/shell.js')).default;
-  const app = read('js/app/ending.js');
-  const needed = ['Carrière terminée', 'Carrière complète', 'Épreuve finale', 'Bilan de la carrière', 'Circuits terminés', 'Temps cumulé de tes meilleurs temps', 'Médailles de cristal', 'Médailles d’or', 'Médailles d’argent', 'Médailles de bronze',
-    'Temps du pilote automatique battus', 'Objectifs bonus réussis', 'Courses terminées', 'Niveau du pilote', 'Générique', 'Crédits et licences', 'Rejouer l’épreuve finale', '▶ Épreuve finale', '🎬 Voir la conclusion de la carrière', '🎬 Revoir la conclusion de la carrière'];
-  const missing = needed.filter((k) => !app.includes(k) && !scr.includes(k));
-  assert.deepEqual(missing, [], 'textes attendus dans le code');
-  const { default: hub } = await import('../js/i18n/en/hub.js');
-  const miss = needed.filter((k) => !(k in en) && !(k in hub));
-  assert.deepEqual(miss, [], 'traductions anglaises manquantes : ' + miss.join(' | '));
-  const lines = credits(N, 14);
-  for (const c of lines) { const k = (c.h || c.t).replace('{n}', '{n:w}').replace('{c}', '{c:w}'); assert.ok(k in en || k in hub || k === 'Trackigami', 'générique non traduit : ' + k); }
-});
-test('le générique ne contient aucun nombre écrit en dur : le nombre de circuits et de chapitres vient du jeu', () => {
-  const a = credits(7, 3), b = credits(84, 14);
-  assert.deepEqual(a.filter((c) => c.n == null), b.filter((c) => c.n == null), 'seule la ligne à valeurs change avec le jeu');
-  assert.deepEqual(a.filter((c) => c.n != null).map((c) => [c.n, c.c]), [[7, 3]]);
-  assert.doesNotMatch(a.find((c) => c.n != null).t, /\d/, 'le modèle ne contient aucun chiffre');
-  assert.deepEqual(credits(84, 14).find((c) => c.n != null), { t: '{n} circuits officiels en {c} chapitres.', n: 84, c: 14 });
-});
-test('animations réduites : le défilement du générique est coupé par la classe « reduce-motion » du corps (réglage Accessibilité ou système) et le texte reste lisible (défilable à la main)', () => {
+test('animations réduites : le générique n’est plus animé (réglage de l’app et préférence système)', () => {
   const css = read('css/style.css');
-  assert.match(css, /body\.reduce-motion \.end-credits \.roll \{ animation: none/);
-  assert.match(css, /body\.reduce-motion \.end-credits \{ overflow-y: auto/);
-  assert.match(read('js/app/settings.js'), /classList\.toggle\('reduce-motion'/);
-  assert.match(read('js/app/ending.js'), /role="region"[^>]*aria-label="Générique"/);
-});
-test('la conclusion n’appelle aucun réseau, ne touche à aucun record, à aucune physique ni à aucun circuit', () => {
-  for (const f of ['js/ending.js', 'js/app/ending.js']) assert.doesNotMatch(read(f).replace(/\/\/.*$/gm, ''), /fetch\(|XMLHttpRequest|online\.|WebSocket|submit|\.rest\(|setRecord|saveRecord/, f);
-  const imports = [...read('js/ending.js').matchAll(/from '([^']+)'/g)].map((m) => m[1]);
-  assert.deepEqual(imports, ['./medals.js'], 'le module pur ne dépend que des médailles');
-  assert.deepEqual(MEDALS.map((m) => m.id), ['cristal', 'or', 'argent', 'bronze']);
+  assert.match(css, /prefers-reduced-motion: reduce\) \{ \.career-end \.ce-credits li \{ animation: none; opacity: 1; \} \}/);
+  assert.match(css, /body\.reduce-motion \.career-end \.ce-credits li \{ animation: none; opacity: 1; \}/);
 });
 
-await finish('Tous les tests de la fin de carrière passent.');
+finish('Tous les tests de la fin de carrière passent.');

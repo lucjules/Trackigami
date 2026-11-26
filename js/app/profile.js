@@ -94,8 +94,7 @@ export const profileMethods = {
       html += '</ul>';
     }
     box.innerHTML = html;
-    const endBtn = this._careerEndButton();      // (COMPLETE-013) l'épreuve finale à finir, ou la conclusion à revoir
-    if (endBtn) box.insertBefore(endBtn, box.firstElementChild.nextSibling);
+    this._careerEndButton(box.querySelector('.career-summary'));      // (COMPLETE-013)
     for (const b of box.querySelectorAll('[data-rec]')) b.onclick = () => { this.audio.click(); this.openBuiltinHub(+b.dataset.rec, 'profile'); };
   },
 
