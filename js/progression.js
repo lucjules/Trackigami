@@ -3,7 +3,7 @@
 // éléments visuels du garage (tools/test-progression.mjs le vérifie). L'expérience vient des COURSES TERMINÉES et des OBJECTIFS atteints, jamais du
 // temps passé dans les menus ; les arrivées répétées sur le même circuit, le même jour, ne rapportent presque rien.
 //
-// Profil : xp (entier), licences { id: date de l'obtention }, mastery { cléCircuit: bits }, xpDay { day, keys } (premières arrivées du jour, local).
+// Profil : xp (entier), endSeen (date de la première conclusion de carrière vue : ending.js), licences { id: date de l'obtention }, mastery { cléCircuit: bits }, xpDay { day, keys } (premières arrivées du jour, local).
 // Fusion cloud (mergeProgress) : expérience au maximum, licences réunies (la date la plus ancienne), maîtrise réunie (OU bit à bit).
 import { profile, saveProfile } from './profile.js';
 
@@ -31,7 +31,9 @@ export function levelOf(xp) {
 }
 
 // Récompenses de niveau : des éléments EXCLUSIFS du garage (ils ne s'achètent pas ; voir rewards.js, qui les donne).
-export const LEVEL_REWARDS = [[5, 'led', 'mint'], [10, 'trail', 'violet'], [20, 'led', 'pale'], [30, 'trail', 'plasma']];
+// COMPLETE-016 : une récompense tous les 5 niveaux, du 5 au 50 (avant : 5, 10, 20, 30). Les quatre premières sont inchangées. Un joueur qui a déjà dépassé un palier reçoit ce qui lui manque
+// au prochain contrôle (rewards.grantRewards : « niveau atteint », pas « niveau franchi » ; rien n'est donné deux fois, rien n'est retiré).
+export const LEVEL_REWARDS = [[5, 'led', 'mint'], [10, 'trail', 'violet'], [15, 'trail', 'azure'], [20, 'led', 'pale'], [25, 'led', 'ruby'], [30, 'trail', 'plasma'], [35, 'trail', 'jade'], [40, 'led', 'aurum'], [45, 'trail', 'nova'], [50, 'led', 'diamond']];
 
 // ---- Défis de maîtrise : quatre par circuit de la carrière --------------------------------------------------------------------------------
 export const MASTERY = [
@@ -170,6 +172,9 @@ export function mergeProgress(a, b) {
       if (d.length) out.licences[L.id] = Math.min(...d);
     }
   }
+  // Conclusion de la carrière déjà vue (COMPLETE-013, js/ending.js) : la plus ancienne date, pour qu'elle ne s'affiche pas de nouveau sur l'autre appareil.
+  const ea = [a.endSeen, b.endSeen].filter((x) => Number.isFinite(+x) && +x > 0).map(Number);
+  if (ea.length) out.endSeen = Math.min(...ea);
   const ma = masteryOfP(a), mb = masteryOfP(b);
   if (Object.keys(ma).length || Object.keys(mb).length) {
     out.mastery = {};

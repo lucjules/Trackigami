@@ -194,6 +194,7 @@ export const finishMethods = {
       if (xp.level > xp.prevLevel) setTimeout(() => app.ui.flash(t('⬆ Niveau {n} !', { n: xp.level }), 3), 400);
     }
     app.checkRewards();
+    if (app.noteCareerEnd && this.opts.builtinIndex != null) app.noteCareerEnd();      // COMPLETE-013 : carrière terminée / épreuve finale à finir
     app.ui.showFinish({
       xp: xp ? { ...xp, ...levelOf(profile().xp) } : null,
       goal,

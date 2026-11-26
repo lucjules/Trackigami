@@ -148,8 +148,11 @@ export const screenMethods = {
       box.innerHTML = `<div class="cs-main"><b>${sm.pct} %</b><span>de la carrière</span></div>
         <div class="cs-bar"><i style="width:${sm.pct}%"></i></div>
         <div class="cs-stats">${sm.medals} / ${sm.total} médailles · ${sm.crystal} cristal · ${sm.goals} / ${sm.total} objectifs bonus</div>
-        ${sm.complete ? `<p class="cs-msg">✦ Carrière complète : ${sm.total} cristaux et ${sm.total} objectifs. Il n’y a plus rien à finir ici.</p>` : sm.finished ? '<p class="cs-msg">🏁 Carrière terminée : une médaille sur chaque circuit. Reste les cristaux et les objectifs bonus.</p>' : ''}`;
+        ${sm.complete ? `<p class="cs-msg">✦ Carrière complète : ${sm.total} cristaux et ${sm.total} objectifs. Bravo !</p>` : sm.finished ? '<p class="cs-msg">🏁 Carrière terminée : une médaille sur chaque circuit. Reste les cristaux et les objectifs bonus.</p>' : ''}`;
+      const endBtn = this._careerEndButton();      // (COMPLETE-013) l'épreuve finale à finir, ou la conclusion à revoir
+      if (endBtn) box.appendChild(endBtn);
       list.appendChild(box);
+      this._maybeShowEnding();      // la conclusion de la carrière s'ouvre d'elle-même la toute première fois
     }
     // 0.15.0 : « Continuer la carrière » : le prochain circuit ouvert sans médaille (sinon le premier sans cristal), en un clic.
     {
