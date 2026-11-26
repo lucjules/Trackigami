@@ -3,7 +3,7 @@
 // éléments visuels du garage (tools/test-progression.mjs le vérifie). L'expérience vient des COURSES TERMINÉES et des OBJECTIFS atteints, jamais du
 // temps passé dans les menus ; les arrivées répétées sur le même circuit, le même jour, ne rapportent presque rien.
 //
-// Profil : xp (entier), licences { id: date de l'obtention }, mastery { cléCircuit: bits }, xpDay { day, keys } (premières arrivées du jour, local).
+// Profil : xp (entier), endSeen (date de la première conclusion de carrière vue : ending.js), licences { id: date de l'obtention }, mastery { cléCircuit: bits }, xpDay { day, keys } (premières arrivées du jour, local).
 // Fusion cloud (mergeProgress) : expérience au maximum, licences réunies (la date la plus ancienne), maîtrise réunie (OU bit à bit).
 import { profile, saveProfile } from './profile.js';
 
@@ -172,6 +172,9 @@ export function mergeProgress(a, b) {
       if (d.length) out.licences[L.id] = Math.min(...d);
     }
   }
+  // Conclusion de la carrière déjà vue (COMPLETE-013, js/ending.js) : la plus ancienne date, pour qu'elle ne s'affiche pas de nouveau sur l'autre appareil.
+  const ea = [a.endSeen, b.endSeen].filter((x) => Number.isFinite(+x) && +x > 0).map(Number);
+  if (ea.length) out.endSeen = Math.min(...ea);
   const ma = masteryOfP(a), mb = masteryOfP(b);
   if (Object.keys(ma).length || Object.keys(mb).length) {
     out.mastery = {};
