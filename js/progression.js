@@ -31,7 +31,9 @@ export function levelOf(xp) {
 }
 
 // Récompenses de niveau : des éléments EXCLUSIFS du garage (ils ne s'achètent pas ; voir rewards.js, qui les donne).
-export const LEVEL_REWARDS = [[5, 'led', 'mint'], [10, 'trail', 'violet'], [20, 'led', 'pale'], [30, 'trail', 'plasma']];
+// COMPLETE-016 : une récompense tous les 5 niveaux, du 5 au 50 (avant : 5, 10, 20, 30). Les quatre premières sont inchangées. Un joueur qui a déjà dépassé un palier reçoit ce qui lui manque
+// au prochain contrôle (rewards.grantRewards : « niveau atteint », pas « niveau franchi » ; rien n'est donné deux fois, rien n'est retiré).
+export const LEVEL_REWARDS = [[5, 'led', 'mint'], [10, 'trail', 'violet'], [15, 'trail', 'azure'], [20, 'led', 'pale'], [25, 'led', 'ruby'], [30, 'trail', 'plasma'], [35, 'trail', 'jade'], [40, 'led', 'aurum'], [45, 'trail', 'nova'], [50, 'led', 'diamond']];
 
 // ---- Défis de maîtrise : quatre par circuit de la carrière --------------------------------------------------------------------------------
 export const MASTERY = [

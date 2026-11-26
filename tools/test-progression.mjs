@@ -124,8 +124,46 @@ test('récompenses de niveau : des éléments exclusifs du garage, visuels, grat
   }
   reset();
   assert.deepEqual(grantRewards({ ...emptyContext(), level: 9 }).exclusives.map((e) => e.id).sort(), ['mint']);
-  assert.deepEqual(grantRewards({ ...emptyContext(), level: 30 }).exclusives.map((e) => e.id).sort(), ['pale', 'plasma', 'violet']);
+  assert.deepEqual(grantRewards({ ...emptyContext(), level: 30 }).exclusives.map((e) => e.id).sort(), ['azure', 'pale', 'plasma', 'ruby', 'violet']);
   assert.ok(owns('trail', 'plasma'));
+  reset();
+});
+test('COMPLETE-016 : une récompense tous les 5 niveaux, du 5 au 50 ; les quatre d’origine inchangées ; chacune est une couleur visible (aucun effet sur la course)', () => {
+  assert.deepEqual(LEVEL_REWARDS.map((r) => r[0]), [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]);
+  assert.deepEqual(LEVEL_REWARDS.filter((r) => [5, 10, 20, 30].includes(r[0])).map((r) => r.slice(1).join(':')), ['led:mint', 'trail:violet', 'led:pale', 'trail:plasma'], 'les quatre d’origine gardent leur objet');
+  assert.equal(new Set(LEVEL_REWARDS.map((r) => r[1] + ':' + r[2])).size, LEVEL_REWARDS.length, 'aucun objet donné à deux niveaux');
+  assert.ok(Math.max(...LEVEL_REWARDS.map((r) => r[0])) <= MAX_LEVEL);
+  for (const [, cat, id] of LEVEL_REWARDS) assert.match(CATALOG[cat].find((x) => x.id === id).color, /^#[0-9a-f]{6}$/i);
+});
+test('COMPLETE-016 : un joueur de niveau 42 reçoit d’un coup les paliers jusqu’à 40, sans doublon, et rien au-delà ; un second contrôle ne donne plus rien', () => {
+  reset();
+  const r = grantRewards({ ...emptyContext(), level: 42 });
+  assert.deepEqual(r.exclusives.map((e) => e.cat + ':' + e.id).sort(), LEVEL_REWARDS.filter((x) => x[0] <= 40).map((x) => x[1] + ':' + x[2]).sort());
+  assert.equal(r.exclusives.length, 8);
+  assert.ok(!owns('trail', 'nova') && !owns('led', 'diamond'));
+  assert.deepEqual(grantRewards({ ...emptyContext(), level: 42 }).exclusives, [], 'aucun doublon');
+  assert.equal(Object.keys(profile().owned).filter((k) => /^(led|trail):/.test(k)).length, 8);
+  assert.deepEqual(grantRewards({ ...emptyContext(), level: 45 }).exclusives.map((e) => e.id), ['nova'], 'le palier suivant s’ajoute');
+  reset();
+});
+test('COMPLETE-016 : un nouveau joueur reçoit chaque récompense au niveau voulu, au fil de l’expérience (addXp puis contrôle)', () => {
+  reset();
+  const got = [];
+  for (let L = 1; L <= MAX_LEVEL; L++) {
+    addXp(Math.max(0, xpForLevel(L) - profile().xp));
+    const r = grantRewards({ ...emptyContext(), level: levelOf(profile().xp).level });
+    for (const e of r.exclusives) got.push([L, e.cat + ':' + e.id]);
+  }
+  assert.deepEqual(got, LEVEL_REWARDS.map(([l, c, i]) => [l, c + ':' + i]));
+  reset();
+});
+test('COMPLETE-016 : un joueur qui a déjà une récompense (acquise avant) ne perd rien ; la fusion de deux appareils réunit les objets', () => {
+  const a = reset({ owned: { 'led:mint': 1, 'body:sport': 1 } });
+  grantRewards({ ...emptyContext(), level: 20 });
+  const pa = JSON.parse(JSON.stringify(profile()));
+  const m = mergeProfile({ ...pa, owned: { ...pa.owned, 'led:pale': 1 } }, { ...pa, owned: { 'trail:jade': 1, 'led:diamond': 1 } });
+  for (const k of ['led:mint', 'trail:violet', 'trail:azure', 'led:pale', 'trail:jade', 'led:diamond', 'body:sport']) assert.equal(m.owned[k], 1, k);
+  assert.equal(a, profile());
   reset();
 });
 test('aucun module de la simulation ni de la vérification serveur n’importe le profil, la progression, le garage ou le stockage', () => {
