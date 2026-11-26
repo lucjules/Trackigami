@@ -1,0 +1,86 @@
+{
+ "zenith": {
+  "start": 35.03,
+  "hold": 0.6,
+  "lock": 1,
+  "count": 2
+ },
+ "metro": {
+  "start": 41.38,
+  "hold": 0.6,
+  "lock": 1,
+  "count": 2
+ },
+ "basalte": {
+  "start": 30.56,
+  "hold": 0.7,
+  "lock": 1,
+  "count": 2
+ },
+ "usinefolle": {
+  "start": 33,
+  "hold": 0.6,
+  "lock": 1,
+  "count": 2
+ },
+ "glacier": {
+  "start": 38.38,
+  "hold": 0.7,
+  "lock": 1,
+  "count": 2
+ },
+ "laminoir": {
+  "start": 33.21,
+  "hold": 0.7,
+  "lock": 1,
+  "count": 2
+ },
+ "corail": {
+  "start": 27.07,
+  "hold": 0.6,
+  "lock": 1,
+  "count": 1
+ },
+ "blizzard": {
+  "start": 31.96,
+  "hold": 0.6,
+  "lock": 1,
+  "count": 1
+ },
+ "rafales": {
+  "start": 33.65,
+  "hold": 0.6,
+  "lock": 1,
+  "count": 1
+ },
+ "plafond": {
+  "start": 30.75,
+  "hold": 0.6,
+  "lock": 1,
+  "count": 1
+ },
+ "coeur": {
+  "start": 22.87,
+  "hold": 0.6,
+  "lock": 1,
+  "count": 1
+ },
+ "temple": {
+  "start": 35.62,
+  "hold": 0.6,
+  "lock": 1,
+  "count": 1
+ },
+ "givre": {
+  "start": 19.15,
+  "hold": 0.7,
+  "lock": 1,
+  "count": 2
+ },
+ "verglas": {
+  "start": 6,
+  "hold": 0.6,
+  "lock": 1,
+  "count": 2
+ }
+}
