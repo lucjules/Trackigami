@@ -3,7 +3,7 @@
 Jeu de course contre-la-montre **low-poly** dans le navigateur, avec éditeur de circuits.
 C'est un jeu original : décors, véhicules, pièces, musique et circuits ont été conçus pour ce projet.
 
-Version actuelle : **bêta 0.21.0** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
+Version actuelle : **bêta 0.22.0** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
 
 ## Jouer
 
@@ -165,6 +165,7 @@ Le jeu marche entièrement hors ligne ; les fonctions en ligne utilisent un proj
 19. **Avis des testeurs** : `supabase/etape19-avis.sql` (suppose l'étape 18) : la table des avis envoyés par Paramètres › Donner mon avis.
 20. **Droits suivis et règles alignées** : `supabase/etape20-droits-et-regles.sql` (suppose les étapes 1 à 19 ; à lancer **avant** de redéployer `submit-score`).
 21. **Code de secours** : `supabase/etape21-recuperation.sql` (suppose les étapes 1 à 20), puis la fonction serveur `account-recovery` (`npm run build:function`, ou le workflow `deploiement.yml`) : récupérer un compte sans courriel. Détail : `supabase/COMPTES.md`.
+22. **Modération** : `supabase/etape22-moderation.sql` (suppose les étapes 1 à 21 ; relançable, ne supprime rien en s'appliquant, **à lancer À LA MAIN**, procédure et vérifications dans `supabase/MIGRATIONS.md`) : la file des contenus signalés, masquer / rétablir un circuit ou un commentaire, suspendre / réactiver un compte (publier et commenter seulement), journal des décisions ; chaque fonction `mod_*` refuse d'abord tout non-modérateur. Les modérateurs sont ajoutés à la main (`supabase/COMPTES.md`, « Modérateurs »). Le jeu 0.22.0 fonctionne sans elle (l'écran n'apparaît alors pour personne). Facultatif : redéployer `submit-score` pour que le refus d'un compte suspendu qui publie soit expliqué.
 
 Étapes suivantes (21 étapes numérotées en tout, détail, ordre, preuves et retour arrière : **`supabase/MIGRATIONS.md`** ; chacune se joue à la main dans le SQL Editor, puis `supabase/verify-prod.sql` en prouve l'état) :
 
