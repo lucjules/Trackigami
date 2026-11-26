@@ -247,6 +247,7 @@ export const DEFAULT_SETTINGS = {
   showFps: false,
   tutorialDone: false,
   ghostGold: true,
+  ghostMedal: 'next',    // quel fantôme de médaille : 'next' = la prochaine médaille à gagner (bronze → cristal), 'or' = toujours l'or (ghostTarget.js)
   ghostImported: true,
   onlineScores: true,
   ui: {},                 // thème et disposition de l'interface (uitheme.js)

@@ -2,7 +2,8 @@
 // Ces méthodes s'ajoutent au prototype de RaceSession (voir race.js) : `this` est l'instance.
 import * as THREE from '../vendor/three.module.min.js';
 import { createCar } from '../carModel.js';
-import { getRecord, getImportedGhost } from '../storage.js';
+import { getRecord, getImportedGhost, medalTime } from '../storage.js';
+import { ghostTarget } from '../ghostTarget.js';
 import { GhostRunner, newGhostPose } from '../replay.js';
 import { PHYS_VER } from '../version.js';
 import { parseGhost } from '../ghostFormat.js';
@@ -20,9 +21,11 @@ export const ghostMethods = {
       app.scene.add(car.group);
       this.ghosts.push({ runner, car, label, q: new THREE.Quaternion(), pq: new THREE.Quaternion(), pose: newGhostPose(), pose0: newGhostPose() });
     };
+    // COMPLETE-009 : le fantôme de la PROCHAINE médaille (bronze → argent → or → cristal), à son rythme calibré (ghostTarget.js) ; réglage « toujours l'or » : le fantôme or d'avant.
+    // Pur affichage : ni le record, ni le classement, ni l'enregistrement de la course, ni la télémétrie n'en savent rien (c'est une seconde simulation, indépendante de la course).
     const rec = this.trackKey ? getRecord(this.trackKey) : null;
-    const goldNotYet = this.medals && (!rec || rec.time > this.medals.or + 1e-6);
-    if (s.ghostGold !== false && this.track.path && goldNotYet) add(new GhostRunner(this.track, { bot: true, latK: 0.8 }), '#ffd23e', 'Or');
+    const target = s.ghostGold !== false && this.track.path && this.medals ? ghostTarget({ trackKey: this.trackKey, medals: this.medals, best: rec ? medalTime(rec) : null, mode: s.ghostMedal }) : null;
+    if (target) add(new GhostRunner(this.track, { bot: true, latK: 0.8, pace: target.pace }), target.color, target.label);
     const imp = this.trackKey && s.ghostImported !== false ? getImportedGhost(this.trackKey) : null;
     if (imp && imp.v === PHYS_VER) add(new GhostRunner(this.track, { inputs: imp.inputs }), '#c77dff', imp.name);
   },

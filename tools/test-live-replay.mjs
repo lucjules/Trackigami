@@ -22,6 +22,8 @@ import { Track } from '../js/track.js';
 import { replayRun, verifyRun } from '../js/verify.js';
 import { GhostRunner } from '../js/replay.js';
 import { PHYS_VER } from '../js/version.js';
+import { ghostTarget } from '../js/ghostTarget.js';
+import { BUILTIN_TRACKS } from '../js/tracks.js';
 
 const require = createRequire(import.meta.url);
 const REQUIRED = !!(process.env.CI || process.env.REQUIRE_BROWSER);
@@ -278,6 +280,40 @@ try {
       const d = await finishRace();
       assert.equal(d.inputRespawns, 0);
       compareLiveToReplay(d);
+    } finally { await release(); }
+  });
+
+  // COMPLETE-009 : le fantôme de la médaille suivante est de l'affichage pur. La même course (mêmes commandes bruitées, graine fixe) avec le fantôme puis sans : mêmes commandes
+  // enregistrées, même temps, même record sur le disque ; le fantôme tourne pendant la course ; la session suivante monte le fantôme de la médaille d'après.
+  await pageTest('fantôme de médaille : « Premiers Éclats » avec puis sans fantôme (mêmes commandes) → même record enregistré, mêmes commandes, même temps ; le fantôme avance pendant la course ; la session suivante monte le fantôme de la médaille suivante', async () => {
+    const one = async (ghostOn) => {
+      await page.evaluate(async (on) => { const A = window.copytrack, { clearRecords } = await import('/js/storage.js'); clearRecords(); A.settings.ghostGold = on; A.settings.ghostMedal = 'next'; A.saveSettings(); }, ghostOn);
+      await launch('eclats', 5);
+      try {
+        await advance(1);
+        await advance(700);
+        const g1 = await page.evaluate(() => window.__lr.S.ghosts.map((g) => ({ label: g.label, visible: g.car.group.visible, x: g.car.group.position.x, z: g.car.group.position.z })));
+        await advance(900);
+        const g2 = await page.evaluate(() => window.__lr.S.ghosts.map((g) => ({ x: g.car.group.position.x, z: g.car.group.position.z })));
+        const d = await finishRace();
+        const rec = await page.evaluate(async () => { const { getRecord } = await import('/js/storage.js'), r = getRecord(window.__lr.key); return r ? { time: r.time, inputs: r.inputs, splits: r.splits } : null; });
+        return { d, rec, g1, g2 };
+      } finally { await release(); }
+    };
+    const on = await one(true), off = await one(false);
+    assert.equal(on.g1.length, 1, 'le fantôme de médaille est monté'); assert.equal(on.g1[0].label, 'Bronze', 'aucun record : la première médaille à gagner'); assert.equal(off.g1.length, 0, 'réglage coupé : aucun fantôme');
+    assert.ok(on.g1[0].visible, 'le fantôme est visible en course'); assert.ok(Math.hypot(on.g2[0].x - on.g1[0].x, on.g2[0].z - on.g1[0].z) > 20, 'le fantôme avance pendant la course');
+    assert.equal(on.d.inputs, off.d.inputs, 'mêmes commandes enregistrées'); assert.equal(on.d.time, off.d.time, 'même temps'); assert.deepEqual(on.d.splits, off.d.splits, 'mêmes temps intermédiaires');
+    assert.ok(on.rec && off.rec, 'un record est enregistré dans les deux cas'); assert.deepEqual(on.rec, off.rec, 'le même record, avec ou sans fantôme');
+    compareLiveToReplay(on.d);
+    // La session suivante (le record de la première course est en place) : le fantôme est celui de la médaille d'après.
+    await page.evaluate(() => { const A = window.copytrack; A.settings.ghostGold = true; A.saveSettings(); });
+    await page.evaluate(async (rec) => { const { saveRecord } = await import('/js/storage.js'); saveRecord(window.copytrack.builtins.find((b) => b.def.id === 'eclats').key, { time: rec.time, splits: rec.splits, inputs: rec.inputs, pv: 0, date: 1 }); }, on.rec);
+    await launch('eclats', 5);
+    try {
+      const label = await page.evaluate(() => (window.__lr.S.ghosts[0] || {}).label || null);
+      const want = ghostTarget({ trackKey: on.d.key, medals: BUILTIN_TRACKS.find((d) => d.id === 'eclats').medals, best: on.rec.time });
+      assert.equal(label, want ? want.label : null, `après un record de ${on.rec.time.toFixed(2)} s : le fantôme de la médaille suivante`);
     } finally { await release(); }
   });
 

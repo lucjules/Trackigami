@@ -196,6 +196,7 @@ export const settingsMethods = {
     this._renderQualityInfo();
     $('opt-ghost').checked = s.ghost;
     $('opt-ghostgold').checked = s.ghostGold !== false;
+    $('opt-ghostmedal').value = s.ghostMedal === 'or' ? 'or' : 'next';
     $('opt-ghostimp').checked = s.ghostImported !== false;
     $('opt-onlinescores').checked = s.onlineScores !== false;
     $('opt-telemetry').checked = s.telemetry === true;

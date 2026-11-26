@@ -50,6 +50,7 @@ export const wiringMethods = {
     });
     $('opt-ghost').addEventListener('change', (e) => { this.settings.ghost = e.target.checked; this.saveSettings(); });
     $('opt-ghostgold').addEventListener('change', (e) => { this.settings.ghostGold = e.target.checked; this.saveSettings(); });
+    $('opt-ghostmedal').addEventListener('change', (e) => { this.settings.ghostMedal = e.target.value === 'or' ? 'or' : 'next'; this.saveSettings(); });
     $('opt-ghostimp').addEventListener('change', (e) => { this.settings.ghostImported = e.target.checked; this.saveSettings(); });
     $('opt-onlinescores').addEventListener('change', (e) => { this.settings.onlineScores = e.target.checked; this.saveSettings(); });
     $('opt-telemetry').addEventListener('change', (e) => this.setTelemetry(e.target.checked));
