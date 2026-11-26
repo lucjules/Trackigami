@@ -8,6 +8,7 @@
 //    exercices de l'Académie : meilleur niveau et meilleure mesure ; mutations du jour réunies, meilleure série au maximum ;
 //    expérience au maximum, licences réunies (date la plus ancienne), défis de maîtrise réunis ; écran de fin de carrière vu : la date la plus ancienne (careerEnd) ; objectifs bonus réunis ; titre : le dernier choisi ;
 //    premières arrivées du jour : le jour le plus récent (circuits réunis) ;
+//    mécaniques découvertes (mech, mechanics.js : COMPLETE-007) : union, au plus haut niveau ;
 //  - dernières courses (runs.*) : réunies, les plus récentes gardées.
 import { mergeWallets, balance } from './wallet.js';
 import { mergeFavorites } from './favorites.js';
@@ -15,6 +16,7 @@ import { cleanRuns, validRecord, validTrackEntry, isTrialName } from './storage.
 import { mergeDrills } from './skills.js';
 import { mergeProgress } from './progression.js';
 import { mergeCareerEnd } from './careerEnd.js';
+import { mergeMech } from './mechanics.js';
 
 // Ce qui suit un compte d'un appareil à l'autre : progression, circuits créés, records. Les réglages
 // (volume, touches, qualité...) restent propres à chaque appareil, le brouillon de l'éditeur aussi.
@@ -110,11 +112,12 @@ export function mergeProfile(local, remote) {
   const daily2 = a.mutDays || b.mutDays || a.dailyBest || b.dailyBest ? { mutDays, dailyBest: Math.max(num(a.dailyBest), num(b.dailyBest)) } : {};   // meilleure série : au maximum
   const presets = Array.isArray(a.presets) && a.presets.some(Boolean) ? a.presets : (Array.isArray(b.presets) ? b.presets : a.presets);
   const fav = (a.favorites || b.favorites || a.favDel || b.favDel) ? mergeFavorites(a, b) : {};      // favoris du Race Hub (favorites.js)
+  const mech = a.mech !== undefined || b.mech !== undefined ? { mech: mergeMech(a.mech, b.mech) } : {};      // mécaniques découvertes (mechanics.js) : union, niveau au maximum
   const drills = a.drills || b.drills ? { drills: mergeDrills(a.drills, b.drills) } : {};         // exercices de l'Académie (skills.js) : meilleur niveau, meilleure mesure
   // Pièces (TECH-029) : modèle additif (js/wallet.js : compteurs par appareil, achats et cadeaux réunis) ; un profil sans portefeuille (ancien client, ancienne sauvegarde)
   // y entre par sa ligne de base, fusionnée par l'ancienne règle (le plus favorable, moins le prix de ce qu'il n'avait pas ; jamais le prix d'un cadeau).
   const out = {
-    ...b, ...a, ...fav, ...drills, ...daily2, ...mergeProgress(a, b), ...mergeCareerEnd(a, b), ...title, ...xpDay,
+    ...b, ...a, ...fav, ...drills, ...mech, ...daily2, ...mergeProgress(a, b), ...mergeCareerEnd(a, b), ...title, ...xpDay,
     id: b.id || a.id,                    // l'identifiant du joueur reste celui du compte
     owned, medals, eggs, shards, stats, presets, academy, collections, dailyDays, titlesSeen, ...(a.goals || b.goals ? { goals } : {}),
     loadout: a.loadout || b.loadout,     // l'appareil courant garde sa personnalisation
