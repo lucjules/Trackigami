@@ -82,6 +82,8 @@ function explain1(status, body, retryAfter = null) {
     return new OnlineError('Fonction « submit-score » introuvable sur le serveur.', 'no-function');
   }
   if (/Trop de publications/.test(msg)) return new OnlineError(msg, 'rate');
+  // Compte suspendu par la modération (étape SQL 22) : publier et commenter sont refusés ; le message de la base dit jusqu'à quand (HTTP 400 d'une fonction, 403 de la fonction de publication).
+  if (/^Compte suspendu/.test(msg)) return new OnlineError(msg, 'suspended');
   if (status === 429 && /Trop de courses/.test(msg)) return rateError(body, retryAfter, msg, 'Trop de courses envoyées : réessaie dans un instant.');
   // Comptes (Supabase Auth)
   const ec = (body && (body.error_code || body.code)) || '';

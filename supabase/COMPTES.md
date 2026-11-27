@@ -234,3 +234,34 @@ Ne jamais copier un jeton ni un code dans un ticket, une capture ou un journal.
 8. **Essai de bout en bout** avec un compte de test : inscription (code montré), connexion ailleurs, changement de mot de passe, récupération avec le code (connecté, nouveau code montré), second usage du même code refusé,
    6 mauvais essais : verrou ; puis supprimer le compte de test (*Supprimer le compte* ; son code part avec lui).
 
+
+## Modérateurs : qui l'est, comment en ajouter ou en retirer, ce que la modération voit (COMPLETE-004, étape 22)
+
+**Rien de ceci n'a été exécuté sur la production** par l'auteur de ce dépôt : l'étape SQL 22 (`supabase/etape22-moderation.sql`, procédure et vérifications dans `supabase/MIGRATIONS.md`) est à appliquer À LA MAIN, puis `supabase/verify-prod.sql` à lire.
+
+**Qui est modérateur** : un compte (ou une session) dont l'identifiant figure dans la table `public.moderators` (étape 13). Cette table n'est lisible ni modifiable depuis le jeu (aucun droit pour `anon` ni `authenticated`) : **on n'ajoute un modérateur qu'à la main**, dans le *SQL Editor* de Supabase (rôle propriétaire). Le statut suit l'**identifiant** : choisir un **compte** (pseudo + mot de passe), pas une session invitée, dont l'identifiant change si le navigateur est vidé et qui ne se retrouve pas sur un autre appareil.
+
+**Ajouter un modérateur** (le compte doit exister : il s'est créé depuis le jeu ; son profil de pilote se crée à sa première action en ligne) :
+
+```sql
+-- 1. retrouver l'identifiant du compte par son pseudo
+select a.user_id, a.username from public.accounts a where a.username_lower = lower('PseudoDuModerateur');
+-- 2. l'ajouter (relançable : sans effet s'il l'est déjà)
+insert into public.moderators (user_id) values ('<user_id lu à l''étape 1>') on conflict do nothing;
+```
+
+**Vérifier** : se connecter au jeu avec CE compte › Jouer › Circuits de la communauté : le bouton « 🛡 Modération » apparaît (jusqu'à 5 minutes de mémoire locale du statut : rouvrir l'écran de la communauté ou recharger la page). Avec un **autre** compte : il n'apparaît pas. Les lignes « étape 22 » de `verify-prod.sql` en donnent le nombre (`select count(*) from public.moderators`).
+
+**Retirer un modérateur** (il perd l'accès immédiatement côté base ; son bouton disparaît à la prochaine ouverture de la communauté) :
+
+```sql
+delete from public.moderators where user_id = '<user_id>';
+```
+
+Ce `delete` est une opération d'**administration manuelle** (une ligne de la liste des modérateurs) ; aucune fonction du jeu ni aucune étape SQL ne supprime de modérateur. Les décisions déjà prises par ce modérateur restent au journal (son identifiant y devient `NULL` seulement si son compte est supprimé).
+
+**Ce qu'un modérateur voit** (le contrôle est dans la base, fonction par fonction : `tools/test-etape22-sql.sh`) : le texte **public** d'un circuit ou d'un commentaire signalé (nom, description, commentaire), le pseudo et l'identifiant publics de son auteur, le **nombre** et la **date** des signalements et s'ils comptent pour le masquage automatique, les décisions déjà prises, les suspensions, le journal. Il ne voit **jamais qui a signalé** (la base ne renvoie aucun identifiant de signalant ; la colonne existe, dans les tables `track_reports` et `comment_reports`, fermées au jeu : seul le propriétaire du projet, depuis le SQL Editor, peut la lire). Les signalements n'ont **pas de motif** : le jeu n'en demande pas (un joueur signale sans choisir de raison) ; le seul motif est celui, obligatoire, que le modérateur écrit pour sa propre décision.
+
+**Ce qu'un modérateur peut faire** : masquer / rétablir un circuit ou un commentaire (rien n'est supprimé ; le contenu masqué reste visible de son auteur), suspendre / réactiver un compte (publier et commenter seulement ; temps et classements intacts), tout avec un motif, tout au journal. Un modérateur ne peut pas se suspendre ni suspendre un autre modérateur. **Hors du journal** : ce que les étapes précédentes donnent déjà à un modérateur et que l'écran n'utilise pas : supprimer le commentaire de quelqu'un d'autre (`comment_delete`) ou un mode publié (`mode_delete`), et choisir la Sélection (`pick_track`). Ces trois fonctions ne passent pas par le journal : à ne pas utiliser pour modérer (masquer, c'est réversible et journalisé).
+
+**À vérifier sur un VRAI projet** (ce dépôt ne peut pas l'éprouver : les tests SQL tournent sur un PostgreSQL local avec un faux schéma `auth`) : qu'un jeton de session invitée ou de compte non modérateur reçoit bien `403` « Réservé aux modérateurs. » sur `POST /rest/v1/rpc/mod_queue` (et `mod_status` répond `false`) ; que la clé publique seule (sans session) reçoit un refus de droit sur toutes les fonctions `mod_*`.

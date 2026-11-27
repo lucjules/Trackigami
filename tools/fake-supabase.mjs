@@ -28,11 +28,83 @@ device('A');
 //                   la fonction rpc/account_conversion_ready répond vrai (ou srv.convertReady, pour simuler un projet mal réglé) ; absente sinon (PGRST202) ;
 //   recovery        code de secours (supabase/etape21-recuperation.sql + fonction account-recovery) : rpc recovery_status / recovery_code_new (exige un jeton ISSU D'UNE CONNEXION PAR MOT DE PASSE,
 //                   comme la revendication `amr` de la base), /auth/v1/logout, /functions/v1/account-recovery (échec UNIQUE, usage unique, sessions révoquées) ; absentes sinon (PGRST202 / 404) ;
+//   moderation      étape 22 (supabase/etape22-moderation.sql) : rpc mod_status / mod_queue / mod_detail / mod_reports / mod_set_*_hidden / mod_suspend / mod_unsuspend / mod_suspensions / mod_log,
+//                   avec les MÊMES règles que la base : un non-modérateur reçoit 403 « Réservé aux modérateurs. » (mod_status répond faux), motif de 3 à 300 caractères, « déjà masqué », pas de
+//                   suspension d'un modérateur ni de soi-même, journal tenu ; absentes sans l'option (PGRST202). L'état est `srv.mod` (voir resetModeration).
 //   autoconfirm     /auth/v1/settings : « Confirm email » désactivé (vrai par défaut, comme le demande supabase/COMPTES.md).
 // Données en ligne simulées : scores (clé circuit:joueur), circuits publiés (par code), j'aime (joueur:circuit), via la fonction submit-score et les RPC.
 export const srv = { users: new Map(), tokens: new Map(), refresh: new Map(), saves: new Map(), accounts: new Map(), players: new Map(), calls: [], refreshFails: false, refreshStatus: 0, offline: false, beforeNextPatch: null, n: 0, delay: {},
   singleUse: false, reuseRevokes: false, convertSupport: false, autoconfirm: true, scores: new Map(), tracks: new Map(), likes: new Set(), revoked: new Set(),
-  recovery: false, recoveryCodes: new Map(), recoveryUsed: new Map(), pwTokens: new Set(), codeSeq: 0, logouts: [], recoveryCalls: [] };
+  recovery: false, recoveryCodes: new Map(), recoveryUsed: new Map(), pwTokens: new Set(), codeSeq: 0, logouts: [], recoveryCalls: [], moderation: false, mod: null };
+// État de la modération simulée : modérateurs (identifiants), contenus signalés, journal, suspensions. `items` : { kind, id, label, author, author_name, reports, counted, hidden, created_at,
+// last_report_at, seen (signalements vus à la dernière décision), description, plays, likes, report_dates }.
+export function resetModeration({ moderators = [], items = [], suspensions = [] } = {}) {
+  srv.moderation = true;
+  srv.mod = { moderators: new Set(moderators), items: items.map((i) => ({ reports: 0, counted: 0, hidden: false, seen: 0, created_at: '2026-11-20T10:00:00Z', last_report_at: null, plays: 0, likes: 0, report_dates: [], description: '', ...i })),
+    log: [], suspensions: suspensions.map((x, n) => ({ id: n + 1, created_at: '2026-11-21T10:00:00Z', until: null, lifted_at: null, ...x })), calls: [], seq: 100 };
+  return srv.mod;
+}
+const WHY = 'Un motif de 3 à 300 caractères est obligatoire.';
+function moderationRpc(fn, body, user) {
+  const m = srv.mod;
+  m.calls.push({ fn, body, user: user.id });
+  if (fn === 'mod_status') return json(200, m.moderators.has(user.id));
+  if (!m.moderators.has(user.id)) return json(403, { code: '42501', message: 'Réservé aux modérateurs.' });
+  const bad = (message) => json(400, { code: 'P0001', message });
+  const page = (rows) => rows.slice(Math.max(0, body.off | 0), Math.max(0, body.off | 0) + Math.min(100, Math.max(1, body.lim ?? 30)));
+  const find = (kind, id) => m.items.find((i) => i.kind === kind && String(i.id) === String(id));
+  const active = (x) => !x.lifted_at && (!x.until || Date.parse(x.until) > Date.now());
+  const logPush = (action, kind, target, reason, extra = {}) => m.log.unshift({ id: ++m.seq, at: new Date().toISOString(), actor_name: m.names?.[m.actor] || 'Moi', action, kind, target: String(target), target_name: null, reason, reports_seen: null, ...extra });
+  const authorOf = (i) => ({ id: i.author, name: i.author_name, tracks: 1, hidden_tracks: 0, hidden_comments: 0, moderator: m.moderators.has(i.author), suspension: (() => { const x = m.suspensions.find((y) => y.user_id === i.author && active(y)); return x ? { id: x.id, reason: x.reason, until: x.until } : null; })() });
+  m.actor = user.id;
+  if (fn === 'mod_queue') {
+    if (!['all', 'track', 'comment'].includes(body.k)) return bad('Type inconnu.');
+    if (!['pending', 'hidden', 'all'].includes(body.st)) return bad('État inconnu.');
+    const rows = m.items.filter((i) => (body.k === 'all' || i.kind === body.k) && (i.reports > 0 || i.hidden)).map((i) => ({ ...i, pending: i.reports > i.seen }))
+      .filter((i) => (body.st === 'pending' ? i.pending : body.st === 'hidden' ? i.hidden : true));
+    return json(200, page(rows).map((i) => ({ kind: i.kind, id: String(i.id), label: i.label, author: i.author, author_name: i.author_name, reports: i.reports, counted: i.counted, hidden: i.hidden, created_at: i.created_at, last_report_at: i.last_report_at, pending: i.pending })));
+  }
+  if (fn === 'mod_detail' || fn === 'mod_reports') {
+    const i = find(body.k, body.tid);
+    if (!i) return bad('Contenu introuvable.');
+    if (fn === 'mod_reports') return json(200, i.report_dates.map((d) => ({ reported_at: d, counted: true })));
+    const hist = m.log.filter((l) => l.kind === i.kind && l.target === String(i.id)).slice(0, 20);
+    return json(200, { kind: i.kind, id: i.id, name: i.label, body: i.label, description: i.description, plays: i.plays, likes: i.likes, reports: i.reports, counted: i.counted, hidden: i.hidden, created_at: i.created_at,
+      track: i.kind === 'comment' ? { id: 't0', name: 'Circuit du commentaire', hidden: false } : undefined, author: authorOf(i), history: hist });
+  }
+  if (fn === 'mod_set_track_hidden' || fn === 'mod_set_comment_hidden') {
+    const kind = fn === 'mod_set_track_hidden' ? 'track' : 'comment', id = kind === 'track' ? body.t : body.c, why = String(body.why || '').trim();
+    if (why.length < 3 || why.length > 300) return bad(WHY);
+    const i = find(kind, id);
+    if (!i) return bad(kind === 'track' ? 'Circuit introuvable.' : 'Commentaire introuvable.');
+    if (i.hidden === !!body.hide) return bad(kind === 'track' ? (body.hide ? 'Ce circuit est déjà masqué.' : 'Ce circuit est déjà visible.') : (body.hide ? 'Ce commentaire est déjà masqué.' : 'Ce commentaire est déjà visible.'));
+    i.hidden = !!body.hide; i.seen = i.reports;
+    logPush(body.hide ? 'hide' : 'restore', kind, id, why, { reports_seen: i.reports });
+    return json(200, null);
+  }
+  if (fn === 'mod_suspend' || fn === 'mod_unsuspend') {
+    const why = String(body.why || '').trim();
+    if (why.length < 3 || why.length > 300) return bad(WHY);
+    const cur = m.suspensions.find((x) => x.user_id === body.u && active(x));
+    if (fn === 'mod_unsuspend') {
+      if (!cur) return bad('Ce compte n’est pas suspendu.');
+      cur.lifted_at = new Date().toISOString(); cur.lift_reason = why; logPush('unsuspend', 'account', body.u, why);
+      return json(200, null);
+    }
+    if (body.u === user.id) return bad('On ne se suspend pas soi-même.');
+    if (m.moderators.has(body.u)) return bad('Un modérateur ne se suspend pas : retire d’abord son statut.');
+    if (body.until_at && (Date.parse(body.until_at) <= Date.now())) return bad('La date de fin doit être dans le futur, et dans moins de 10 ans.');
+    if (cur) return bad('Ce compte est déjà suspendu : réactive-le d’abord pour changer la suspension.');
+    const row = { id: ++m.seq, user_id: body.u, name: (m.items.find((i) => i.author === body.u) || {}).author_name || null, reason: why, created_at: new Date().toISOString(), until: body.until_at || null, lifted_at: null, created_by_name: 'Moi' };
+    m.suspensions.push(row); logPush('suspend', 'account', body.u, why);
+    return json(200, row.id);
+  }
+  if (fn === 'mod_suspensions') {
+    return json(200, page(m.suspensions.filter((x) => !body.active_only || active(x)).slice().reverse()).map((x) => ({ id: x.id, user_id: x.user_id, name: x.name || null, reason: x.reason, created_at: x.created_at, created_by_name: 'Moi', until: x.until, lifted_at: x.lifted_at, lift_reason: x.lift_reason || null, active: active(x) })));
+  }
+  if (fn === 'mod_log') return json(200, page(m.log.filter((l) => (!body.k || l.kind === body.k) && (!body.tid || l.target === body.tid))));
+  return json(404, { code: 'PGRST202', message: 'Could not find the function public.' + fn + ' in the schema cache' });
+}
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 export function session(user, family = 'f' + ++srv.n) {
   const at = 'at' + ++srv.n, rt = 'rt' + ++srv.n;
@@ -124,6 +196,10 @@ globalThis.fetch = async (url, init = {}) => {
   }
   if (path === '/rest/v1/rpc/delete_account') { srv.users.delete(user.email); srv.saves.delete(user.id); srv.accounts.delete(user.id); return json(200, null); }
   if (!user) return json(401, { message: 'JWT expired' });
+  if (path.startsWith('/rest/v1/rpc/mod_')) {
+    const fn = path.split('/').pop();
+    return srv.moderation ? moderationRpc(fn, body || {}, user) : json(404, { code: 'PGRST202', message: 'Could not find the function public.' + fn + ' in the schema cache' });
+  }
   if (path === '/rest/v1/accounts') return json(200, srv.accounts.has(user.id) ? [{ username: srv.accounts.get(user.id) }] : []);
   if (path === '/rest/v1/players') { srv.players.set(body.id, body.name); return new Response('', { status: 201 }); }
   if (path === '/functions/v1/submit-score') {

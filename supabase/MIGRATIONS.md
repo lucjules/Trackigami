@@ -63,6 +63,44 @@ Ne jamais lancer 6 avant 3 et 5. Les étapes 2 et 6 sont **relançables sans dan
 
 Puis, **dans l'ordre**, les étapes **16** (`etape16-durcissement.sql`, droits : voir « Audit 0.9.59 »), **17**, **18**, **19**, **20** et **21** (une section chacune ci-dessous, de la plus récente à la plus ancienne) : chacune est relançable et ne supprime aucune donnée en s'appliquant ; la 17 suppose les étapes 1 à 15 (la 16 recommandée), la 18 les étapes 1 à 17, la 19 la 18, la 20 les étapes 1 à 19 et la 21 les étapes 1 à 20. En tout, `supabase/` contient 23 fichiers `etape*.sql` : les étapes 1 à 21, plus `etape15b-publication-verifiee.sql` et `etape15-retour.sql` (retour arrière de l'étape 15).
 
+### Étape 22 (outils de modération dans le jeu, 0.22.0, COMPLETE-004) : `etape22-moderation.sql`
+
+**À appliquer À LA MAIN par le propriétaire du projet** (SQL Editor) : **rien n'a été exécuté sur la production** par l'auteur de ce dépôt ; elle n'est donc **pas** « appliquée » tant que le propriétaire n'a pas lancé `verify-prod.sql` ET lu ses lignes « étape 22 ».
+Pré-requis : étapes 1 à 21 (elle utilise `moderators` et `is_moderator` de l'étape 13, les signalements des étapes 1, 13 et 17). **Relançable ; ne supprime ni ne modifie aucune donnée en s'appliquant** (deux tables, une colonne `comment_reports.created_at` laissée à `NULL` pour l'existant, trois index, quatorze fonctions, six déclencheurs ; `tools/test-etape22-sql.sh` compare l'empreinte de dix tables avant et après). **Compatible avec le jeu actuel** : le jeu d'avant ne connaît pas l'écran de modération et marche comme avant ; le jeu 0.22.0 marche SANS l'étape (l'écran de modération n'apparaît alors pour personne). Elle **redéfinit `mod_hide`** (étape 13), à l'identique pour l'appelant mais journalisée : **relancer `etape13-communaute.sql` APRÈS l'étape 22 remet l'ancienne `mod_hide`, sans journal** (relancer alors l'étape 22).
+
+**Principe** : la sécurité est dans la base. Chaque fonction `mod_*` commence par `if not is_moderator(auth.uid()) then raise exception 'Réservé aux modérateurs.'`, avant toute lecture ou écriture ; l'écran du jeu n'est qu'une commodité.
+
+| Objet | Rôle | Droits |
+|---|---|---|
+| `mod_status()` | « suis-je modérateur ? » pour l'appelant, jamais pour un autre identifiant (vrai / faux) : le jeu n'affiche l'écran que si la base répond vrai | `authenticated` seulement |
+| `mod_queue(k, st, lim, off)` | la file : circuits et commentaires signalés ou masqués, avec compteurs, 100 lignes au plus par appel ; « à examiner » = signalé depuis la dernière décision d'un modérateur | `authenticated` ; refuse tout non-modérateur |
+| `mod_detail(k, tid)`, `mod_reports(k, tid)` | la fiche d'un contenu (texte public, compteurs, auteur, suspension en cours, décisions déjà prises) ; ses signalements : date et « compté » ou non, **jamais qui a signalé** | idem |
+| `mod_set_track_hidden(t, hide, why)`, `mod_set_comment_hidden(c, hide, why)` | masquer / rétablir, **motif de 3 à 300 caractères obligatoire**, journalisé ; ne supprime rien | idem |
+| `mod_suspend(u, why, until_at)`, `mod_unsuspend(u, why)`, `mod_suspensions(active_only, lim, off)` | suspendre (fin facultative : sinon jusqu'à réactivation, 10 ans au plus) / réactiver / lister ; pas soi-même, pas un modérateur | idem |
+| `mod_log(k, tid, lim, off)` | le journal : qui, quoi, sur quoi, quand, pourquoi | idem |
+| `mod_hide(kind, target, hide)` | l'ancienne fonction de l'étape 13 (circuits, commentaires, modes), même signature, désormais journalisée (motif générique) | idem |
+| `moderation_apply_hide`, `moderation_active_suspension`, `moderation_suspension_guard` | fonctions internes (écriture commune, état d'une suspension, déclencheur) | **aucun** rôle de l'API |
+| `moderation_log` | une ligne par décision ; ne référence les personnes que par `actor` et `target_user`, mis à `NULL` à la suppression du compte | RLS activée, aucun droit pour `anon` ni `authenticated`, aucune règle |
+| `account_suspensions` | une ligne par suspension (motif, début, fin, levée par qui et pourquoi) | idem |
+
+**Ce que fait une suspension** : un déclencheur refuse, pour un compte suspendu, **publier** un circuit (par la fonction serveur comme par toute autre voie), un mode ou une playlist, **modifier le nom ou la description** d'un circuit, et **commenter**. Elle **ne touche pas** aux temps (un nouveau temps s'enregistre), aux classements, aux fantômes, à la sauvegarde, aux amis, aux duels, ni aux contenus déjà publiés (les masquer est une autre décision). Une suspension échue ne bloque plus sans que personne n'ait à la lever. Le pseudo, lui, se change toujours (écriture directe de `players.name` : hors du périmètre).
+
+**Ordre d'application** (jamais l'inverse) : 1. `verify-prod.sql` (état avant : lignes « étape 22 » en `MANQUE` ; **`MANQUE`/`ÉCART` ailleurs = s'arrêter**) ; 2. sauvegarde (Database › Backups) ; 3. `etape22-moderation.sql` ; 4. `verify-prod.sql` : **toutes** les lignes « étape 22 » à `ok` ; 5. **ajouter un modérateur** (`supabase/COMPTES.md`, « Ajouter un modérateur ») et vérifier avec son compte que le bouton « 🛡 Modération » apparaît dans la Communauté, et **pas** avec un autre compte ; 6. facultatif : redéployer `submit-score` (`npm run build:function`) pour qu'un compte suspendu qui publie reçoive son message au lieu de « Enregistrement impossible. » (sans cela, la publication est refusée tout de même, le joueur voit le message générique).
+
+**Vérifications de production attendues** (à lire par le propriétaire ; rien de ceci n'a été constaté) :
+
+| Vérification | Attendu |
+|---|---|
+| `verify-prod.sql`, lignes « étape 22 » | `ok` ×4 (tables fermées, droits des 11 + 3 fonctions, contrôle de modérateur en tête de chaque fonction, garde de suspension branchée) ; la ligne d'info donne le nombre de modérateurs, de suspensions en cours et de décisions au journal |
+| `select has_function_privilege('anon', 'public.mod_queue(text,text,integer,integer)', 'execute'), has_function_privilege('authenticated', 'public.mod_queue(text,text,integer,integer)', 'execute'), has_table_privilege('authenticated', 'public.moderation_log', 'select'), has_function_privilege('authenticated', 'public.moderation_apply_hide(text,text,boolean,text,boolean)', 'execute');` | `f, t, f, f` |
+| `verify-prod.sql`, « fonctions appelables SANS session hors liste » | `ok` (aucune fonction `mod_*` pour `anon`) |
+| Avec un compte qui n'est PAS modérateur : Communauté | pas de bouton « 🛡 Modération » ; dans l'onglet réseau, une seule requête `mod_status` (réponse `false`) |
+| Avec un compte modérateur : masquer un circuit signalé (motif écrit), puis `select * from moderation_log order by id desc limit 5;` (clé de service ou SQL Editor) | la ligne y est (qui, quoi, motif) ; le circuit n'apparaît plus dans la liste publique mais existe toujours dans `tracks` (`hidden` vrai) |
+| Suspendre un compte de test, puis essayer de commenter avec lui | refus « Compte suspendu : publier et commenter est impossible jusqu'au … » ; son temps d'un circuit officiel s'enregistre toujours ; réactivé, il commente |
+| Conseils Supabase (*Advisors*) | seulement les fonctions `security definer` appelables (c'est l'API du jeu : les `mod_*` refusent les non-modérateurs) |
+
+**Retour arrière** (aucune donnée n'est touchée ; le journal et les suspensions déjà écrits restent dans leurs tables) : lever le blocage des suspensions par `drop trigger moderation_suspension_guard on public.tracks, public.track_comments, public.community_modes, public.playlists` (un `drop trigger ... on` par table) et `drop trigger moderation_suspension_guard_upd on public.tracks` / `... on public.playlists` ; fermer l'écran : `revoke execute on function public.mod_status() from authenticated;` (le jeu cache alors le bouton) ; retrouver l'ancienne `mod_hide` sans journal en relançant `etape13-communaute.sql` puis `etape17-securite.sql`. Test : `tools/test-etape22-sql.sh` (`npm run test:sql`, PostgreSQL 16 requis).
+
 ### Étape 21 (code de secours : récupérer un compte sans courriel, 0.16.13, COMPLETE-003) : `etape21-recuperation.sql`
 
 **À appliquer À LA MAIN par le propriétaire du projet** (SQL Editor) : **rien n'a été exécuté sur la production** par l'auteur de ce dépôt ; elle n'est donc **pas** « appliquée » tant que le propriétaire n'a pas lancé `verify-prod.sql` ET lu ses lignes « étape 21 ».

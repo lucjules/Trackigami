@@ -222,7 +222,7 @@ export const communityMethods = {
       if ($('comm-random')) $('comm-random').addEventListener('click', () => { this.audio.click(); this.communityRandom(); });
     }
     const C = this._comm;
-    if (reset) { C.offset = 0; list.innerHTML = ''; }
+    if (reset) { C.offset = 0; list.innerHTML = ''; this._refreshModeration(); }      // (le bouton « Modération » : seulement si la base confirme que cet appareil est modérateur, js/app/moderation.js)
     const req = (this._commReq = (this._commReq || 0) + 1);
     status.textContent = 'Chargement…';
     more.classList.add('hidden');

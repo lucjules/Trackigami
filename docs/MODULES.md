@@ -168,6 +168,7 @@ La vue d'ensemble (principes, déterminisme, flux d'une course) est dans [ARCHIT
 | `lab.js` | Laboratoire de comparaison (Trackigami Evolution, E20) : depuis la fiche d'un circuit, rejoue les commandes du record personnel sous deux réglages physiques (profils, véhicules v1 / v2, adhérence, pluie) et affiche l'écart secteur par secteur et le long du circuit. Le calcul est dans analysis/lab.js ; le circuit n'est jamais modifié. Ces méthodes s'ajoutent au prototype de App. |
 | `legal.js` | Pages légales dans le jeu (0.12.4) : confidentialité, mentions légales, règles de la communauté, crédits et licences (textes : js/legal.js), et export des données du joueur (js/dataExport.js). Ces méthodes s'ajoutent au prototype de App (voir main.js) : `this` est l'instance. |
 | `mechanics.js` | Mécaniques de jeu (COMPLETE-007), côté écrans : la carte « Nouveau » de la fiche d'un circuit (Race Hub) et l'index « Mécaniques découvertes » du profil (Progression › Mécaniques). |
+| `moderation.js` | Écran de modération (COMPLETE-004) : la file des contenus signalés, la fiche d'un contenu, masquer / rétablir, suspendre / réactiver un compte, le journal. |
 | `modes.js` | Modes de jeu, règles de partie et paquets (lot 13) : l'interface. Les règles et validations sont dans rules.js et mods.js. Ces méthodes s'ajoutent au prototype de App. |
 | `multi.js` | Multijoueur : salons (privés par code, ou publics), circuit commun, lobby, départ en course à plusieurs, classement du salon, championnat (manches). |
 | `profile.js` | Profil : compte, sauvegardes, import et export de sauvegarde. |
@@ -260,6 +261,7 @@ La vue d'ensemble (principes, déterminisme, flux d'une course) est dans [ARCHIT
 | Fichier | Rôle |
 | --- | --- |
 | `community.js` | Communauté 2 (Trackigami Evolution, E21) : le client des fonctions de supabase/etape13-communaute.sql. Commentaires, playlists, sélection, découverte au hasard, recommandations, statistiques de circuit (depuis run_stats), modes publiés. Tout passe par des fonctions de la base, qui vérifient les droits, le débit et la modération : ce module ne fait que les appeler et remettre en forme leurs réponses. |
+| `moderation.js` | Modération (COMPLETE-004) : le client des fonctions de supabase/etape22-moderation.sql. Réservé aux modérateurs. |
 
 ## `js/physics/`
 

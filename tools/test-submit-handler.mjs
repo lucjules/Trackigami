@@ -271,6 +271,15 @@ test('publication : signature déjà prise par un autre pilote (409), collision 
   const sb = fakeSupabase(); await make(sb)(request(pubBody({ name: '   Un   nom \n  trop long ' + 'x'.repeat(100), description: 'd'.repeat(500) })));
   const a = pubCalls(sb)[0].args; assert.ok(a.nm.length <= 40 && !/\s{2}/.test(a.nm) && a.ds.length === 200);
 });
+test('publication d\'un compte SUSPENDU par la modération (étape SQL 22) : refus 403 avec le message de la base (jusqu\'à quand), drapeau « suspended », jamais « Enregistrement impossible »', async () => {
+  const msg = 'Compte suspendu : publier et commenter est impossible jusqu\'au 28/11/2026 12:00 (UTC).';
+  const r = await make(fakeSupabase({ failWrite: msg }))(request(pubBody()));
+  assert.equal(r.status, 403);
+  const j = await r.json();
+  assert.equal(j.error, msg); assert.equal(j.suspended, true);
+  const gen = await make(fakeSupabase({ failWrite: 'boum' }))(request(pubBody()));
+  assert.equal(gen.status, 500, 'toute autre erreur de la base reste une panne générique');
+});
 test('republication par l\'auteur (circuit publié avant l\'étape 15, temps non vérifié) : mis à jour, vérifié', async () => {
   const sb = fakeSupabase(); const h = make(sb, { rateLimit: { ...RATE_LIMIT, max: 100 } });
   assert.equal((await (await h(request(pubBody()))).json()).status, 'created');

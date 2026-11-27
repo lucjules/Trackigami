@@ -123,6 +123,7 @@ export function createHandler({ supabaseUrl, serviceKey, fetch: rawFetch = globa
     if (/Trop de temps enregistrés/.test(msg)) return json(422, { error: 'Limite de 2 000 temps enregistrés atteinte : efface d’anciens records pour en ajouter.', capReached: true });
     if (/Trop de publications/.test(msg)) return json(429, { error: msg }, { 'Retry-After': '3600' });
     if (/Trop de circuits publiés/.test(msg)) return json(422, { error: msg, trackCap: true });
+    if (/^Compte suspendu/.test(msg)) return json(403, { error: msg, suspended: true });      // (étape SQL 22, COMPLETE-004 : la suspension d'un compte bloque la publication ; le message de la base, qui dit jusqu'à quand, est transmis tel quel)
     log('submit-score :', what, r.status, msg);
     return json(500, { error: 'Enregistrement impossible.' });
   }

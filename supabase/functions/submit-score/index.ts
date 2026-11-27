@@ -21034,6 +21034,10 @@ function createHandler({ supabaseUrl, serviceKey, fetch: rawFetch = globalThis.f
       error: msg,
       trackCap: true
     });
+    if (/^Compte suspendu/.test(msg)) return json(403, {
+      error: msg,
+      suspended: true
+    });
     log("submit-score :", what, r.status, msg);
     return json(500, {
       error: "Enregistrement impossible."
@@ -21290,4 +21294,4 @@ Deno.serve(createHandler({
   serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   allowedOrigin: Deno.env.get("ALLOWED_ORIGIN") ?? "*"
 }));
-globalThis.__COPYTRACK_BUILD__ = "53a0c8d652005072";
+globalThis.__COPYTRACK_BUILD__ = "851595e1792d9ba2";
