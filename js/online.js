@@ -620,6 +620,17 @@ class OnlineClient {
   async tournamentJoin(code, playerName) { await this.ensurePlayer(playerName); return +(await this.rpc('tournament_join', { jcode: String(code || '').trim() })); }
   async tournamentBoard(id) { const r = await this.rpc('tournament_board', { tid: id }); return Array.isArray(r) ? r : []; }
 
+  // Boîte de réception (COMPLETE-015, étape SQL 23) : une requête, avec la session de l'appareil SEULEMENT si elle existe. null : aucune session, rien n'est parti (jamais
+  // d'inscription anonyme pour lire). Voir js/inbox.js (cache, date de dernière consultation).
+  hasStoredSession() { const st = this.session && this.session.refresh_token ? this.session : this._stored(); return !!(st && st.refresh_token && st.user && st.user.id); }
+  async inbox(since) {
+    if (!this.hasStoredSession()) return null;
+    const s = await this._optionalSession();
+    if (!s) return null;
+    const r = await this._fetch('/rest/v1/rpc/inbox_summary', { method: 'POST', body: { depuis: since }, auth: 'optional' });
+    return Array.isArray(r) ? r : [];
+  }
+
   async myLikes() {
     const s = await this._optionalSession();
     if (!s) return new Set();                                            // aucune session sur cet appareil : rien n'a été aimé (et afficher la communauté ne crée pas de joueur)

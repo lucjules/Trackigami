@@ -44,6 +44,7 @@ export const screenMethods = {
       this._menuSub(null);
       const r = getRecord('daily-' + dayKey());
       $('daily-best').textContent = r ? formatTime(r.time) : 'nouveau';
+      if (this._refreshInbox) this._refreshInbox();          // boîte de réception (COMPLETE-015) : le cache, ou une requête s'il a vieilli ; aucune sans session
     }
     if (name === 'tracks') { this._renderTracks(); this._maybeCareerEnd(); }
     if (name === 'race-hub') this._renderHub();

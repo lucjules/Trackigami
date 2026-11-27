@@ -7,6 +7,10 @@
 //   - onglet Saison : les amorces du circuit, « hors classement de la saison » ;
 //   - Compétition › Contre un fantôme officiel, sans compte : la course part avec ce fantôme pour rival ;
 //   - en anglais : aucun mot de français dans le classement ni dans la section de la compétition.
+// Boîte de réception (COMPLETE-015) :
+//   - visiteur SANS session : le bouton est là, sans badge ; AUCUNE requête inbox_summary, aucune inscription anonyme, même en ouvrant la fenêtre (qui explique à quoi elle sert) ;
+//   - compte : UNE requête à l'arrivée au menu (pas une de plus en revenant au menu), badge du nombre de nouveautés, fenêtre avec les phrases, bouton qui mène au circuit ;
+//     ouverte, elle est lue (le badge ne garde que le duel qui attend) ; en anglais, aucun mot de français.
 // Playwright absent : ignoré en local, ÉCHEC en CI ou avec REQUIRE_BROWSER=1.
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -181,6 +185,71 @@ try {
     await ctx.close();
   });
 
+  console.log('Boîte de réception');
+  const PW = 'mot-de-passe-1';
+  const addUser = (name) => { const u = { id: 'u-' + name, email: name.toLowerCase() + '@accounts.copytrack.invalid', pw: PW, username: name }; srv.users.set(u.email, u); srv.accounts.set(u.id, name); return u; };
+  const login = async (page, name) => { await click(page, '[data-wl="login"]'); await page.locator('#wl-name').fill(name); await page.locator('#wl-pw').fill(PW); await click(page, '#wl-submit'); await menu(page); };
+  const now = Date.now(), iso = (h) => new Date(now - h * 3600000).toISOString();
+  const INBOX = [
+    { kind: 'beaten', at: iso(2), track_key: K, track_name: 'Premiers Éclats', who: 'Erin', my_time: 50, their_time: 48, n: 1 },
+    { kind: 'duel', at: iso(30 * 24), track_key: 'b-canyon-ymt2z', track_name: 'Canyon Corail', who: 'Bob', ref: 12 },
+    { kind: 'duel_win', at: iso(5), track_key: K, track_name: 'Premiers Éclats', who: 'Carl', my_time: 47.5, their_time: 49, n: 16, ref: 9 },
+    { kind: 'follow', at: iso(20), track_id: '00000000-0000-4000-8000-00000000f201', track_name: 'Nouveau d’Erin', who: 'Erin' },
+  ];
+  const inboxCalls = () => (srv.social ? srv.social.calls.filter((c) => c.fn === 'inbox_summary') : []);
+  await test('visiteur sans session : bouton sans badge ; aucune requête de boîte, aucune inscription anonyme, même en l’ouvrant', async () => {
+    resetSocial({ inbox: {} }); srv.calls.length = 0;
+    const { ctx, page } = await device();
+    await guest(page);
+    await page.waitForTimeout(500);
+    assert.equal(await page.locator('#menu-inbox').isVisible(), true);
+    assert.equal(await page.locator('#menu-inbox-n').isVisible(), false);
+    await click(page, '#menu-inbox');
+    await page.waitForSelector('#modal-body .inbox', { timeout: 10000 });
+    assert.match(await page.locator('#modal-body').innerText(), /suit tes temps en ligne/);
+    await page.waitForTimeout(300);
+    assert.equal(inboxCalls().length, 0, 'pas une seule requête de boîte');
+    assert.equal(srv.calls.filter((c) => c.path === '/auth/v1/signup').length, 0, 'aucune inscription anonyme');
+    await ctx.close();
+  });
+  await test('compte : une requête au menu, badge, phrases, bouton vers le circuit ; ouverte, elle est lue ; revenir au menu ne redemande pas', async () => {
+    addUser('Nora'); resetSocial({ inbox: { 'u-Nora': INBOX } });
+    const { ctx, page } = await device();
+    await login(page, 'Nora');
+    await page.waitForFunction(() => !document.getElementById('menu-inbox-n').classList.contains('hidden'), null, { timeout: 15000 });
+    assert.equal(await page.locator('#menu-inbox-n').innerText(), '4');
+    assert.equal(inboxCalls().length, 1, 'une requête');
+    assert.ok(inboxCalls()[0].auth, 'avec la session du compte');
+    await page.evaluate(() => window.copytrack.showMenu('menu'));
+    await page.waitForTimeout(400);
+    assert.equal(inboxCalls().length, 1, 'revenir au menu : le cache, pas de requête');
+    await click(page, '#menu-inbox');
+    await page.waitForSelector('#modal-body .inbox-list', { timeout: 10000 });
+    const t = await page.locator('#modal-body').innerText();
+    assert.match(t, /Erin a battu ton temps sur Premiers Éclats/);
+    assert.match(t, /Bob te défie en duel sur Canyon Corail/);
+    assert.match(t, /Duel gagné contre Carl sur Premiers Éclats \(Elo \+16\)/);
+    assert.match(t, /Erin a publié un nouveau circuit : Nouveau d’Erin/);
+    assert.equal(inboxCalls().length, 1, 'ouvrir la fenêtre : le cache');
+    await page.waitForFunction(() => document.getElementById('menu-inbox-n').textContent === '1', null, { timeout: 5000 });
+    await page.locator('#modal-body .inbox-item').first().locator('[data-inbox]').evaluate((el) => el.click());
+    await page.waitForSelector('#race-hub:not(.hidden)', { timeout: 10000 });
+    assert.match(await page.locator('#hub-name').innerText(), /Premiers Éclats/);
+    await ctx.close();
+  });
+  await test('en anglais : la boîte de réception sans un mot de français', async () => {
+    addUser('Olga'); resetSocial({ inbox: { 'u-Olga': INBOX } });
+    const { ctx, page } = await device('en-GB');
+    await login(page, 'Olga');
+    await click(page, '#menu-inbox');
+    await page.waitForSelector('#modal-body .inbox-list', { timeout: 10000 });
+    await page.waitForTimeout(300);
+    assert.deepEqual(await frenchLeft(page, '#modal-body'), []);
+    assert.deepEqual(await frenchLeft(page, '#menu-inbox'), []);
+    assert.match(await page.locator('#modal-body').innerText(), /Erin beat your time on First Sparks/);
+    await ctx.close();
+  });
+
   console.log('Anglais');
   await test('en anglais : classement avec amorces, ligne « juste devant », section de la compétition, sans un mot de français', async () => {
     resetSocial({ scores: SCORES, officials: officialsFor(K) });
@@ -203,4 +272,4 @@ try {
   server.kill();
 }
 if (failures) { console.log(`\n${failures} test(s) en échec`); process.exit(1); }
-console.log('\nTous les tests du navigateur (amorces officielles) passent.');
+console.log('\nTous les tests du navigateur (amorces officielles, boîte de réception) passent.');

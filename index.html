@@ -292,6 +292,8 @@
         <button data-action="sub-profile" class="btn big" aria-haspopup="true" aria-expanded="false" aria-controls="menu-sub-profile">Garage <small>voiture, compte, sauvegardes</small></button>
         <button data-action="sub-settings" class="btn big" aria-haspopup="true" aria-expanded="false" aria-controls="menu-sub-settings">Paramètres <small>son, image, commandes</small></button>
       </nav>
+      <!-- Boîte de réception (COMPLETE-015, js/app/inbox.js) : ce que les autres pilotes ont fait depuis la dernière visite ; aucune requête sans session. -->
+      <button type="button" class="btn inbox-btn" id="menu-inbox" data-action="inbox">📬 Boîte de réception <b class="inbox-n hidden" id="menu-inbox-n" aria-hidden="true"></b></button>
       <div class="menu-panel hidden" id="menu-sub-play" role="group" aria-labelledby="mp-play">
         <header class="menu-panel-head"><button class="btn" data-action="sub-back">← Retour</button><h2 id="mp-play">Jouer</h2></header>
         <div class="menu-panel-grid">

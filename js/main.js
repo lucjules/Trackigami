@@ -33,6 +33,7 @@ import { musicPlan } from './musicVariants.js';
 import { multiMethods } from './app/multi.js';
 import { academyMethods } from './app/academy.js';
 import { competitionMethods } from './app/competition.js';
+import { inboxMethods } from './app/inbox.js';
 import { labMethods } from './app/lab.js';
 import { rewardsMethods } from './app/rewards.js';
 import { careerEndMethods } from './app/careerEnd.js';
@@ -563,7 +564,7 @@ class App {
 }
 
 // Les familles de méthodes vivent dans app/ ; elles s'ajoutent au prototype (`this` est l'instance).
-Object.assign(App.prototype, multiMethods, academyMethods, competitionMethods, labMethods, rewardsMethods, careerEndMethods, mechanicsMethods, communityMethods, moderationMethods, screenMethods, settingsMethods, profileMethods, wiringMethods, editorFlowMethods, uiCustomMethods, modesMethods, raceHubMethods, theaterAppMethods, legalMethods, feedbackMethods, updateMethods);
+Object.assign(App.prototype, multiMethods, academyMethods, competitionMethods, inboxMethods, labMethods, rewardsMethods, careerEndMethods, mechanicsMethods, communityMethods, moderationMethods, screenMethods, settingsMethods, profileMethods, wiringMethods, editorFlowMethods, uiCustomMethods, modesMethods, raceHubMethods, theaterAppMethods, legalMethods, feedbackMethods, updateMethods);
 
 
 // Application installable et jouable hors ligne (service worker), si le contexte le permet.
