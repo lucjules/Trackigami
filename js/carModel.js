@@ -3,6 +3,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import { CATALOG, DEFAULT_LOADOUT, sanitizeLoadout } from './cosmetics.js';
 import { addParts, addLivery } from './customCar.js';
+import { DECOR_RIMS } from './decorSeries.js';
 
 const TAU = Math.PI * 2;
 // Couleurs de la LED « pulsation » (créées une fois : pas d'allocation ni d'analyse de texte à chaque image).
@@ -56,7 +57,21 @@ const DECAL_ART = {
   flowers: () => [[1.2, 0.6], [0.1, 0.66], [-1.0, 0.56], [-1.7, 0.64]].flatMap(([x, y]) => [starPts(x, y, 0.17, 0.09, 5), ring(x, y, 0.045, 6)]),
   leaf: () => [[1.2, 0.6, 0.5], [0.3, 0.66, -0.6], [-0.7, 0.56, 0.4], [-1.6, 0.64, -0.4]].map(([x, y, a]) => turnPts([[x, y + 0.2], [x + 0.1, y + 0.07], [x + 0.1, y - 0.06], [x, y - 0.2], [x - 0.1, y - 0.06], [x - 0.1, y + 0.07]], x, y, a)),
   hearts: () => [[1.3, 0.6, 0.2], [0.3, 0.66, 0.24], [-0.7, 0.56, 0.2], [-1.6, 0.64, 0.22]].map(([x, y, sc]) => heartPts(x, y, sc)),
+  // Séries de décor (COMPLETE-018, decorSeries.js) : un motif par décor, du même vocabulaire (aplats de la couleur « Dessins »), sans aucun modèle neuf.
+  desert: () => [waveBand(0.46, 0.09, 0.07), waveBand(0.63, 0.07, 0.06)],
+  jungle: () => [waveBand(0.55, 0.12, 0.05), ...[[1.1, 0.74], [0.0, 0.34], [-1.2, 0.72]].map(([x, y]) => ring(x, y, 0.07, 6))],
+  isles: () => [[1.2, 0.6], [-0.1, 0.66], [-1.3, 0.58]].flatMap(([x, y]) => [starPts(x, y, 0.2, 0.08, 5, 0.3), ring(x, y, 0.04, 6)]),
+  city: () => [[1.5, 0.3], [1.2, 0.5], [0.9, 0.38], [0.5, 0.7], [0.2, 0.44], [-0.2, 0.6], [-0.6, 0.36], [-1.0, 0.66], [-1.4, 0.42]].map(([x, h]) => [[x - 0.1, 0.34], [x + 0.1, 0.34], [x + 0.1, 0.34 + h * 0.6], [x - 0.1, 0.34 + h * 0.6]]),
+  polar: () => [waveBand(0.4, 0.07, 0.05), waveBand(0.54, 0.09, 0.05), waveBand(0.68, 0.06, 0.05)],
+  volcano: () => [[1.0, 0.5], [-0.9, 0.42]].map(([x, h]) => [[x - 0.45, 0.34], [x - 0.09, 0.34 + h], [x - 0.04, 0.34 + h - 0.1], [x + 0.04, 0.34 + h - 0.1], [x + 0.09, 0.34 + h], [x + 0.45, 0.34]]),
+  orbit: () => [[1.3, 0.7], [0.5, 0.5], [-0.3, 0.72], [-1.0, 0.46], [-1.7, 0.66]].map(([x, y]) => starPts(x, y, 0.11, 0.03, 4)),
+  reef: () => [[1.4, 0.5, 0.1], [1.15, 0.7, 0.06], [0.2, 0.55, 0.13], [-0.5, 0.74, 0.07], [-1.2, 0.5, 0.11], [-1.5, 0.7, 0.05]].map(([x, y, r]) => ring(x, y, r, 10)),
+  factory: () => [[1.0, 0.58, 0.24], [-0.9, 0.58, 0.18]].flatMap(([x, y, r]) => [starPts(x, y, r, r * 0.78, 8), ring(x, y, r * 0.3, 8)]),
+  sky: () => [[1.1, 0.58], [-0.4, 0.66], [-1.5, 0.56]].flatMap(([x, y]) => [ring(x, y, 0.16, 10), ring(x + 0.17, y - 0.04, 0.12, 10), ring(x - 0.16, y - 0.05, 0.11, 10)]),
+  caves: () => [[1.2, 0.58, 0.2], [0.1, 0.64, 0.26], [-1.0, 0.56, 0.18], [-1.7, 0.62, 0.15]].map(([x, y, h]) => [[x, y + h], [x + h * 0.55, y], [x, y - h], [x - h * 0.55, y]]),
+  atelier: () => [[1.2, 0.58], [0.0, 0.62], [-1.2, 0.56]].flatMap(([x, y]) => [ring(x, y, 0.15, 6), [[x - 0.32, y - 0.015], [x - 0.2, y - 0.015], [x - 0.2, y + 0.015], [x - 0.32, y + 0.015]]]),
 };
+export const DECAL_ART_IDS = Object.keys(DECAL_ART);
 // Ornements ajoutés en 0.9.57 (les anciens restent codés à leur place) : construits autour de leur point d'attache (origine, y vers le haut).
 const NEW_ORNAMENTS = new Set(['santahat', 'antlers', 'xtree', 'snowman', 'partyhat', 'umbrella', 'surfboard', 'ringfloat', 'icecream', 'witchhat', 'pumpkin', 'bunny', 'heartballoon']);
 
@@ -102,7 +117,7 @@ export function createCar(loadoutIn = DEFAULT_LOADOUT, opts = {}) {
   const dark = mk({ color: '#23242f', roughness: 0.8 });
   const glass = mk({ color: '#1b2444', roughness: 0.15, metalness: 0.4 });
   const rubber = mk({ color: '#17171f', roughness: 0.95 });
-  const RIM = { gold: ['#f2c14e', 0.35, 0.6], chrome: ['#f4f6ff', 0.08, 1.0], snow: ['#eaf6ff', 0.4, 0.3], sunny: ['#ffd21f', 0.35, 0.3] }[L.wheels] || ['#c9ccd8', 0.35, 0.6];
+  const RIM = { gold: ['#f2c14e', 0.35, 0.6], chrome: ['#f4f6ff', 0.08, 1.0], snow: ['#eaf6ff', 0.4, 0.3], sunny: ['#ffd21f', 0.35, 0.3], ...DECOR_RIMS }[L.wheels] || ['#c9ccd8', 0.35, 0.6];
   const rimMat = mk({ color: RIM[0], roughness: RIM[1], metalness: RIM[2] });
   const decalMat = ghost ? mk({}) : new THREE.MeshBasicMaterial({ color: L.decalColor, toneMapped: false, side: THREE.DoubleSide });
   if (!ghost) own.push(decalMat);

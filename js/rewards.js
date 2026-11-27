@@ -1,6 +1,7 @@
 // Récompenses (0.9.18) : titres affichés au classement, éléments EXCLUSIFS du garage (qui ne s'achètent pas), collections à thème. Données et règles pures : le contexte (médailles, défis, leçons…) est
 // rassemblé par app/rewards.js, ici on décide seulement ce qui est mérité. Rien ne touche à la physique ni aux temps : tout est visuel.
 import { CATALOG } from './cosmetics.js';
+import { DECOR_SERIES, decorThemeId } from './decorSeries.js';
 import { profile, saveProfile, addCoins, owns, grantGift } from './profile.js';
 import { streakOf } from './mutations.js';
 import { LEVEL_REWARDS } from './progression.js';
@@ -47,6 +48,8 @@ export const COLLECTIONS = [
   { id: 'c-printemps', label: 'Printemps', items: [['ornament', 'bunny'], ['decal', 'flowers'], ['led', 'blossom'], ['trail', 'petals']] },
   { id: 'c-automne', label: 'Automne', items: [['decal', 'leaf'], ['led', 'harvest'], ['trail', 'leaves'], ['ornament', 'witchhat']] },
   { id: 'c-amour', label: 'Saint-Valentin', items: [['ornament', 'heartballoon'], ['decal', 'hearts'], ['led', 'love'], ['trail', 'hearts']] },
+  // Séries de décor (COMPLETE-018) : les quatre éléments de chaque décor de la carrière (decorSeries.js).
+  ...DECOR_SERIES.map((s) => ({ id: 'c-' + decorThemeId(s.decor), label: s.label, items: [['decal', s.decor], ['led', s.decor], ['trail', s.decor], ['wheels', s.decor]] })),
 ];
 
 // Avancement d'une collection : { have, total, done }.

@@ -1,7 +1,7 @@
 // Service worker généré par tools/gen-sw.mjs : ne pas modifier à la main.
 // Jeu hors ligne : les fichiers du jeu sont gardés en cache ; le réseau reste prioritaire
 // pour récupérer les mises à jour quand il est disponible.
-const CACHE = 'copytrack-8d7f0c1eef';
+const CACHE = 'copytrack-3deca6c3d3';
 const FILES = [
   "./",
   "assets/fonts/OFL.txt",
@@ -89,6 +89,7 @@ const FILES = [
   "js/decoPack.js",
   "js/decoPackData.js",
   "js/decoPrimitives.js",
+  "js/decorSeries.js",
   "js/decos.js",
   "js/difficulty.js",
   "js/dmath.js",

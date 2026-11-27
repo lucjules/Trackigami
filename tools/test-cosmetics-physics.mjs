@@ -26,7 +26,7 @@ const closure = (entries) => {
   return seen;
 };
 const CORE = ['physics.js', 'simulation.js', 'raceLogic.js', 'verify.js', 'replay.js', 'dmath.js'].map(js);
-const FORBIDDEN = ['cosmetics.js', 'custom.js', 'customCar.js', 'carModel.js', 'garage.js', 'garage/studio.js', 'rewards.js', 'profile.js', 'storage.js', 'cloudsave.js'].map(js);
+const FORBIDDEN = ['cosmetics.js', 'decorSeries.js', 'custom.js', 'customCar.js', 'carModel.js', 'garage.js', 'garage/studio.js', 'rewards.js', 'profile.js', 'storage.js', 'cloudsave.js'].map(js);
 
 console.log('Preuve structurelle');
 test('le code de la physique, de la course simulée et de la vérification serveur n\'importe AUCUN module de personnalisation (ni profil, ni stockage), même indirectement', () => {

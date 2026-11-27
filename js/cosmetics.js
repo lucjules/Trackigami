@@ -2,6 +2,7 @@
 // ne modifie la physique (voir CAR dans physics.js, qui ne dépend pas du modèle 3D).
 
 import { DEFAULT_CUSTOM, sanitizeCustom, cloneCustom } from './custom.js';
+import { DECOR_SERIES, DECOR_COST, decorThemeId } from './decorSeries.js';
 
 export const CATEGORIES = [
   { id: 'body', label: 'Carrosserie' },
@@ -193,6 +194,16 @@ export const CATALOG = {
   ],
 };
 
+// Séries de décor (COMPLETE-018, decorSeries.js) : quatre éléments par décor de la carrière, rangés dans le catalogue sous le thème « decor-<décor> » (couleurs de LED, de
+// traînée et de jante, dessin : aucun modèle 3D neuf, aucun effet sur la physique). Le même identifiant (celui du décor) sert aux quatre catégories.
+for (const s of DECOR_SERIES) {
+  const theme = decorThemeId(s.decor);
+  CATALOG.led.push({ id: s.decor, label: s.led[0], cost: DECOR_COST.led, color: s.led[1], theme });
+  CATALOG.trail.push({ id: s.decor, label: s.trail[0], cost: DECOR_COST.trail, color: s.trail[1], theme });
+  CATALOG.decal.push({ id: s.decor, label: s.decal, cost: DECOR_COST.decal, theme });
+  CATALOG.wheels.push({ id: s.decor, label: s.wheels[0], cost: DECOR_COST.wheels, theme });
+}
+
 export const COLOR_CHOICES = [
   '#ffd23e', '#ff5a5f', '#3ec1ff', '#7cf06b', '#c77dff', '#ff8c42', '#f4f1ea', '#2f3247',
   '#ff4fd8', '#2fd3b5', '#ffffff', '#111118', '#b0b6c8', '#8a1c2e', '#1d4fb8', '#e8c27a',
@@ -212,6 +223,8 @@ export const THEMES = [
   { id: 'printemps', label: 'Printemps', icon: '🌸', palette: ['#ffb3d1', '#7cf06b', '#ffffff'] },
   { id: 'automne', label: 'Automne', icon: '🍂', palette: ['#b5521b', '#e8c27a', '#8a1c2e'] },
   { id: 'amour', label: 'Saint-Valentin', icon: '💝', palette: ['#ff4fd8', '#8a1c2e', '#ffffff'] },
+  // COMPLETE-018 : une série par décor de la carrière (decorSeries.js), à la suite des thèmes de saison.
+  ...DECOR_SERIES.map((s) => ({ id: decorThemeId(s.decor), label: s.label, icon: s.icon, palette: s.palette })),
 ];
 
 // Palettes de couleurs (onglet Couleurs du garage) : applique peinture, secondaire et dessins d'un coup. Gratuites. Les trois premières couleurs viennent de THEMES.
@@ -263,6 +276,15 @@ export const PRESETS = [
   { id: 'amour-rose', label: 'Rose passion', theme: 'amour', loadout: { body: 'limo', color: '#8a1c2e', color2: '#ff4fd8', decalColor: '#ffffff', spoiler: 'low', led: 'love', decal: 'hearts', ornament: 'crown', wheels: 'gold', finish: 'pearl', trail: 'hearts' } },
   { id: 'shark', label: 'Requin', loadout: { body: 'wedge', color: '#b0b6c8', color2: '#2f3247', decalColor: '#ffffff', spoiler: 'low', led: 'pink', decal: 'bolt', ornament: 'fin', wheels: 'classic' } },
 ];
+
+// Deux préréglages par série de décor (COMPLETE-018) : la série complète sur sa palette, puis la même avec les couleurs échangées sur une autre carrosserie.
+for (const s of DECOR_SERIES) {
+  const theme = decorThemeId(s.decor), own = { led: s.decor, trail: s.decor, decal: s.decor, wheels: s.decor };
+  PRESETS.push(
+    { id: `${theme}-1`, label: 'Classique', theme, loadout: { body: s.bodies[0], color: s.palette[0], color2: s.palette[1], decalColor: s.palette[2], spoiler: 'low', ornament: 'none', finish: 'gloss', ...own } },
+    { id: `${theme}-2`, label: 'Contraste', theme, loadout: { body: s.bodies[1], color: s.palette[1], color2: s.palette[0], decalColor: s.palette[2], spoiler: 'duck', ornament: 'none', finish: 'pearl', ...own } },
+  );
+}
 
 export function itemCost(cat, id) {
   const it = (CATALOG[cat] || []).find((x) => x.id === id);
