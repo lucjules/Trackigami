@@ -85,7 +85,7 @@ $P -d $DB -f supabase/etape21-recuperation.sql >/dev/null
 DEF2="$($P -d $DB -At -c "$DEF")"
 
 # verify-prod.sql sur la base COMPLÈTE (étapes 1 à 21), avant tout objet d'essai.
-$P -d $DB -At -F'|' -f supabase/verify-prod.sql | grep -vE '^étape 22' > "$TMP/vp.txt"          # (les lignes de l'étape 22, appliquée après, sont éprouvées par test-etape22-sql.sh)
+$P -d $DB -At -F'|' -f supabase/verify-prod.sql | grep -vE '^étape 2[23]' > "$TMP/vp.txt"          # (les lignes des étapes 22 et 23, appliquées après, sont éprouvées par test-etape22-sql.sh et test-etape23-sql.sh)
 
 cat > "$TMP/apres.sql" <<'SQL'
 \set ON_ERROR_STOP off

@@ -28,7 +28,7 @@ import { PHYS_VER } from './version.js';
 export const ONLINE = CONFIG.supabase;      // { url, key } : voir js/config.js
 
 // Fonctions de la base appelables SANS session (droit execute de anon : voir verify-prod.sql et tools/test-securite-sql.sh, qui comparent cette liste à la base).
-export const PUBLIC_RPC = ['follower_count', 'get_ghost', 'modes_list', 'playlists_list', 'random_track', 'recommended_tracks', 'season_standings', 'sector_board', 'track_comments_list', 'track_stats', 'trending_tracks'];
+export const PUBLIC_RPC = ['follower_count', 'get_ghost', 'modes_list', 'playlists_list', 'random_track', 'recommended_tracks', 'rival_ahead', 'season_standings', 'sector_board', 'track_comments_list', 'track_stats', 'trending_tracks'];
 
 export class OnlineError extends Error {
   constructor(message, code = '', status = 0) { super(message); this.code = code; this.status = status; }

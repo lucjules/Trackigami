@@ -42,6 +42,7 @@ if [ -z "${AVANT:-}" ]; then $P -d $DB -f supabase/etape20-droits-et-regles.sql 
 if [ -z "${AVANT:-}" ]; then $P -d $DB -f supabase/etape21-recuperation.sql >/dev/null; $P -d $DB -f supabase/etape21-recuperation.sql >/dev/null; fi          # (0.16.13) relançable : le code de secours (COMPLETE-003) ; ses attaques sont dans test-etape21-sql.sh, ses droits sont revérifiés ici
 
 if [ -z "${AVANT:-}" ]; then $P -d $DB -f supabase/etape22-moderation.sql >/dev/null; $P -d $DB -f supabase/etape22-moderation.sql >/dev/null; fi          # (0.22.0) relançable : la modération (COMPLETE-004) ; ses attaques sont dans test-etape22-sql.sh, ses droits sont revérifiés ici
+if [ -z "${AVANT:-}" ]; then $P -d $DB -f supabase/etape23-amorces.sql >/dev/null; $P -d $DB -f supabase/etape23-amorces.sql >/dev/null; fi          # (0.23.0) relançable : amorces officielles, rival juste devant, boîte de réception (COMPLETE-010, 015) ; ses essais sont dans test-etape23-sql.sh, ses droits sont revérifiés ici
 
 # verify-prod.sql (lecture seule) sur la base COMPLÈTE (étapes 1 à 17), avant tout objet d'essai : aucune ligne MANQUE ni ÉCART (ses lignes « étape 17 », « étape 16 » et « RLS partout »).
 VP="$($P -d $DB -At -F'|' -f supabase/verify-prod.sql)"
@@ -53,6 +54,7 @@ if [ -z "${AVANT:-}" ]; then
   [ "$(echo "$VP" | grep -c 'étape 20')" -ge 3 ] || { echo "  FAIL verify-prod.sql ne contient pas les trois lignes de l'étape 20"; VPFAIL=1; }
   [ "$(echo "$VP" | grep -c 'étape 21')" -ge 4 ] || { echo "  FAIL verify-prod.sql ne contient pas les lignes de l'étape 21"; VPFAIL=1; }
   [ "$(echo "$VP" | grep -c 'étape 22')" -ge 5 ] || { echo "  FAIL verify-prod.sql ne contient pas les lignes de l'étape 22"; VPFAIL=1; }
+  [ "$(echo "$VP" | grep -c 'étape 23')" -ge 4 ] || { echo "  FAIL verify-prod.sql ne contient pas les lignes de l'étape 23"; VPFAIL=1; }
   [ "$(echo "$VP" | grep -c 'lisibilité (TECH-021)')" -ge 6 ] || { echo "  FAIL verify-prod.sql ne contient pas les six lignes de lisibilité des colonnes (TECH-021)"; VPFAIL=1; }
 else VPFAIL=0; fi
 
@@ -151,7 +153,7 @@ select public.chk('A8 fonctions RÉSERVÉES au serveur (clé de service) : refus
   and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))));
 select public.chk('A9 fonctions appelables SANS session (anon) : seulement la liste attendue (lectures publiques, inscription, statistiques)', (
   select string_agg(p.proname, ',' order by p.proname) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prokind = 'f' and p.prorettype <> 'trigger'::regtype and has_function_privilege('anon', p.oid, 'execute') and p.proname not in ('as_user', 'chk', 'rows_of', 'denied'))
-  = 'current_season,elo,follower_count,get_ghost,health_report,log_errors,log_runs,modes_list,my_season,playlists_list,random_track,recommended_tracks,season_bounds,season_clock,season_points,season_standings,sector_board,submit_feedback,track_comments_list,track_stats,trending_tracks,username_available');
+  = 'current_season,elo,follower_count,get_ghost,health_report,log_errors,log_runs,modes_list,my_season,playlists_list,random_track,recommended_tracks,rival_ahead,season_bounds,season_clock,season_points,season_standings,sector_board,submit_feedback,track_comments_list,track_stats,trending_tracks,username_available');
 select public.chk('A10 toute fonction « security definer » fixe son search_path (pas de détournement par un schéma de l''appelant)', not exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosecdef and p.proname not in ('as_user', 'chk')
   and not exists (select 1 from unnest(coalesce(p.proconfig, '{}')) c where c like 'search_path=%')));
 select public.chk('A11 aucune fonction de public n''est exécutable par PUBLIC si elle écrit pour le serveur seulement', not exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('submit_best', 'publish_track', 'rate_check', 'competition_open')
@@ -225,7 +227,7 @@ select public.chk('B23 sans session (anon) : la lecture publique marche (profils
 select public.chk('B23b TECH-031 : chaque fonction de PUBLIC_RPC (js/online.js) est appelable sans session : ' || :'pubrpc', (
   select count(*) = array_length(string_to_array(:'pubrpc', ','), 1) from (select distinct p.proname from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = any (string_to_array(:'pubrpc', ','))
     and has_function_privilege('anon', p.oid, 'execute')) x));
-select public.chk('B23c TECH-031 : sans session, les lectures du classement et de la communauté répondent sans erreur (circuits + pseudo de l''auteur, temps + pseudo + titre, tendances, fantôme, secteurs, saison, commentaires, playlists, modes, statistiques)',
+select public.chk('B23c TECH-031 : sans session, les lectures du classement et de la communauté répondent sans erreur (circuits + pseudo de l''auteur, temps + pseudo + titre, tendances, fantôme, secteurs, saison, commentaires, playlists, modes, statistiques, rival juste devant, amorces officielles)',
   public.rows_of($$select t.id, t.name, p.name from tracks t join players p on p.id = t.author order by t.created_at desc limit 30$$) >= 0
   and public.rows_of($$select s.time, s.player, s.updated_at, s.has_ghost, s.ghost_veh, p.name, p.title from scores s join players p on p.id = s.player where s.track_key = 'b-test-1' and s.phys_ver = 35 order by s.time, s.updated_at limit 10$$) >= 0
   and public.rows_of($$select count(player) from scores where track_key = 'b-test-1'$$) >= 0
@@ -233,10 +235,12 @@ select public.chk('B23c TECH-031 : sans session, les lectures du classement et d
   and public.rows_of($$select * from public.sector_board('b-test-1', 35, 0, 10)$$) >= 0 and public.rows_of($$select * from public.season_standings(1, 20)$$) >= 0
   and public.rows_of($$select public.follower_count('00000000-0000-0000-0000-0000000000b0')$$) >= 0 and public.rows_of($$select * from public.track_comments_list('00000000-0000-0000-0000-00000000f001', 30, 0)$$) >= 0
   and public.rows_of($$select * from public.playlists_list(false, 30, 0)$$) >= 0 and public.rows_of($$select * from public.modes_list(false, 30, 0)$$) >= 0
-  and public.rows_of($$select * from public.track_stats('eclats', 35)$$) >= 0 and public.rows_of($$select * from public.recommended_tracks(12)$$) >= 0 and public.rows_of($$select public.random_track('{}')$$) >= 0);
-select public.chk('B23d TECH-031 : sans session, ce qui exige une session reste refusé (j''aime, clôture des saisons, règlement des duels, mes duels) : la lecture publique n''ouvre rien de plus',
+  and public.rows_of($$select * from public.track_stats('eclats', 35)$$) >= 0 and public.rows_of($$select * from public.recommended_tracks(12)$$) >= 0 and public.rows_of($$select public.random_track('{}')$$) >= 0
+  and public.rows_of($$select * from public.rival_ahead('b-test-1', 35, 60)$$) >= 0
+  and public.rows_of($$select source, level, pilot, "time", has_ghost, ghost_veh, ghost from official_runs where track_key = 'b-test-1' and phys_ver = 35 order by "time"$$) >= 0);
+select public.chk('B23d TECH-031 : sans session, ce qui exige une session reste refusé (j''aime, clôture des saisons, règlement des duels, mes duels, boîte de réception ; commandes des amorces) : la lecture publique n''ouvre rien de plus',
   public.rows_of($$select public.toggle_like('00000000-0000-0000-0000-00000000f001')$$) = -1 and public.rows_of($$select public.close_due_seasons()$$) = -1 and public.rows_of($$select public.settle_due()$$) = -1
-  and public.rows_of($$select 1 from track_likes$$) = -1);
+  and public.rows_of($$select 1 from track_likes$$) = -1 and public.rows_of($$select * from public.inbox_summary(now())$$) = -1 and public.rows_of($$select inputs from official_runs$$) = -1);
 reset role;
 
 -- ================================================================ C. Failles CONFIRMÉES (corrigées par l'étape 17)

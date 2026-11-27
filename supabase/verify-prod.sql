@@ -142,9 +142,9 @@ checks as (
   union all
   select 91, 'étape 17 : fonctions appelables SANS session (anon) hors de la liste attendue (lectures publiques, inscription, statistiques)', 'aucune',
          coalesce((select string_agg(p.proname, ', ' order by p.proname) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prokind = 'f' and p.prorettype <> 'trigger'::regtype and has_function_privilege('anon', p.oid, 'execute')
-                   and p.proname not in ('current_season', 'elo', 'follower_count', 'get_ghost', 'health_report', 'log_errors', 'log_runs', 'modes_list', 'my_season', 'playlists_list', 'random_track', 'recommended_tracks', 'season_bounds', 'season_clock', 'season_points', 'season_standings', 'sector_board', 'submit_feedback', 'track_comments_list', 'track_stats', 'trending_tracks', 'username_available')), 'aucune'),
+                   and p.proname not in ('current_season', 'elo', 'follower_count', 'get_ghost', 'health_report', 'log_errors', 'log_runs', 'modes_list', 'my_season', 'playlists_list', 'random_track', 'recommended_tracks', 'rival_ahead', 'season_bounds', 'season_clock', 'season_points', 'season_standings', 'sector_board', 'submit_feedback', 'track_comments_list', 'track_stats', 'trending_tracks', 'username_available')), 'aucune'),
          case when exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prokind = 'f' and p.prorettype <> 'trigger'::regtype and has_function_privilege('anon', p.oid, 'execute')
-                   and p.proname not in ('current_season', 'elo', 'follower_count', 'get_ghost', 'health_report', 'log_errors', 'log_runs', 'modes_list', 'my_season', 'playlists_list', 'random_track', 'recommended_tracks', 'season_bounds', 'season_clock', 'season_points', 'season_standings', 'sector_board', 'submit_feedback', 'track_comments_list', 'track_stats', 'trending_tracks', 'username_available')) then 'ÉCART' else 'ok' end
+                   and p.proname not in ('current_season', 'elo', 'follower_count', 'get_ghost', 'health_report', 'log_errors', 'log_runs', 'modes_list', 'my_season', 'playlists_list', 'random_track', 'recommended_tracks', 'rival_ahead', 'season_bounds', 'season_clock', 'season_points', 'season_standings', 'sector_board', 'submit_feedback', 'track_comments_list', 'track_stats', 'trending_tracks', 'username_available')) then 'ÉCART' else 'ok' end
   union all
   -- ---- 4 ter. étape 18 (maintenance avant la 1.0) ------------------------------------------------------------------------------------------------------
   select 100, 'étape 18 : search_path fixé sur cloud_saves_touch, season_clock, season_bounds, current_season, elo', '5 sur 5',
@@ -362,6 +362,47 @@ checks as (
   select 154, 'étape 22 : modérateurs enregistrés (table moderators, à remplir à la main : supabase/COMPTES.md) · suspensions en cours · décisions au journal', 'info',
          case when to_regclass('public.moderation_log') is null or to_regclass('public.account_suspensions') is null then 'tables absentes'
               else (xpath('/row/c/text()', query_to_xml('select (select count(*) from public.moderators) || '' modérateur(s) · '' || (select count(*) from public.account_suspensions where lifted_at is null and (until is null or until > now())) || '' suspension(s) en cours · '' || (select count(*) from public.moderation_log) || '' décision(s) au journal'' as c', false, true, '')))[1]::text end,
+         'info'
+  union all
+  -- ---- 4 nonies. étape 23 (amorces officielles, rival juste devant, boîte de réception : COMPLETE-010, COMPLETE-015) -------------------------------------------------
+  select 160, 'étape 23 : official_runs présente, RLS activée ; lecture publique SANS les commandes (inputs) ; aucune écriture pour anon ni authenticated (clé de service seulement)', 'conforme',
+         case when to_regclass('public.official_runs') is null then 'table absente'
+              when not (select relrowsecurity from pg_class where oid = to_regclass('public.official_runs')) then 'RLS désactivée'
+              when has_any_column_privilege('anon', 'public.official_runs', 'insert') or has_any_column_privilege('authenticated', 'public.official_runs', 'insert')
+                or has_any_column_privilege('anon', 'public.official_runs', 'update') or has_any_column_privilege('authenticated', 'public.official_runs', 'update')
+                or has_table_privilege('anon', 'public.official_runs', 'delete') or has_table_privilege('authenticated', 'public.official_runs', 'delete') then 'ÉCRITURE ouverte au jeu'
+              when has_column_privilege('anon', 'public.official_runs', 'inputs', 'select') or has_column_privilege('authenticated', 'public.official_runs', 'inputs', 'select') then 'commandes lisibles'
+              when not (has_column_privilege('anon', 'public.official_runs', 'time', 'select') and has_column_privilege('anon', 'public.official_runs', 'ghost', 'select') and has_column_privilege('anon', 'public.official_runs', 'level', 'select')) then 'amorces illisibles sans session'
+              else 'conforme' end,
+         case when to_regclass('public.official_runs') is null then 'MANQUE'
+              when not (select relrowsecurity from pg_class where oid = to_regclass('public.official_runs'))
+                or has_any_column_privilege('anon', 'public.official_runs', 'insert') or has_any_column_privilege('authenticated', 'public.official_runs', 'insert')
+                or has_any_column_privilege('anon', 'public.official_runs', 'update') or has_any_column_privilege('authenticated', 'public.official_runs', 'update')
+                or has_table_privilege('anon', 'public.official_runs', 'delete') or has_table_privilege('authenticated', 'public.official_runs', 'delete')
+                or has_column_privilege('anon', 'public.official_runs', 'inputs', 'select') or has_column_privilege('authenticated', 'public.official_runs', 'inputs', 'select')
+                or not (has_column_privilege('anon', 'public.official_runs', 'time', 'select') and has_column_privilege('anon', 'public.official_runs', 'ghost', 'select') and has_column_privilege('anon', 'public.official_runs', 'level', 'select')) then 'ÉCART'
+              else 'ok' end
+  union all
+  select 161, 'étape 23 : rival_ahead appelable sans session (lecture publique) ; inbox_summary réservée aux sessions (jamais anon) ; security definer, search_path fixé', 'conformes',
+         case when to_regprocedure('public.rival_ahead(text,integer,double precision)') is null or to_regprocedure('public.inbox_summary(timestamp with time zone)') is null then 'fonctions absentes'
+              when not has_function_privilege('anon', 'public.rival_ahead(text,integer,double precision)', 'execute') or has_function_privilege('anon', 'public.inbox_summary(timestamp with time zone)', 'execute')
+                or not has_function_privilege('authenticated', 'public.inbox_summary(timestamp with time zone)', 'execute')
+                or exists (select 1 from pg_proc p where p.oid in (to_regprocedure('public.rival_ahead(text,integer,double precision)'), to_regprocedure('public.inbox_summary(timestamp with time zone)')) and (not p.prosecdef or array_to_string(p.proconfig, ',') not like 'search_path=%')) then 'droits non conformes'
+              else 'conformes' end,
+         case when to_regprocedure('public.rival_ahead(text,integer,double precision)') is null or to_regprocedure('public.inbox_summary(timestamp with time zone)') is null then 'MANQUE'
+              when not has_function_privilege('anon', 'public.rival_ahead(text,integer,double precision)', 'execute') or has_function_privilege('anon', 'public.inbox_summary(timestamp with time zone)', 'execute')
+                or not has_function_privilege('authenticated', 'public.inbox_summary(timestamp with time zone)', 'execute')
+                or exists (select 1 from pg_proc p where p.oid in (to_regprocedure('public.rival_ahead(text,integer,double precision)'), to_regprocedure('public.inbox_summary(timestamp with time zone)')) and (not p.prosecdef or array_to_string(p.proconfig, ',') not like 'search_path=%')) then 'ÉCART'
+              else 'ok' end
+  union all
+  select 162, 'étape 23 : aucune fonction de la base ne lit official_runs (classements, saisons, divisions, duels, tournois, rangs : les amorces ne comptent pour personne)', 'aucune',
+         coalesce((select string_agg(p.proname, ', ' order by p.proname) from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosrc ilike '%official_runs%'), 'aucune'),
+         case when to_regclass('public.official_runs') is null then 'MANQUE'
+              when exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosrc ilike '%official_runs%') then 'ÉCART' else 'ok' end
+  union all
+  select 163, 'étape 23 : amorces officielles enregistrées (par version de physique : circuits, temps ; à produire par tools/seed-officiels.mjs avec la clé de service)', 'info',
+         case when to_regclass('public.official_runs') is null then 'table absente'
+              else coalesce((xpath('/row/c/text()', query_to_xml('select string_agg(phys_ver || '' : '' || n || '' temps sur '' || k || '' circuits'', '' · '' order by phys_ver) as c from (select phys_ver, count(*) n, count(distinct track_key) k from public.official_runs group by phys_ver) x', false, true, '')))[1]::text, 'aucune amorce') end,
          'info'
   union all
   -- ---- 5. renseignements ---------------------------------------------------------------------------------------------------------------------
