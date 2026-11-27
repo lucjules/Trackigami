@@ -659,4 +659,18 @@ export default {
   'Identifiant de commentaire invalide.': 'Invalid comment identifier.',
   'Compte suspendu : publier et commenter est impossible jusqu’à sa réactivation.': 'Account suspended: publishing and commenting are not possible until it is reactivated.',
   'Compte suspendu : publier et commenter est impossible jusqu’au {d} {t} (UTC).': 'Account suspended: publishing and commenting are not possible until {d} {t} (UTC).',
+  // Amorces officielles, rival juste devant, duel contre un fantôme officiel (COMPLETE-010, étape SQL 23)
+  'Officiel · automatique (bronze)': 'Official · autopilot (bronze)', 'Officiel · automatique (argent)': 'Official · autopilot (silver)',
+  'Officiel · automatique (or)': 'Official · autopilot (gold)', 'Officiel · automatique (cristal)': 'Official · autopilot (crystal)',
+  'Officiel · automatique': 'Official · autopilot', 'Officiel · testeur': 'Official · tester', 'Officiel · testeur {name}': 'Official · tester {name}',
+  'Hors classement': 'Not ranked', 'hors classement': 'not ranked', 'place {n:w}': 'rank {n}',
+  '🎯 Juste devant toi :': '🎯 Just ahead of you:', '🎯 Pour commencer :': '🎯 To get started:', '🏆 Personne devant toi : ni joueur, ni amorce officielle.': '🏆 Nobody ahead of you: no player, no official time.',
+  'Affronter ce fantôme': 'Race this ghost', 'Affronter ce fantôme officiel': 'Race this official ghost',
+  'Aucun joueur classé pour l’instant : sois le premier !': 'No ranked player yet: be the first!',
+  'Les lignes « Officiel » sont des temps du pilote automatique du jeu (ou d’un testeur) : hors classement, elles ne prennent la place de personne et ne comptent ni dans les points, ni dans les divisions.': 'The “Official” rows are times set by the game’s autopilot (or by a tester): they are not ranked, take nobody’s place and count neither for points nor for divisions.',
+  'Contre un fantôme officiel': 'Against an official ghost', '(entraînement : hors classement de la saison)': '(practice: not ranked in the season)',
+  'Les amorces officielles ne comptent ni dans les points ni dans les divisions : seuls les temps des joueurs, rejoués par le serveur, comptent.': 'Official times count neither for points nor for divisions: only players’ times, replayed by the server, count.',
+  'Niveau bronze': 'Bronze level', 'Niveau argent': 'Silver level', 'Niveau or': 'Gold level', 'Niveau cristal': 'Crystal level', 'Niveau du fantôme': 'Ghost level', 'Courir': 'Race',
+  'Le fantôme du pilote automatique du jeu, réglé sur une médaille : un entraînement, sans Elo ni division. Ton temps compte au classement du circuit, comme toute course.': 'The ghost of the game’s autopilot, tuned to a medal: practice, with no Elo and no division. Your time counts on the track’s leaderboard, like any race.',
+  'Pas encore de fantôme officiel pour ce circuit à ce niveau (le serveur n’a pas reçu les amorces).': 'No official ghost yet for this track at this level (the server has not received the official times).',
 };

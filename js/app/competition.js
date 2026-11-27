@@ -6,6 +6,8 @@ import { online } from '../online.js';
 import { formatTime } from '../storage.js';
 import { locale } from '../i18n.js';
 import { describeVariant } from '../trackDescriptor.js';
+import { officialGhost, OFFICIAL_LEVELS } from '../online/officials.js';
+import { PHYS_VER } from '../version.js';
 
 const when = (d) => { const t = new Date(d); return Number.isFinite(t.getTime()) ? t.toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''; };
 
@@ -14,14 +16,17 @@ export const competitionMethods = {
     const body = document.createElement('div');
     body.className = 'competition';
     this.ui.modal({ title: '⚔ Compétition', body, actions: [{ label: 'Fermer', primary: true }] });
+    // Contre un fantôme officiel (COMPLETE-010) : pour tout le monde, compte ou non, même seul en ligne. Un entraînement : ni Elo, ni division, ni classement à part.
+    const official = this._officialDuelSection();
     if (this.identity.kind !== 'account') {
       body.innerHTML = '<p>Les duels et les tournois demandent un <b>compte</b> : leurs résultats et le classement Elo sont gardés en ligne.</p>';
+      body.prepend(official);
       return;
     }
     body.innerHTML = '<p class="meta">Chargement…</p>';
     let duels, tours, ratings, friends;
     try { [duels, tours, ratings, friends] = await Promise.all([online.duels(), online.tournaments(), online.friendsRatings(), online.friends()]); }
-    catch (e) { body.innerHTML = `<p class="lb-off">Compétition indisponible : ${esc(e.message)}</p>`; return; }
+    catch (e) { body.innerHTML = `<p class="lb-off">Compétition indisponible : ${esc(e.message)}</p>`; body.prepend(official); return; }
     if (!document.body.contains(body)) return;
     const me = ratings.find((r) => r.player === online.uid);
     const okFriends = friends.filter((f) => f.status === 'accepted');
@@ -54,6 +59,7 @@ export const competitionMethods = {
         <form class="tour-new row"><input type="text" maxlength="40" placeholder="Nom du tournoi" aria-label="Nom du tournoi" required><select class="tour-track" aria-label="Circuit du tournoi">${tracks}</select><select class="tour-days" aria-label="Durée">${[1, 2, 3, 7, 14].map((n) => opt(String(n), `${n} jour${n > 1 ? 's' : ''}`)).join('')}</select><button class="btn primary" type="submit">Créer</button></form>
         <div class="tour-board"></div></section>
       <p class="mp-err comp-err" role="alert"></p>`;
+    body.prepend(official);
     const err = body.querySelector('.comp-err'), redo = () => this.competitionMenu();
     const act = async (fn) => { err.textContent = ''; try { await fn(); } catch (e) { err.textContent = e.message; } };
     for (const b of body.querySelectorAll('[data-duel-yes]')) b.onclick = () => act(async () => { await online.duelRespond(+b.dataset.duelYes, true); redo(); });
@@ -76,6 +82,34 @@ export const competitionMethods = {
         redo();
       });
     };
+  },
+
+  // « Duel » contre un fantôme officiel (amorce du pilote automatique, étape SQL 23) : la course ordinaire du circuit, ce fantôme en rival. À l'arrivée, le jeu dit qui
+  // gagne (comme pour tout rival). Aucun duel n'est créé en base : ni Elo, ni division, ni classement à part ; le temps compte au classement du circuit comme toute course.
+  _officialDuelSection() {
+    const sec = document.createElement('section');
+    sec.className = 'comp-official';
+    const opt = (v, l) => `<option value="${esc(v)}">${esc(l)}</option>`;
+    const LEVEL_LABELS = { bronze: 'Niveau bronze', argent: 'Niveau argent', or: 'Niveau or', cristal: 'Niveau cristal' };
+    sec.innerHTML = `<h3>Contre un fantôme officiel</h3>
+      <form class="off-duel row"><select class="off-track" aria-label="Circuit">${this.builtins.filter((b) => b.def.decor !== 'atelier').map((b) => opt(b.key, b.def.name)).join('')}</select>
+        <select class="off-level" aria-label="Niveau du fantôme">${OFFICIAL_LEVELS.map((l) => opt(l, LEVEL_LABELS[l])).join('')}</select><button class="btn primary" type="submit">Courir</button></form>
+      <p class="meta">Le fantôme du pilote automatique du jeu, réglé sur une médaille : un entraînement, sans Elo ni division. Ton temps compte au classement du circuit, comme toute course.</p>
+      <p class="mp-err off-err" role="alert"></p>`;
+    const f = sec.querySelector('.off-duel'), err = sec.querySelector('.off-err');
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      const key = f.querySelector('.off-track').value, level = f.querySelector('.off-level').value, btn = f.querySelector('button');
+      btn.disabled = true;
+      let g = null;
+      try { g = await officialGhost(key, 'auto', level, PHYS_VER); } catch (x) { err.textContent = x.message; btn.disabled = false; return; }
+      btn.disabled = false;
+      if (!g) { err.textContent = 'Pas encore de fantôme officiel pour ce circuit à ce niveau (le serveur n’a pas reçu les amorces).'; return; }
+      this.ui.closeModal();
+      this.raceWithRivals(key, null, [g]);
+    };
+    return sec;
   },
 
   // Une course de duel ou de tournoi : le circuit de la carrière sous sa catégorie (le record local et l'envoi au serveur suivent cette clé).
