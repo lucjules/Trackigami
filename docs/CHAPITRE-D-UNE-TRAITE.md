@@ -89,9 +89,16 @@ le jeu dit que le serveur n'est pas à jour et garde le record sur l'appareil.
 ## 6. Le reste
 
 - **PHYS_VER ne change pas** (aucune physique touchée). Équité : les mêmes circuits, la même physique, le temps du serveur ; aides → catégorie à part.
-- Record local `rec3.ch-…` : `{ time, splits (fins de manche), legs: [6 commandes], pv, date, name }` (synchronisé comme les autres `rec3.*`) ; pas de
+- Record local `rec3.ch-…` : `{ time, splits (fins de manche, en pas cumulés), inputs (les 6 commandes jointes par « , »), chain: true, pv, date, name }` (mise en œuvre : `validRecord` accepte jusqu'à 1 200 s quand `chain: true`, une course seule reste à 600 s) (synchronisé comme les autres `rec3.*`) ; pas de
   « Revoir la course » ni de partage de fantôme pour un enchaînement en v1.
 - Tests prévus : `tools/test-chain.mjs` (clé, liste recalculée, refus : mauvais nombre, ordre, manche truquée, temps faux, limites, variantes, clé
   croisée ; rejeu accepté sur un chapitre réel avec le pilote automatique ; budget processeur mesuré), `test-submit-handler.mjs` (action, cadence,
   écriture), non-régression des catégories (`test-variants`, `check-categories`, clés officielles inchangées), test navigateur (enchaînement de bout en
   bout avec des manches courtes), textes traduits (`test-i18n`, `i18n-scan`).
+
+## 7. Mise en œuvre (0.24.0)
+
+`js/chain.js` (clé, liste, limites, forme), `verifyChain` dans `js/verify.js`, action `submit-chain` dans `supabase/functions/submit-score/handler.js`,
+`js/chainRun.js` (séquencement par `Championship`), `js/app/chain.js` (écrans), `js/race.js` / `js/race/finish.js` (manche neutre, « recommencer »).
+Mesure du test `tools/test-chain.mjs` : 124 ms pour les 232 s du chapitre 14 (0,53 ms par seconde de course), soit ≈ 640 ms estimées pour 1 200 s.
+Écart avec la proposition : la cadence est exprimée sur la fenêtre de 10 minutes de `rate_check` (600 au total, 400 anonymes : le même débit que 60 et 40 par minute).

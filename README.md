@@ -3,7 +3,7 @@
 Jeu de course contre-la-montre **low-poly** dans le navigateur, avec éditeur de circuits.
 C'est un jeu original : décors, véhicules, pièces, musique et circuits ont été conçus pour ce projet.
 
-Version actuelle : **bêta 0.23.0** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
+Version actuelle : **bêta 0.24.0** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
 
 ## Jouer
 
@@ -33,6 +33,7 @@ Le jeu s'**installe comme une application** (bouton d'installation du navigateur
 - **Académie** : six leçons guidées de deux minutes (conduite, dérapage, mini-turbo en série, réception parfaite, plaque de transformation, obstacles), chacune avec un objectif ; **huit leçons par mécanique** (gravité et inversion, murs et looping, eau et bateau, deltaplane, verre, aimant, obstacles animés, portes logiques), chacune démontrée réussissable et non triviale par les tests, et deux exercices notés de plus (vitesse sur le mur, obstacles animés) ; l'éditeur démarre en **mode guidé** (l'essentiel seulement) pour un nouveau joueur.
 - **Mécaniques** : à la **première rencontre** d'une mécanique (36 : revêtements, plaques, obstacles, murs, plafonds, gravité, logique…), une carte « Nouveau » sur la fiche du circuit et un rappel discret en course (une seule fois, jamais sur un message important) ; l'index **Progression › Mécaniques** garde ce qu'on a découvert, et la progression suit le compte (union des appareils).
 - **Carrière** : un chapitre s'ouvre avec 4 médailles dans le précédent (l'Atelier bonus : dans le premier) ; chaque circuit a un **objectif bonus** ★ qui reprend ce qu'il enseigne (un vol d'au moins *t* s, une vitesse à atteindre, une section sous un temps, des mini-turbos dans une section, finir en moins de *t* s, réceptions parfaites, anneaux, finir en moto…) et qui rapporte 50 pièces une seule fois.
+- **Chapitre d'une traite** : sur un chapitre ouvert, bouton « ⏱ D'une traite » : ses 6 circuits à la suite, au **temps cumulé**, avec un **classement à part** (« recommencer » reprend tout à la manche 1 ; ni record par circuit, ni médaille, ni pièces ; chaque enchaînement est rejoué manche par manche par le serveur). La carrière entière n'est pas proposée (trop longue pour le classement).
 - **Défi du jour** : un circuit généré à partir de la date, le même pour tout le monde, vérifié par le pilote automatique.
 - **Médailles** Bronze / Argent / Or / Cristal, chronos intermédiaires, réapparition au dernier checkpoint.
 - **Replays — Replay Theater** : chaque course est enregistrée (commandes seulement, la physique est déterministe) et se revoit à l'identique, de ×0,25 à ×4. Le Theater ajoute une **barre de temps** (aller et venir, secteurs et incidents marqués), jusqu'à **trois courses à comparer** sur la piste (ancien record, fantôme or, record mondial, rivaux), les caméras **libre** et **cinématique** en plus des caméras TV et orbite, et un **panneau d'analyse** (trajectoires sur la carte, vitesses, écarts, secteurs).
