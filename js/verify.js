@@ -9,10 +9,11 @@ import { BUILTIN_TRACKS, buildBuiltin } from './tracks.js';
 import { dailyChallenge } from './daily.js';
 import { GhostRunner, decodeInputs } from './replay.js';
 import { PHYS_VER } from './version.js';
-import { MAX_RUN_STEPS, MAX_INPUTS_CHARS } from './constants.js';
+import { MAX_RUN_STEPS, MAX_INPUTS_CHARS, DT } from './constants.js';
 import { encodeFloats } from './ghostFormat.js';
 import { splitKey, parseVariant, applyVariant } from './variants.js';
 import { seasonOpen, seasonTracks } from './seasons.js';
+import { chainForKey, chainShapeError, chainTime, chainSplits, CHAIN_SEP } from './chain.js';
 
 // Un circuit écrit par une version PLUS RÉCENTE du jeu peut contenir des pièces que ce code ne connaît pas : la lecture les saute (Track.decode, `lost.unknown`) et la signature ne
 // correspond plus. Le refus est correct ; le message dit la vraie cause (mettre le serveur à jour) au lieu de « le code ne correspond pas ».
@@ -27,6 +28,7 @@ const UNKNOWN_MSG = 'Ce serveur ne connaît pas toutes les pièces de ce circuit
 //   <clé>~v1.…           variante de record (variants.js) : le circuit de la clé officielle, transformé par ses règles
 //   b-…~v1.sea-N         saison hebdomadaire N (seasons.js) : acceptée seulement pendant sa semaine, sur ses trois circuits
 //   b-…~v1.duel-N / tour-N  duel ou tournoi (E17) : le circuit officiel ; la fonction serveur vérifie en base la fenêtre et les participants
+//   ch-…                 enchaînement d'un chapitre (COMPLETE-014) : PAS ici (une course seule ne peut pas y entrer) ; voir verifyChain, en bas
 export function trackForKey(key, code = '', now = Date.now()) {
   key = String(key || '');
   const { base, variant } = splitKey(key);
@@ -125,4 +127,26 @@ export function verifyPublish({ code, inputs, time, physVer }) {
   if (!(Math.abs(run.time - time) <= 0.0005)) return { ok: false, error: 'Le temps ne correspond pas à la course rejouée.' };
   if (!(Math.abs(run.time - track.vt) <= AUTHOR_TIME_TOLERANCE)) return { ok: false, error: 'Le temps de l’auteur inscrit dans le circuit ne correspond pas à la course rejouée.' };
   return { ok: true, time: run.time, key: track.userKey, signature: track.signature(), sigText: track.signatureText(), name: track.name, decor: track.decor, pieces: track.tiles.length, laps: track.laps || 1 };
+}
+
+// Épreuve « chapitre d'une traite » (COMPLETE-014, js/chain.js) : les 6 manches d'un chapitre, rejouées chacune sur SON circuit (reconstruit par le serveur à
+// partir de la clé), SANS fantôme. Refus au premier échec ; la forme est contrôlée avant tout rejeu. Le temps retenu est celui du rejeu : la somme des pas des
+// 6 manches × DT (chainTime), exactement l'opération du jeu. Renvoie { ok, time, splits (fins de manche en pas cumulés), inputs (jointes), name, aided }.
+// La clé d'un enchaînement n'est connue QUE d'ici : verifyRun (trackForKey) la refuse, et une clé de circuit est refusée ici.
+export function verifyChain({ trackKey, legs, times, time, physVer }) {
+  if (physVer !== PHYS_VER) return versionError(physVer);
+  const shape = chainShapeError({ legs, times, time });
+  if (shape) return { ok: false, error: shape };
+  let c;
+  try { c = chainForKey(trackKey); } catch (e) { return { ok: false, error: e.message }; }
+  const steps = [];
+  for (let i = 0; i < legs.length; i++) {
+    const run = replayRun(c.tracks[i], legs[i]);
+    if (run == null) return { ok: false, error: `La manche ${i + 1} rejouée n’atteint pas l’arrivée.`, leg: i };
+    if (!(Math.abs(run.time - times[i]) <= 0.0005)) return { ok: false, error: `Le temps de la manche ${i + 1} ne correspond pas à la course rejouée.`, leg: i };
+    steps.push(Math.round(run.time / DT));
+  }
+  const total = chainTime(steps);
+  if (!(Math.abs(total - time) <= 0.0005)) return { ok: false, error: 'Le temps total ne correspond pas aux manches rejouées.' };
+  return { ok: true, time: total, splits: chainSplits(steps), inputs: legs.join(CHAIN_SEP), name: c.name, kind: 'chain', aided: c.aided };
 }
