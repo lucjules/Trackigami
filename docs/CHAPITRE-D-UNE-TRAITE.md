@@ -57,7 +57,7 @@ Le serveur, dans l'ordre (refus au premier échec, **avant** tout rejeu pour les
 1. forme : `legs` et `times` de longueur 6 exactement ; chaque commande base64 non vide ; **somme des longueurs + 5 ≤ 400 000** ; chaque temps fini,
    > 0, ≤ 600 s ; `time` ≤ 1 200 s et égal à la somme des `times` (0,003 s près) ;
 2. cadence : la soumission compte comme une course (`rate_check` « submit », comme aujourd'hui) **et** dans un second compteur « chain » (la fonction
-   SQL existante accepte un nom quelconque) : 3 par 10 minutes et par pilote, 60 par minute au total, 40 pour les sessions anonymes ;
+   SQL existante accepte un nom quelconque) : 3 par 10 minutes et par pilote, 600 par 10 minutes au total (60 par minute), 400 pour les sessions anonymes ;
 3. rejeu : `verifyChain` (nouveau, `js/chain.js`, dans la fermeture de `verify.js`) rejoue les 6 manches **sans fantôme**, chacune sur son circuit ;
    chaque manche doit atteindre l'arrivée et redonner son temps (0,5 ms près) ; le temps retenu est **celui du rejeu** (somme des pas × DT) ;
 4. écriture : `submit_best` **inchangée** : `tk` = clé d'enchaînement, `t` = temps rejoué, `inp` = les 6 commandes jointes par « , » (caractère absent
@@ -76,7 +76,7 @@ Le serveur, dans l'ordre (refus au premier échec, **avant** tout rejeu pour les
 | Durée d'une manche | ≤ 600 s | `MAX_RUN_SECONDS`, comme une course seule |
 | Durée totale | ≤ 1 200 s | 2,3 × la plus grande somme des temps bronze d'un chapitre (530 s) ; reste < 3 600 s de `scores.time` |
 | Processeur | ≈ 0,9 ms par seconde de course (mesuré sous Node, 206 à 347 ms pour un chapitre) → ≤ ≈ 1,1 s au pire | à confirmer sur la plateforme : la limite processeur des fonctions Supabase (de l'ordre de 2 s) n'est pas mesurable d'ici |
-| Cadence | 3 / 10 min / pilote ; 60 / min au total ; 40 / min anonymes | un enchaînement se joue en 4 minutes au moins ; chaque envoi vaut 6 rejeux |
+| Cadence | 3 / 10 min / pilote ; 600 / 10 min au total ; 400 / 10 min anonymes | un enchaînement se joue en 4 minutes au moins ; chaque envoi vaut 6 rejeux |
 
 ## 5. Étape SQL
 

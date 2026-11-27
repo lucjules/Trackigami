@@ -3,7 +3,10 @@
 import assert from 'node:assert/strict';
 const { ReadableStream } = globalThis;
 import { test, finish } from './harness.mjs';
-import { createHandler, MAX_BODY_CHARS, MAX_GHOST_CHARS, RATE_LIMIT } from '../supabase/functions/submit-score/handler.js';
+import { createHandler, MAX_BODY_CHARS, MAX_GHOST_CHARS, RATE_LIMIT, CHAIN_RATE_LIMIT } from '../supabase/functions/submit-score/handler.js';
+import { chainKey, chainLegIndexes, chainTime } from '../js/chain.js';
+import { DT } from '../js/constants.js';
+import { botRun } from './seed-officiels.mjs';
 import { MAX_TRACK_CODE_CHARS } from '../js/constants.js';
 import { Simulation } from '../js/simulation.js';
 import { InputRecorder, quantSteer } from '../js/replay.js';
@@ -294,7 +297,7 @@ test('méthode : OPTIONS répond aux navigateurs, PUT / DELETE sont refusés ; G
   assert.equal((await h(request(null, { method: 'PUT' }))).status, 405);
   assert.equal((await h(request(null, { method: 'DELETE' }))).status, 405);
   const r = await h(new Request('https://fn.example/', { method: 'GET' })), j = await r.json();
-  assert.equal(r.status, 200); assert.equal(j.physVer, PHYS_VER); assert.equal(j.service, 'submit-score'); assert.deepEqual(j.actions, ['submit', 'publish-track']);
+  assert.equal(r.status, 200); assert.equal(j.physVer, PHYS_VER); assert.equal(j.service, 'submit-score'); assert.deepEqual(j.actions, ['submit', 'publish-track', 'submit-chain']);
   assert.equal(sb.calls.length, 0, 'aucun appel à la base');
 });
 test('pas de jeton valide : 401, et rien n\'est rejoué ni écrit', async () => {
@@ -607,6 +610,76 @@ test('TECH-079 : une clé de défi du jour inexistante (daily-2026-02-30, -04-31
     assert.match((await r.json()).error, /Défi du jour/, key);
     assert.equal(submitCalls(sb).length, 0, key + ' : rien écrit');
   }
+});
+
+console.log('Enchaînement « chapitre d\'une traite » (action submit-chain, COMPLETE-014)');
+const CH = 13, CH_KEY = chainKey(CH);
+const CH_RUNS = chainLegIndexes(CH).map((i) => botRun(buildBuiltin(BUILTIN_TRACKS[i]), null));
+const CH_TIMES = CH_RUNS.map((r) => r.time);
+const CH_TOTAL = chainTime(CH_TIMES.map((t) => Math.round(t / DT)));
+const chainBody = (extra = {}) => ({ action: 'submit-chain', trackKey: CH_KEY, legs: CH_RUNS.map((r) => r.inputs), times: CH_TIMES, time: CH_TOTAL, physVer: PHYS_VER, ...extra });
+test('le service annonce l\'action submit-chain et ses limites (GET)', async () => {
+  const j = await (await make(fakeSupabase())(request('', { method: 'GET' }))).json();
+  assert.ok(j.actions.includes('submit-chain'));
+  assert.deepEqual(j.chain, { legs: 6, maxSeconds: 1200, maxInputs: 400000 });
+});
+test('enchaînement rejoué et confirmé : UNE écriture submit_best (temps rejoué, 6 commandes jointes, fins de manche, ni fantôme ni empreinte)', async () => {
+  const sb = fakeSupabase(), h = make(sb);
+  const r = await h(request(chainBody({ time: CH_TOTAL + 0.0004 }))), j = await r.json();
+  assert.equal(r.status, 200, JSON.stringify(j));
+  assert.deepEqual({ ok: j.ok, improved: j.improved, rank: j.rank, total: j.total }, { ok: true, improved: true, rank: 1, total: 1 });
+  assert.equal(submitCalls(sb).length, 1);
+  const a = submitCalls(sb)[0].args;
+  assert.equal(a.tk, CH_KEY); assert.equal(a.t, CH_TOTAL, 'le temps du REJEU, pas celui annoncé'); assert.equal(a.pv, PHYS_VER);
+  assert.equal(a.inp, CH_RUNS.map((r) => r.inputs).join(','));
+  assert.ok(a.inp.length <= 400000);
+  assert.equal(a.sp.length, 6); assert.equal(a.sp[5], Math.round(CH_TOTAL / DT));
+  assert.equal(a.gh, null); assert.equal(a.gveh, null); assert.equal(a.strong, null);
+  assert.match(a.tname, /Chapitre 14/); assert.ok(a.tname.length <= 60);
+});
+test('cadence : l\'envoi compte comme une course ET dans le compteur « chain » (3 par 10 minutes, plafonds global et anonyme)', async () => {
+  const sb = fakeSupabase({ anonymous: true });
+  await make(sb)(request(chainBody()));
+  const kinds = sb.calls.filter((c) => c.url.includes('rate_check')).map((c) => c.args);
+  assert.deepEqual(kinds.map((k) => k.k), ['submit', 'chain']);
+  const c = kinds[1];
+  assert.deepEqual({ max: c.max_hits, w: c.window_s, g: c.global_max, a: c.anon_max, anon: c.is_anon }, { max: CHAIN_RATE_LIMIT.max, w: 600, g: CHAIN_RATE_LIMIT.globalMax, a: CHAIN_RATE_LIMIT.anonMax, anon: true });
+  const busy = fakeSupabase({ rate: (b) => (b.k === 'chain' ? 120 : 0) });
+  const r = await make(busy)(request(chainBody()));
+  assert.equal(r.status, 429); assert.equal(r.headers.get('Retry-After'), '120');
+  assert.equal(submitCalls(busy).length, 0, 'rien rejoué ni écrit');
+  const down = fakeSupabase({ rate: (b) => (b.k === 'chain' ? 'x' : 0) });
+  assert.equal((await make(down)(request(chainBody()))).status, 503, 'compteur indisponible : refusé, jamais rejoué sans limite');
+  const sb3 = fakeSupabase(), h3 = make(sb3, { chainRateLimit: { ...CHAIN_RATE_LIMIT, max: 1 } });
+  assert.equal((await h3(request(chainBody()))).status, 200);
+  assert.equal((await h3(request(chainBody()))).status, 429, 'frein en mémoire de l\'instance');
+});
+test('refus sans écriture : manche truquée, nombre de manches, total, clé de circuit, clé inconnue, autre physique', async () => {
+  const legs = CH_RUNS.map((r) => r.inputs); const bad = [...legs]; bad[3] = legs[2];
+  const cases = [
+    [chainBody({ legs: bad }), 422, /manche 4/],
+    [chainBody({ legs: legs.slice(0, 5), times: CH_TIMES.slice(0, 5) }), 422, /exactement 6/],
+    [chainBody({ time: CH_TOTAL + 0.01 }), 422, /total/],
+    [chainBody({ trackKey: `b-${BUILTIN_TRACKS[0].id}-x` }), 400, /invalide/],
+    [chainBody({ trackKey: 'ch-desert-zzz' }), 422, /Version/],
+    [chainBody({ trackKey: CH_KEY + '~v1.veh-moto' }), 422, /catégorie/],
+    [chainBody({ legs: [...legs.slice(0, 5), 'a,b'] }), 400, /invalide/],
+    [chainBody({ physVer: PHYS_VER - 1 }), 422, /Version du jeu/],
+  ];
+  for (const [body, status, re] of cases) {
+    const sb = fakeSupabase();
+    const r = await make(sb)(request(body)), j = await r.json();
+    assert.equal(r.status, status, JSON.stringify(j));
+    assert.match(j.error, re);
+    assert.equal(submitCalls(sb).length, 0);
+  }
+});
+test('cloisonnement : l\'envoi ordinaire refuse une clé d\'enchaînement (422), la catégorie « avec aides » est acceptée par submit-chain', async () => {
+  const r = await make(fakeSupabase())(request({ trackKey: CH_KEY, inputs: CH_RUNS[0].inputs, time: CH_TIMES[0], physVer: PHYS_VER }));
+  assert.equal(r.status, 422);
+  const sb = fakeSupabase();
+  assert.equal((await make(sb)(request(chainBody({ trackKey: chainKey(CH, { aided: true }) })))).status, 200);
+  assert.match(submitCalls(sb)[0].args.tk, /~v1\.as-1$/);
 });
 
 await finish('Tous les tests de la fonction serveur passent.');

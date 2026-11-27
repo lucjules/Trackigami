@@ -3,15 +3,17 @@
 // Reçoit une course terminée (clé du circuit, commandes enregistrées, temps), la REJOUE avec le vrai code du jeu (js/verify.js), et n'enregistre le
 // temps que s'il est confirmé. server.ts n'est que le fil qui la branche sur Deno.serve ; `npm run build:function` regroupe le tout en un seul fichier.
 //
-// Deux actions : l'envoi d'une course (par défaut) et la PUBLICATION d'un circuit (action « publish-track », temps auteur rejoué par le serveur).
+// Trois actions : l'envoi d'une course (par défaut), la PUBLICATION d'un circuit (action « publish-track », temps auteur rejoué par le serveur) et l'envoi d'un
+// ENCHAÎNEMENT « chapitre d'une traite » (action « submit-chain », COMPLETE-014 : les 6 manches rejouées, docs/CHAPITRE-D-UNE-TRAITE.md).
 // GET : l'état du service (version de physique du serveur, limites) — la preuve observable de la version réellement déployée.
 //
 // Défenses, dans l'ordre : méthode, configuration, taille de la requête (avant de la lire), identité du pilote (jeton Supabase), cadence (le rejeu coûte du
 // processeur), forme des données, rejeu de la course, profil du pilote, écriture ATOMIQUE en base (submit_best / publish_track). Les erreurs internes ne
 // sont jamais renvoyées telles quelles. Prérequis : supabase/etape15-backend.sql (voir supabase/MIGRATIONS.md).
-import { verifyRun, verifyPublish } from '../../../js/verify.js';
+import { verifyRun, verifyPublish, verifyChain } from '../../../js/verify.js';
 import { PHYS_VER } from '../../../js/version.js';
 import { MAX_TRACK_CODE_CHARS, MAX_INPUTS_CHARS, MAX_RUN_SECONDS, MAX_PUBLISH_CHARS, MAX_PUBLISH_PIECES } from '../../../js/constants.js';
+import { MAX_CHAIN_SECONDS, MAX_CHAIN_INPUTS_CHARS, CHAIN_KEY_RE } from '../../../js/chain.js';
 
 // Taille maximale d'une requête : les commandes + le code d'un circuit de joueur + le reste du JSON.
 export const MAX_BODY_CHARS = MAX_INPUTS_CHARS + MAX_TRACK_CODE_CHARS + 4096;
@@ -24,6 +26,10 @@ export const MAX_BODY_CHARS = MAX_INPUTS_CHARS + MAX_TRACK_CODE_CHARS + 4096;
 export const RATE_LIMIT = { max: 8, windowMs: 60_000, globalMax: 600, anonMax: 400 };
 // Taille maximale d'un fantôme enregistré (base64) : 60 000 poses de 28 octets = 2,2 Mo ; une vraie course en fait 100 Ko.
 export const MAX_GHOST_CHARS = 800_000;
+// Enchaînements (submit-chain) : chaque envoi rejoue 6 courses. En PLUS de la cadence ordinaire (l'envoi compte comme une course), un second compteur « chain »
+// en base (même fonction rate_check, autre nom) : 3 par 10 minutes et par pilote (un enchaînement se joue en 4 minutes au moins), 600 par 10 minutes au total
+// (60 par minute), 400 pour les sessions anonymes.
+export const CHAIN_RATE_LIMIT = { max: 3, windowMs: 600_000, globalMax: 600, anonMax: 400 };
 
 
 // Lecture PROGRESSIVE du corps de la requête avec une limite stricte en octets : la lecture s'arrête (et le flux est annulé) dès que la limite est dépassée,
@@ -60,7 +66,7 @@ const dbMessage = async (r) => { try { const j = JSON.parse(await r.text()); ret
 export const UPSTREAM_TIMEOUT_MS = 8_000;
 class Upstream extends Error {}      // Supabase injoignable, trop lent, ou réponse illisible : panne passagère (503), jamais « erreur interne » (500)
 
-export function createHandler({ supabaseUrl, serviceKey, fetch: rawFetch = globalThis.fetch, allowedOrigin = '*', now = Date.now, rateLimit = RATE_LIMIT, log = console.error, upstreamTimeoutMs = UPSTREAM_TIMEOUT_MS, build = null }) {
+export function createHandler({ supabaseUrl, serviceKey, fetch: rawFetch = globalThis.fetch, allowedOrigin = '*', now = Date.now, rateLimit = RATE_LIMIT, log = console.error, upstreamTimeoutMs = UPSTREAM_TIMEOUT_MS, build = null, chainRateLimit = CHAIN_RATE_LIMIT }) {
   // Empreinte de build (tools/build-stamp.mjs) : le fichier généré l'écrit en dernière ligne (`globalThis.__COPYTRACK_BUILD__`), APRÈS l'appel de createHandler : on la lit donc à chaque requête.
   const buildStamp = () => {
     const b = build ?? globalThis.__COPYTRACK_BUILD__;
@@ -86,25 +92,30 @@ export function createHandler({ supabaseUrl, serviceKey, fetch: rawFetch = globa
     });
   const rpc = (name, args) => db(`rpc/${name}`, { method: 'POST', body: JSON.stringify(args) });
 
-  const hits = new Map();       // pilote -> instants (ms) de ses dernières soumissions
-  function tooFast(uid) {
-    const t = now();
-    const recent = (hits.get(uid) ?? []).filter((x) => t - x < rateLimit.windowMs);
-    if (recent.length >= rateLimit.max) { hits.set(uid, recent); return Math.ceil((rateLimit.windowMs - (t - recent[0])) / 1000); }
-    recent.push(t);
-    hits.set(uid, recent);
-    if (hits.size > 5000) for (const [k, v] of hits) if (!v.some((x) => t - x < rateLimit.windowMs)) hits.delete(k);
-    return 0;
+  // Frein en mémoire de l'instance : pilote -> instants (ms) de ses dernières soumissions (un par limite : courses, enchaînements).
+  function brake(lim) {
+    const hits = new Map();
+    return (uid) => {
+      const t = now();
+      const recent = (hits.get(uid) ?? []).filter((x) => t - x < lim.windowMs);
+      if (recent.length >= lim.max) { hits.set(uid, recent); return Math.ceil((lim.windowMs - (t - recent[0])) / 1000); }
+      recent.push(t);
+      hits.set(uid, recent);
+      if (hits.size > 5000) for (const [k, v] of hits) if (!v.some((x) => t - x < lim.windowMs)) hits.delete(k);
+      return 0;
+    };
   }
+  const tooFast = brake(rateLimit);
+  const tooFastChain = brake(chainRateLimit);
 
   // Limite partagée (base). Renvoie { wait } (secondes d'attente, 0 = accepté) ou { down: true } quand la base ne la tient pas (étape 15 absente, panne) :
   // FAIL-CLOSED, la requête est refusée plutôt que rejouée sans limite fiable. Journalisé une fois par minute au plus.
   let lastWarn = 0;
-  async function sharedWait(uid, anon) {
+  async function sharedWait(uid, anon, kind = 'submit', lim = rateLimit, dflt = RATE_LIMIT) {
     try {
       const r = await rpc('rate_check', {
-        k: 'submit', p: uid, max_hits: rateLimit.max, window_s: Math.round(rateLimit.windowMs / 1000),
-        global_max: rateLimit.globalMax ?? RATE_LIMIT.globalMax, is_anon: anon, anon_max: rateLimit.anonMax ?? RATE_LIMIT.anonMax,
+        k: kind, p: uid, max_hits: lim.max, window_s: Math.round(lim.windowMs / 1000),
+        global_max: lim.globalMax ?? dflt.globalMax, is_anon: anon, anon_max: lim.anonMax ?? dflt.anonMax,
       });
       if (!r.ok) throw new Error('rpc ' + r.status);
       const n = await r.json();
@@ -131,7 +142,7 @@ export function createHandler({ supabaseUrl, serviceKey, fetch: rawFetch = globa
   return async function handle(req) {
     if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
     // État du service : la version de physique que CE déploiement vérifie et l'empreinte de son code (build), sans authentification, rien de secret.
-    if (req.method === 'GET') return json(200, { ok: true, service: 'submit-score', physVer: PHYS_VER, build: buildStamp(), rate: { max: rateLimit.max, windowS: Math.round(rateLimit.windowMs / 1000), globalMax: rateLimit.globalMax, anonMax: rateLimit.anonMax }, actions: ['submit', 'publish-track'] });
+    if (req.method === 'GET') return json(200, { ok: true, service: 'submit-score', physVer: PHYS_VER, build: buildStamp(), rate: { max: rateLimit.max, windowS: Math.round(rateLimit.windowMs / 1000), globalMax: rateLimit.globalMax, anonMax: rateLimit.anonMax }, actions: ['submit', 'publish-track', 'submit-chain'], chain: { legs: 6, maxSeconds: MAX_CHAIN_SECONDS, maxInputs: MAX_CHAIN_INPUTS_CHARS } });
     if (req.method !== 'POST') return json(405, { error: 'Méthode non autorisée.' });
     try {
       if (!supabaseUrl || !serviceKey) return json(500, { error: 'Fonction mal configurée (clés Supabase absentes).' });
@@ -163,7 +174,8 @@ export function createHandler({ supabaseUrl, serviceKey, fetch: rawFetch = globa
       let body;
       try { body = JSON.parse(text); } catch { return json(400, { error: 'Requête invalide.' }); }
       const { action = 'submit', trackKey, code = '', inputs, time, physVer } = body ?? {};
-      if (action !== 'submit' && action !== 'publish-track') return json(400, { error: 'Action inconnue.' });
+      if (action !== 'submit' && action !== 'publish-track' && action !== 'submit-chain') return json(400, { error: 'Action inconnue.' });
+      if (action === 'submit-chain') return await chain({ uid, anon, body });
       const publishing = action === 'publish-track';
       if ((!publishing && (typeof trackKey !== 'string' || !TRACK_KEY_RE.test(trackKey))) || typeof inputs !== 'string' || !inputs || inputs.length > MAX_INPUTS_CHARS || !BASE64_RE.test(inputs)
         || typeof time !== 'number' || !Number.isFinite(time) || time <= 0 || time > MAX_RUN_SECONDS || !Number.isInteger(physVer) || physVer < 0 || physVer > 100000) {
@@ -214,6 +226,34 @@ export function createHandler({ supabaseUrl, serviceKey, fetch: rawFetch = globa
       return json(500, { error: 'Erreur interne.' });
     }
   };
+
+  // Enchaînement « chapitre d'une traite » (COMPLETE-014). Dans l'ordre : forme (sans rien rejouer), profil, second compteur de cadence, REJEU des 6 manches
+  // (verifyChain : chacune sur son circuit, reconstruit d'après la clé), puis submit_best INCHANGÉE : temps rejoué, les 6 commandes jointes par « , », les fins de
+  // manche en pas cumulés comme temps intermédiaires, ni fantôme ni empreinte forte (circuits officiels). Réponse identique à l'envoi d'une course.
+  async function chain({ uid, anon, body }) {
+    const { trackKey, legs, times, time, physVer } = body;
+    if (typeof trackKey !== 'string' || !TRACK_KEY_RE.test(trackKey) || !CHAIN_KEY_RE.test(trackKey) || !Array.isArray(legs) || !Array.isArray(times)
+      || legs.some((l) => typeof l !== 'string' || !BASE64_RE.test(l)) || !Number.isInteger(physVer) || physVer < 0 || physVer > 100000) {
+      return json(400, { error: 'Requête invalide.' });
+    }
+    const profRes = await db(`players?id=eq.${uid}&select=id`);
+    const prof = profRes.ok ? await profRes.json() : null;
+    if (!Array.isArray(prof) || !prof.length) return json(400, { error: 'Profil pilote manquant.' });
+    let wait = tooFastChain(uid);
+    if (!wait) {
+      const shared = await sharedWait(uid, anon, 'chain', chainRateLimit, CHAIN_RATE_LIMIT);
+      if (shared.down) return json(503, { error: 'Service de scores momentanément indisponible : réessaie dans un instant.' }, { 'Retry-After': '30' });
+      wait = shared.wait;
+    }
+    if (wait) return json(429, { error: `Trop d’enchaînements envoyés : réessaie dans ${wait} s.` }, { 'Retry-After': String(wait) });
+    const res = verifyChain({ trackKey, legs, times, time, physVer });
+    if (!res.ok) return json(422, { error: res.error ?? 'Enchaînement non confirmé.', ...(res.versionMismatch ? { versionMismatch: true, serverPhysVer: res.serverPhysVer ?? PHYS_VER } : {}) });
+    const w = await rpc('submit_best', { p: uid, tk: trackKey, t: res.time, inp: res.inputs, pv: physVer, tname: String(res.name).slice(0, 60), sp: res.splits, gh: null, gveh: null, strong: null });
+    if (!w.ok) return await failWrite(w, 'submit_best (enchaînement)');
+    const out = await w.json();
+    if (!out || out.status !== 'ok') { log('submit-score : réponse submit_best inattendue (enchaînement)', out); return json(500, { error: 'Enregistrement impossible.' }); }
+    return json(200, { ok: true, improved: !!out.improved, best: out.best, rank: out.rank, total: out.total, time: res.time });
+  }
 
   // Publication d'un circuit : la course de vérification de l'auteur est REJOUÉE sur ce code ; author_time = temps rejoué (jamais l'affirmation du client).
   async function publish({ uid, body, code, inputs, time, physVer }) {

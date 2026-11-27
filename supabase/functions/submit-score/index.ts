@@ -20677,6 +20677,75 @@ function seasonOpen(n, t = Date.now()) {
   return "";
 }
 
+// js/chain.js
+var CHAIN_LEGS = 6;
+var MAX_CHAIN_SECONDS = 1200;
+var MAX_LEG_SECONDS = MAX_RUN_SECONDS;
+var MAX_CHAIN_INPUTS_CHARS = 4e5;
+var CHAIN_SEP = ",";
+var CHAIN_TIME_TOLERANCE = 3e-3;
+var CHAIN_KEY_RE = /^ch-([a-z]{1,20})-([0-9a-z]{1,16})(?:~([a-z0-9.-]{1,40}))?$/;
+var chainChapters = () => Math.min(CHAPTER_KEYS.length, Math.floor(BUILTIN_TRACKS.length / CHAIN_LEGS));
+function chainLegIndexes(ch) {
+  if (!Number.isInteger(ch) || ch < 0 || ch >= chainChapters()) throw new Error("Chapitre inconnu.");
+  return Array.from({
+    length: CHAIN_LEGS
+  }, (_, i) => ch * CHAIN_LEGS + i);
+}
+function chainKeyFrom(ch, keys) {
+  if (!Array.isArray(keys) || keys.length !== CHAIN_LEGS || keys.some((k) => typeof k !== "string" || !k.startsWith("b-"))) throw new Error("Encha\xEEnement invalide.");
+  return `ch-${CHAPTER_KEYS[ch]}-${hashString(keys.join("|"))}`;
+}
+function chainForKey(key2) {
+  const m = CHAIN_KEY_RE.exec(String(key2 || ""));
+  if (!m) throw new Error("Cl\xE9 d\u2019encha\xEEnement invalide.");
+  const { base, variant } = splitKey(key2);
+  let aided = false;
+  if (variant) {
+    const v = parseVariant(variant);
+    if (Object.keys(v).length !== 1 || v.as !== "1") throw new Error("Cette cat\xE9gorie n\u2019existe pas pour un encha\xEEnement.");
+    aided = true;
+  }
+  const ch = CHAPTER_KEYS.indexOf(m[1]);
+  if (ch < 0 || ch >= chainChapters()) throw new Error("Chapitre inconnu.");
+  const defs = chainLegIndexes(ch).map((i) => BUILTIN_TRACKS[i]);
+  const tracks = defs.map((d) => buildBuiltin(d));
+  const keys = defs.map((d, i) => `b-${d.id}-${hashString(tracks[i].encode())}`);
+  if (chainKeyFrom(ch, keys) !== base) throw new Error("Version de l\u2019encha\xEEnement diff\xE9rente : mets le jeu \xE0 jour.");
+  return {
+    ch,
+    chapter: m[1],
+    base,
+    aided,
+    keys,
+    tracks,
+    name: `Chapitre ${ch + 1} \xB7 d'une traite${aided ? " (aides)" : ""}`
+  };
+}
+var chainTime = (steps) => steps.reduce((a, b) => a + b, 0) * DT;
+function chainSplits(steps) {
+  let s = 0;
+  return steps.map((x) => s += x);
+}
+var B64 = /^[A-Za-z0-9+/]+={0,2}$/;
+function chainShapeError({ legs, times, time }) {
+  if (!Array.isArray(legs) || legs.length !== CHAIN_LEGS || !Array.isArray(times) || times.length !== CHAIN_LEGS) return `Un encha\xEEnement compte exactement ${CHAIN_LEGS} manches.`;
+  let chars = CHAIN_LEGS - 1;
+  for (const l of legs) {
+    if (typeof l !== "string" || !l || !B64.test(l)) return "Commandes d\u2019une manche invalides.";
+    chars += l.length;
+  }
+  if (chars > MAX_CHAIN_INPUTS_CHARS) return "Encha\xEEnement trop long (commandes).";
+  let sum = 0;
+  for (const t of times) {
+    if (typeof t !== "number" || !Number.isFinite(t) || t <= 0 || t > MAX_LEG_SECONDS) return "Temps d\u2019une manche invalide.";
+    sum += t;
+  }
+  if (typeof time !== "number" || !Number.isFinite(time) || time <= 0 || time > MAX_CHAIN_SECONDS) return "Temps total invalide ou trop long.";
+  if (!(Math.abs(sum - time) <= CHAIN_TIME_TOLERANCE)) return "Le temps total n\u2019est pas la somme des manches.";
+  return "";
+}
+
 // js/verify.js
 var unknownPieces = (track) => !!(track && track.lost && track.lost.unknown > 0);
 var UNKNOWN_MSG = "Ce serveur ne conna\xEEt pas toutes les pi\xE8ces de ce circuit (version plus r\xE9cente du jeu) : son temps ne peut pas \xEAtre v\xE9rifi\xE9 ici.";
@@ -20877,6 +20946,56 @@ function verifyPublish({ code, inputs, time, physVer }) {
     laps: track.laps || 1
   };
 }
+function verifyChain({ trackKey, legs, times, time, physVer }) {
+  if (physVer !== PHYS_VER) return versionError(physVer);
+  const shape = chainShapeError({
+    legs,
+    times,
+    time
+  });
+  if (shape) return {
+    ok: false,
+    error: shape
+  };
+  let c;
+  try {
+    c = chainForKey(trackKey);
+  } catch (e) {
+    return {
+      ok: false,
+      error: e.message
+    };
+  }
+  const steps = [];
+  for (let i = 0; i < legs.length; i++) {
+    const run = replayRun(c.tracks[i], legs[i]);
+    if (run == null) return {
+      ok: false,
+      error: `La manche ${i + 1} rejou\xE9e n\u2019atteint pas l\u2019arriv\xE9e.`,
+      leg: i
+    };
+    if (!(Math.abs(run.time - times[i]) <= 5e-4)) return {
+      ok: false,
+      error: `Le temps de la manche ${i + 1} ne correspond pas \xE0 la course rejou\xE9e.`,
+      leg: i
+    };
+    steps.push(Math.round(run.time / DT));
+  }
+  const total = chainTime(steps);
+  if (!(Math.abs(total - time) <= 5e-4)) return {
+    ok: false,
+    error: "Le temps total ne correspond pas aux manches rejou\xE9es."
+  };
+  return {
+    ok: true,
+    time: total,
+    splits: chainSplits(steps),
+    inputs: legs.join(CHAIN_SEP),
+    name: c.name,
+    kind: "chain",
+    aided: c.aided
+  };
+}
 
 // supabase/functions/submit-score/handler.js
 var MAX_BODY_CHARS = MAX_INPUTS_CHARS + MAX_TRACK_CODE_CHARS + 4096;
@@ -20887,6 +21006,12 @@ var RATE_LIMIT = {
   anonMax: 400
 };
 var MAX_GHOST_CHARS = 8e5;
+var CHAIN_RATE_LIMIT = {
+  max: 3,
+  windowMs: 6e5,
+  globalMax: 600,
+  anonMax: 400
+};
 async function readBodyLimited(req, maxBytes) {
   if (!req.body) {
     const t = await req.text();
@@ -20932,7 +21057,7 @@ var dbMessage = async (r) => {
 var UPSTREAM_TIMEOUT_MS = 8e3;
 var Upstream = class extends Error {
 };
-function createHandler({ supabaseUrl, serviceKey, fetch: rawFetch = globalThis.fetch, allowedOrigin = "*", now = Date.now, rateLimit = RATE_LIMIT, log = console.error, upstreamTimeoutMs = UPSTREAM_TIMEOUT_MS, build: build2 = null }) {
+function createHandler({ supabaseUrl, serviceKey, fetch: rawFetch = globalThis.fetch, allowedOrigin = "*", now = Date.now, rateLimit = RATE_LIMIT, log = console.error, upstreamTimeoutMs = UPSTREAM_TIMEOUT_MS, build: build2 = null, chainRateLimit = CHAIN_RATE_LIMIT }) {
   const buildStamp = () => {
     const b = build2 ?? globalThis.__COPYTRACK_BUILD__;
     return typeof b === "string" && /^[0-9a-f]{16}$/.test(b) ? b : null;
@@ -20975,32 +21100,36 @@ function createHandler({ supabaseUrl, serviceKey, fetch: rawFetch = globalThis.f
     method: "POST",
     body: JSON.stringify(args)
   });
-  const hits = /* @__PURE__ */ new Map();
-  function tooFast(uid) {
-    const t = now();
-    const recent = (hits.get(uid) ?? []).filter((x) => t - x < rateLimit.windowMs);
-    if (recent.length >= rateLimit.max) {
+  function brake(lim) {
+    const hits = /* @__PURE__ */ new Map();
+    return (uid) => {
+      const t = now();
+      const recent = (hits.get(uid) ?? []).filter((x) => t - x < lim.windowMs);
+      if (recent.length >= lim.max) {
+        hits.set(uid, recent);
+        return Math.ceil((lim.windowMs - (t - recent[0])) / 1e3);
+      }
+      recent.push(t);
       hits.set(uid, recent);
-      return Math.ceil((rateLimit.windowMs - (t - recent[0])) / 1e3);
-    }
-    recent.push(t);
-    hits.set(uid, recent);
-    if (hits.size > 5e3) {
-      for (const [k, v] of hits) if (!v.some((x) => t - x < rateLimit.windowMs)) hits.delete(k);
-    }
-    return 0;
+      if (hits.size > 5e3) {
+        for (const [k, v] of hits) if (!v.some((x) => t - x < lim.windowMs)) hits.delete(k);
+      }
+      return 0;
+    };
   }
+  const tooFast = brake(rateLimit);
+  const tooFastChain = brake(chainRateLimit);
   let lastWarn = 0;
-  async function sharedWait(uid, anon) {
+  async function sharedWait(uid, anon, kind = "submit", lim = rateLimit, dflt = RATE_LIMIT) {
     try {
       const r = await rpc("rate_check", {
-        k: "submit",
+        k: kind,
         p: uid,
-        max_hits: rateLimit.max,
-        window_s: Math.round(rateLimit.windowMs / 1e3),
-        global_max: rateLimit.globalMax ?? RATE_LIMIT.globalMax,
+        max_hits: lim.max,
+        window_s: Math.round(lim.windowMs / 1e3),
+        global_max: lim.globalMax ?? dflt.globalMax,
         is_anon: anon,
-        anon_max: rateLimit.anonMax ?? RATE_LIMIT.anonMax
+        anon_max: lim.anonMax ?? dflt.anonMax
       });
       if (!r.ok) throw new Error("rpc " + r.status);
       const n = await r.json();
@@ -21060,8 +21189,14 @@ function createHandler({ supabaseUrl, serviceKey, fetch: rawFetch = globalThis.f
       },
       actions: [
         "submit",
-        "publish-track"
-      ]
+        "publish-track",
+        "submit-chain"
+      ],
+      chain: {
+        legs: 6,
+        maxSeconds: MAX_CHAIN_SECONDS,
+        maxInputs: MAX_CHAIN_INPUTS_CHARS
+      }
     });
     if (req.method !== "POST") return json(405, {
       error: "M\xE9thode non autoris\xE9e."
@@ -21122,8 +21257,13 @@ function createHandler({ supabaseUrl, serviceKey, fetch: rawFetch = globalThis.f
         });
       }
       const { action = "submit", trackKey, code = "", inputs, time, physVer } = body ?? {};
-      if (action !== "submit" && action !== "publish-track") return json(400, {
+      if (action !== "submit" && action !== "publish-track" && action !== "submit-chain") return json(400, {
         error: "Action inconnue."
+      });
+      if (action === "submit-chain") return await chain({
+        uid,
+        anon,
+        body
       });
       const publishing = action === "publish-track";
       if (!publishing && (typeof trackKey !== "string" || !TRACK_KEY_RE.test(trackKey)) || typeof inputs !== "string" || !inputs || inputs.length > MAX_INPUTS_CHARS || !BASE64_RE.test(inputs) || typeof time !== "number" || !Number.isFinite(time) || time <= 0 || time > MAX_RUN_SECONDS || !Number.isInteger(physVer) || physVer < 0 || physVer > 1e5) {
@@ -21225,6 +21365,76 @@ function createHandler({ supabaseUrl, serviceKey, fetch: rawFetch = globalThis.f
       });
     }
   };
+  async function chain({ uid, anon, body }) {
+    const { trackKey, legs, times, time, physVer } = body;
+    if (typeof trackKey !== "string" || !TRACK_KEY_RE.test(trackKey) || !CHAIN_KEY_RE.test(trackKey) || !Array.isArray(legs) || !Array.isArray(times) || legs.some((l) => typeof l !== "string" || !BASE64_RE.test(l)) || !Number.isInteger(physVer) || physVer < 0 || physVer > 1e5) {
+      return json(400, {
+        error: "Requ\xEAte invalide."
+      });
+    }
+    const profRes = await db(`players?id=eq.${uid}&select=id`);
+    const prof = profRes.ok ? await profRes.json() : null;
+    if (!Array.isArray(prof) || !prof.length) return json(400, {
+      error: "Profil pilote manquant."
+    });
+    let wait = tooFastChain(uid);
+    if (!wait) {
+      const shared = await sharedWait(uid, anon, "chain", chainRateLimit, CHAIN_RATE_LIMIT);
+      if (shared.down) return json(503, {
+        error: "Service de scores momentan\xE9ment indisponible : r\xE9essaie dans un instant."
+      }, {
+        "Retry-After": "30"
+      });
+      wait = shared.wait;
+    }
+    if (wait) return json(429, {
+      error: `Trop d\u2019encha\xEEnements envoy\xE9s : r\xE9essaie dans ${wait} s.`
+    }, {
+      "Retry-After": String(wait)
+    });
+    const res = verifyChain({
+      trackKey,
+      legs,
+      times,
+      time,
+      physVer
+    });
+    if (!res.ok) return json(422, {
+      error: res.error ?? "Encha\xEEnement non confirm\xE9.",
+      ...res.versionMismatch ? {
+        versionMismatch: true,
+        serverPhysVer: res.serverPhysVer ?? PHYS_VER
+      } : {}
+    });
+    const w = await rpc("submit_best", {
+      p: uid,
+      tk: trackKey,
+      t: res.time,
+      inp: res.inputs,
+      pv: physVer,
+      tname: String(res.name).slice(0, 60),
+      sp: res.splits,
+      gh: null,
+      gveh: null,
+      strong: null
+    });
+    if (!w.ok) return await failWrite(w, "submit_best (encha\xEEnement)");
+    const out = await w.json();
+    if (!out || out.status !== "ok") {
+      log("submit-score : r\xE9ponse submit_best inattendue (encha\xEEnement)", out);
+      return json(500, {
+        error: "Enregistrement impossible."
+      });
+    }
+    return json(200, {
+      ok: true,
+      improved: !!out.improved,
+      best: out.best,
+      rank: out.rank,
+      total: out.total,
+      time: res.time
+    });
+  }
   async function publish({ uid, body, code, inputs, time, physVer }) {
     if (code.length > MAX_PUBLISH_CHARS) return json(413, {
       error: `Circuit trop gros (${code.length} / ${MAX_PUBLISH_CHARS} caract\xE8res).`
@@ -21294,4 +21504,4 @@ Deno.serve(createHandler({
   serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   allowedOrigin: Deno.env.get("ALLOWED_ORIGIN") ?? "*"
 }));
-globalThis.__COPYTRACK_BUILD__ = "851595e1792d9ba2";
+globalThis.__COPYTRACK_BUILD__ = "9f2bd24960fd8b32";

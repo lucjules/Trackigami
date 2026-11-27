@@ -62,7 +62,7 @@ const mk = (extra = {}) => createHandler({ supabaseUrl: 'https://x.supabase.co',
 test('sans empreinte (tests, développement) : `build` vaut null ; le reste de l\'état est inchangé (physVer, actions, limites)', async () => {
   const { status, body } = await get(mk());
   assert.equal(status, 200); assert.equal(body.build, null);
-  assert.equal(body.physVer, PHYS_VER); assert.deepEqual(body.actions, ['submit', 'publish-track']); assert.equal(body.service, 'submit-score');
+  assert.equal(body.physVer, PHYS_VER); assert.deepEqual(body.actions, ['submit', 'publish-track', 'submit-chain']); assert.equal(body.service, 'submit-score');
 });
 test('empreinte donnée au gestionnaire : publiée telle quelle', async () => {
   assert.equal((await get(mk({ build: '0123456789abcdef' }))).body.build, '0123456789abcdef');
