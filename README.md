@@ -3,7 +3,7 @@
 Jeu de course contre-la-montre **low-poly** dans le navigateur, avec éditeur de circuits.
 C'est un jeu original : décors, véhicules, pièces, musique et circuits ont été conçus pour ce projet.
 
-Version actuelle : **bêta 0.24.0** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
+Version actuelle : **bêta 0.25.0** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
 
 ## Jouer
 
@@ -106,7 +106,7 @@ Le jeu s'**installe comme une application** (bouton d'installation du navigateur
 
 ### Le reste
 
-- **Garage** (purement visuel) : 8 carrosseries, moto routière ou chopper, couleurs, finitions (brillante, mate, métallisée, nacrée), LED, dessins, ornements, ailerons, roues, traînées lumineuses, klaxons (touche H), presets.
+- **Garage** (purement visuel) : 8 carrosseries, moto routière ou chopper, couleurs, finitions (brillante, mate, métallisée, nacrée), LED, dessins, ornements, ailerons, roues, traînées lumineuses, klaxons (touche H), presets. **Séries de décor** (0.25.0) : une série par décor de la carrière (12), de quatre éléments (une LED, une traînée, des jantes, un dessin) avec palette, deux préréglages et une collection ; 360 ◆ chacune, bien plus que la prime de sa collection : un débouché aux pièces une fois le garage acquis, sans aucun effet sur la course.
 - **Pièces (monnaie)** gagnées selon la médaille et les objectifs bonus. **Profil** : un code joueur contient toute la progression.
 - **Musique** synthétisée en direct, une ambiance par décor ; sons sans aucun fichier audio.
 - **Menu principal** : six catégories — **Jouer** (course rapide, carrière, défi du jour, circuits de la communauté, modes, Académie), **Créer** (éditeur, mes circuits, importer un code), **Multijoueur** (salons, compétition, amis), **Progression** (records et médailles, niveau et licences, statistiques, déblocages), **Profil** (compte et pseudonyme, garage, sauvegardes) et **Paramètres** (audio, graphismes, accessibilité, jeu, interface, commandes). Chacune ouvre un panneau avec « ← Retour » (Échap, ou le bouton retour de la manette, fait de même) ; un écran ouvert depuis un panneau y ramène au retour.
