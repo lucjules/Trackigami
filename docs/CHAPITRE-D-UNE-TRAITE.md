@@ -1,6 +1,6 @@
 # Chapitre d'une traite (COMPLETE-014) — design validé
 
-Statut : **validé par le propriétaire (choix recommandés : contrat tel quel, chapitres seulement, manches neutres et R = tout l’enchaînement)**. C'est un changement de contrat serveur : nouvelle action de la fonction `submit-score`, nouvelle famille
+Statut : **validé par le propriétaire (choix recommandés : contrat tel quel, chapitres seulement, manches neutres et « recommencer » = tout l’enchaînement)**. C'est un changement de contrat serveur : nouvelle action de la fonction `submit-score`, nouvelle famille
 de clés de classement, nouvelles limites. Validé avant tout code.
 
 ## 1. Le jeu
@@ -10,7 +10,7 @@ de clés de classement, nouvelles limites. Validé avant tout code.
 - Entre deux manches : un écran d'entracte (temps de la manche, temps cumulé, écart avec le meilleur enchaînement à la même manche),
   « Manche suivante » ou « Abandonner ». Le chrono ne tourne pas pendant l'entracte, la pause est permise comme dans une course normale :
   chaque manche est rejouée **depuis son départ**, donc ni l'entracte ni la pause n'ont d'effet sur le temps ou sur la vérification.
-- **R (recommencer) recommence tout l'enchaînement à la manche 1** : sinon on referait chaque manche jusqu'à la perfection et l'épreuve serait la
+- **« Recommencer » (T par défaut ; R est le retour au checkpoint) reprend tout l'enchaînement à la manche 1** : sinon on referait chaque manche jusqu'à la perfection et l'épreuve serait la
   somme des meilleurs temps, pas « d'une traite ». Le retour au checkpoint reste permis (il fait partie de la course enregistrée).
 - Quitter en cours de route : l'enchaînement est abandonné, rien n'est enregistré.
 - Les manches ne sont **pas** des courses ordinaires : pas de record par circuit, pas de médaille, pas de pièces, pas d'objectif bonus, pas d'envoi

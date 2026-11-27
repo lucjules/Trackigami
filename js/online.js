@@ -504,6 +504,12 @@ class OnlineClient {
     return this._fetch('/functions/v1/submit-score', { method: 'POST', body: { trackKey, code, inputs, time, physVer } });
   }
 
+  // Enchaînement « chapitre d'une traite » (COMPLETE-014, js/chainRun.js : submission) : les 6 manches, rejouées par le serveur (action submit-chain).
+  async submitChain({ trackKey, legs, times, time, physVer }, playerName) {
+    await this.ensurePlayer(playerName);
+    return this._fetch('/functions/v1/submit-score', { method: 'POST', body: { action: 'submit-chain', trackKey, legs, times, time, physVer } });
+  }
+
   // Colonnes demandées au classement (TECH-021). Trois sont récentes et peuvent manquer, ou ne pas être ACCORDÉES en lecture :
   //   ghost (has_ghost, étape 7), title (players.title, étape 8 + droits de l'étape 14), veh (ghost_veh, étape 7 ; lecture accordée par l'étape 20 : avant elle, PostgreSQL
   //   refusait la requête complète). Le jeu marche AVEC ou SANS chacune : on demande tout, et un refus de COLONNE retire celle qu'il nomme (PostgreSQL nomme une colonne absente ;

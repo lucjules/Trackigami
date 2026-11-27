@@ -239,6 +239,17 @@ export const screenMethods = {
       g.innerHTML = `<div class="chapter-head"><h3 class="group-title"><i style="background:${open ? '#5ff2ff' : '#555'}"></i>Chapitre ${ch + 1} · ${esc(C.name)}${open ? '' : ' 🔒'}</h3>
         <span class="prog">${medals} / ${idx.length} médailles · ${goals} / ${idx.length} objectifs bonus</span>${cst.label ? `<span class="ch-badge ${cst.id}">${cst.label}</span>` : ''}</div>
         <p class="chapter-desc">${esc(C.desc)}${open ? '' : ` — Gagne ${UNLOCK_MEDALS} médailles au chapitre ${prerequisiteOf(ch) + 1} pour l’ouvrir.`}</p>`;
+      // Épreuve « chapitre d'une traite » (COMPLETE-014, app/chain.js) : les 6 circuits à la suite, au temps cumulé ; seulement sur un chapitre complet et ouvert.
+      if (open && idx.length === CHAPTER_SIZE) {
+        const crec = getRecord(this._newChain(ch).base);
+        const bt = document.createElement('button');
+        bt.className = 'btn small chain-btn';
+        bt.dataset.chain = String(ch);
+        bt.title = 'Les 6 circuits du chapitre à la suite, au temps cumulé : un classement à part.';
+        bt.textContent = crec ? `⏱ D’une traite · ${formatTime(crec.time)}` : '⏱ D’une traite';
+        bt.addEventListener('click', () => { this.audio.click(); this.chainMenu(ch); });
+        g.querySelector('.chapter-head').appendChild(bt);
+      }
       const grid = document.createElement('div');
       grid.className = 'card-grid';
       for (const i of idx) {

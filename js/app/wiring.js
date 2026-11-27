@@ -200,7 +200,7 @@ export const wiringMethods = {
       case 'resume': if (s && s.resume) s.resume(); break;
       case 'pause-respawn': if (s && s.resume && s.respawn) { s.resume(); s.respawn(true); } break;      // (0.15.0) pause : retour au checkpoint
       case 'pause-camera': if (s && s.cycleCamera) { s.cycleCamera(); this.syncPauseQuick(); } break;
-      case 'restart': if (s && s.restart) { this.ui.hideOverlay('pause'); s.restart(); } break;
+      case 'restart': if (s && s.opts && s.opts.chain) { this.ui.hideOverlay('pause'); this.restartChain(); } else if (s && s.restart) { this.ui.hideOverlay('pause'); s.restart(); } break;      // (enchaînement : tout, à la manche 1)
       case 'quit': this.quitRace(); break;
       case 'watch-replay': this.watchReplay(); break;
       case 'share-ghost': this.shareGhost(); break;

@@ -4,7 +4,7 @@
 // valables) ; chaque compte écrit dans « shardwayacct.<id du compte>.* ». Les deux familles de clés ne se
 // recouvrent pas : la progression d'un compte et celle d'un invité ne se mélangent jamais sur un même navigateur.
 // La portée se règle une fois, au lancement, avant que le jeu ne lise quoi que ce soit.
-import { MAX_RUN_SECONDS, MAX_TRACK_CODE_CHARS } from './constants.js';
+import { MAX_RUN_SECONDS, MAX_CHAIN_SECONDS, MAX_TRACK_CODE_CHARS } from './constants.js';
 import { compactGhost } from './ghostFormat.js';
 
 const GUEST_PREFIX = 'shardway.';
@@ -317,10 +317,12 @@ const slim = (rec) => ({ ...rec, ghost: null, inputs: null });
 
 // Un record lisible (phase 4) : un temps fini, > 0 et dans les bornes d'une course. Un record dont le temps est 0, négatif, NaN ou démesuré (donnée abîmée ou fabriquée) n'est JAMAIS
 // le « meilleur temps » : il donnerait une médaille de cristal et déverrouillerait la carrière. Il reste sur le disque (rien n'est effacé) mais n'est plus lu.
+// Un record d'enchaînement « chapitre d'une traite » (clé ch-…, `chain: true`, js/chainRun.js) cumule 6 manches : jusqu'à MAX_CHAIN_SECONDS (1 200 s) ; tout autre record, une course.
 export function validRecord(rec) {
-  return !!rec && typeof rec === 'object' && Number.isFinite(+rec.time) && +rec.time > 0 && +rec.time <= MAX_RUN_SECONDS
+  const max = rec && rec.chain === true ? MAX_CHAIN_SECONDS : MAX_RUN_SECONDS;
+  return !!rec && typeof rec === 'object' && Number.isFinite(+rec.time) && +rec.time > 0 && +rec.time <= max
     && (rec.pv === undefined || (Number.isInteger(+rec.pv) && +rec.pv >= 0 && +rec.pv <= 100000))
-    && (rec.bt === undefined || rec.bt === null || (Number.isFinite(+rec.bt) && +rec.bt > 0 && +rec.bt <= MAX_RUN_SECONDS));
+    && (rec.bt === undefined || rec.bt === null || (Number.isFinite(+rec.bt) && +rec.bt > 0 && +rec.bt <= max));
 }
 
 // Anciennes clés d'une clé de circuit intégré (js/builtinKeys.js : alias, RISK-001) : fournies par le jeu au démarrage (setLegacyKeyProvider), jamais importées ici (ce module

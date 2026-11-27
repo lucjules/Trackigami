@@ -59,7 +59,10 @@ export class RaceSession {
     // Aides à la conduite (aids.js) : la course va dans la catégorie « assisté » (clé « …as-1 »), sans médailles ; pas d'aides en saison,
     // duel ou tournoi (aidedKey renvoie null : elles sont coupées pour cette course).
     this.aids = null; this.aidsOff = false;
-    if (aidsActive(app.settings.aids) && !opts.replay && !this.demo) {
+    if (aidsActive(app.settings.aids) && !opts.replay && !this.demo && opts.chain) {
+      // Manche d'un enchaînement « d'une traite » (COMPLETE-014) : pas de clé à elle ; une manche aidée classe TOUT l'enchaînement « avec aides » (~v1.as-1).
+      opts.chain.markAided(); this.medals = null; this.aids = new DrivingAids(track, app.settings.aids);
+    } else if (aidsActive(app.settings.aids) && !opts.replay && !this.demo) {
       const k = opts.trackKey ? aidedKey(opts.trackKey) : opts.trackKey;
       if (k === null) this.aidsOff = true;
       else { this.trackKey = k; this.medals = null; this.aids = new DrivingAids(track, app.settings.aids); }
@@ -497,7 +500,7 @@ export class RaceSession {
       }
       if (this.state === 'paused') return this.render(dt, this.acc / DT);      // (même interpolation qu'avant la pause : la voiture ne recule pas d'un pas)
       // Manche d'un championnat : pas de nouvel essai (une seule course par manche) ; le retour au checkpoint (R), lui, reste possible.
-      if (input.act('restart') || input.hit('NumpadEnter')) { if (this.cup) { /* une seule course par manche */ } else if (this.multi) this._newAttempt(); else { this.restart(); return; } }
+      if (input.act('restart') || input.hit('NumpadEnter')) { if (this.cup) { /* une seule course par manche */ } else if (this.multi) this._newAttempt(); else if (this.opts.chain) { app.restartChain(); return; } else { this.restart(); return; } }      // (enchaînement « d'une traite » : « recommencer » reprend TOUT, à la manche 1)
       if (input.act('respawn') && !this.replay) { if (this.multi && this.state === 'finished') { if (!this.cup) this._newAttempt(); } else this.respawn(true); }
       if (input.act('camera')) this.cycleCamera();
       if (input.act('horn')) app.audio.horn(profile().loadout.horn);

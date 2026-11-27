@@ -88,6 +88,12 @@ export const finishMethods = {
     app.audio.engine(null);          // plus de bruit de moteur une fois le niveau terminé
     this.finishT = 0;
     if (this.replay) { this._replayEnded(); return; }
+    if (this.opts.chain) {         // manche d'un enchaînement « chapitre d'une traite » (app/chain.js) : ni record, ni médaille, ni pièces ; l'entracte ou le bilan de l'enchaînement
+      this._tmDone = true;
+      app.audio.finish(false);
+      app.onChainLegFinished(this, time, { unverified: !!this.unverifiable });
+      return;
+    }
     if (this.unverifiable && !this.multi) { this._finishUnverified(time); return; }      // un incident pendant le pas : l'arrivée n'est pas enregistrée (TECH-015)
     if (this.opts.academy) {       // leçon de l'Académie : ni record, ni pièces de circuit, ni statistiques ; l'écran de bilan est celui de l'Académie
       app.audio.finish(false);

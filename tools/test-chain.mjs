@@ -15,6 +15,9 @@ import {
   chainShapeError, isChainKey,
 } from '../js/chain.js';
 import { botRun } from './seed-officiels.mjs';
+import { ChainRun, submissionFromRecord } from '../js/chainRun.js';
+import { Championship } from '../js/net/championship.js';
+import { validRecord } from '../js/storage.js';
 import { readFileSync } from 'node:fs';
 
 const keyOfDef = (d) => `b-${d.id}-${hashString(buildBuiltin(d).encode())}`;
@@ -160,6 +163,46 @@ test('cloisonnement : une clé d’enchaînement est refusée par la course seul
   assert.equal(one.ok, false);
   const bKey = keyOfDef(BUILTIN_TRACKS[chainLegIndexes(CH)[0]]);
   assert.equal(verifyChain({ ...sub, trackKey: bKey }).ok, false);
+});
+
+console.log('Côté jeu : séquencement des manches (mécanisme du championnat) et soumission');
+const KEYS13 = chainLegIndexes(CH).map((i) => keyOfDef(BUILTIN_TRACKS[i]));
+test('ChainRun : 6 manches séquencées par un Championship, temps cumulé, « recommencer » remet tout à zéro', () => {
+  const run = new ChainRun({ ch: CH, keys: KEYS13, names: ['a', 'b', 'c', 'd', 'e', 'f'], indexes: chainLegIndexes(CH) });
+  assert.ok(run.cup instanceof Championship);
+  assert.equal(run.key, chKey); assert.equal(run.leg, 0); assert.equal(run.current.id, KEYS13[0]);
+  run.record(1200, 'AAAA'); run.record(600, 'BBBB');
+  assert.equal(run.leg, 2); assert.equal(run.current.id, KEYS13[2]); assert.equal(run.time, 1800 * DT); assert.deepEqual(run.splits, [1200, 1800]);
+  assert.equal(run.diffAt(1, { splits: [1100, 1900] }), -100 * DT);
+  assert.equal(run.diffAt(1, null), null);
+  run.markAided(); assert.equal(run.key, chainKey(CH, { aided: true }));
+  run.restart();
+  assert.equal(run.leg, 0); assert.equal(run.time, 0); assert.equal(run.key, chKey, 'un nouvel enchaînement repart sans aides');
+  assert.throws(() => run.record(0, 'A'), /invalide/); assert.throws(() => run.record(10, ''), /invalide/);
+  for (let i = 0; i < 6; i++) run.record(10, 'A');
+  assert.ok(run.finished); assert.equal(run.current, null);
+  assert.throws(() => run.record(10, 'A'), /terminé/);
+  assert.throws(() => new ChainRun({ ch: CH, keys: KEYS13.slice(0, 5) }), /6 circuits/);
+});
+test('les manches du pilote automatique, rangées par ChainRun : soumission acceptée par le serveur ; record local relu à l’identique', () => {
+  const run = new ChainRun({ ch: CH, keys: KEYS13 });
+  runs.forEach((r) => run.record(Math.round(r.time / DT), r.inputs));
+  const sub = run.submission(PHYS_VER);
+  const v = verifyChain(sub);
+  assert.equal(v.ok, true, v.error);
+  assert.equal(v.time, sub.time, 'temps annoncé = temps rejoué, au bit près');
+  const rec = run.toRecord({ name: 'x', physVer: PHYS_VER, date: 1 });
+  assert.equal(rec.chain, true); assert.equal(rec.time, run.time);
+  assert.deepEqual(submissionFromRecord(chKey, rec, PHYS_VER), sub);
+  assert.equal(submissionFromRecord(chKey, { ...rec, inputs: null }, PHYS_VER), null);
+  assert.equal(submissionFromRecord(chKey, { ...rec, chain: undefined }, PHYS_VER), null);
+});
+test('stockage : un record d’enchaînement peut dépasser 600 s (jusqu’à 1 200), un record de circuit non', () => {
+  assert.equal(validRecord({ time: 900, pv: PHYS_VER, chain: true }), true);
+  assert.equal(validRecord({ time: 1200, pv: PHYS_VER, chain: true }), true);
+  assert.equal(validRecord({ time: 1201, pv: PHYS_VER, chain: true }), false);
+  assert.equal(validRecord({ time: 900, pv: PHYS_VER }), false, 'inchangé pour une course seule');
+  assert.equal(validRecord({ time: 600, pv: PHYS_VER }), true);
 });
 
 console.log('Non-régression');

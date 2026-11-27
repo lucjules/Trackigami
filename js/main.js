@@ -52,6 +52,7 @@ import { theaterAppMethods } from './app/theater.js';
 import { legalMethods } from './app/legal.js';
 import { feedbackMethods } from './app/feedback.js';
 import { updateMethods } from './app/update.js';
+import { chainMethods } from './app/chain.js';
 
 // Tous les modules sont chargés et liés : la garde du démarrage (js/boot-guard.js) se désarme.
 window.__copytrackBooted = true;
@@ -330,6 +331,7 @@ class App {
     if (opts.multi) { this._leaveRaceToLobby(opts.multi.room); return; }
     if (opts.academy) { this.showMenu('menu'); this.academyMenu(); return; }
     if (opts.mode) { this.showMenu('menu'); this.modesMenu(); return; }
+    if (opts.chain) { this._chain = null; this.showMenu('tracks'); return; }        // enchaînement « chapitre d'une traite » (app/chain.js) : abandonné, retour à la carrière
     if (opts.fromEditor) this.openEditor(this.editorState);
     else if (opts.fromHub && this._lastDesc && this._lastDesc.key === opts.trackKey) this._backToHub(this._lastDesc, opts.fromHub);     // course lancée depuis la fiche : on y revient
     else if (opts.builtinIndex != null || opts.daily) this.showMenu('tracks');
@@ -564,7 +566,7 @@ class App {
 }
 
 // Les familles de méthodes vivent dans app/ ; elles s'ajoutent au prototype (`this` est l'instance).
-Object.assign(App.prototype, multiMethods, academyMethods, competitionMethods, inboxMethods, labMethods, rewardsMethods, careerEndMethods, mechanicsMethods, communityMethods, moderationMethods, screenMethods, settingsMethods, profileMethods, wiringMethods, editorFlowMethods, uiCustomMethods, modesMethods, raceHubMethods, theaterAppMethods, legalMethods, feedbackMethods, updateMethods);
+Object.assign(App.prototype, multiMethods, academyMethods, competitionMethods, inboxMethods, labMethods, rewardsMethods, careerEndMethods, mechanicsMethods, communityMethods, moderationMethods, screenMethods, settingsMethods, profileMethods, wiringMethods, editorFlowMethods, uiCustomMethods, modesMethods, raceHubMethods, theaterAppMethods, legalMethods, feedbackMethods, updateMethods, chainMethods);
 
 
 // Application installable et jouable hors ligne (service worker), si le contexte le permet.

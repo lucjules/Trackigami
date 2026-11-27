@@ -1129,6 +1129,14 @@ body.reduce-motion .end-credits .roll { animation: none; padding-top: 12px; }
 .ch-badge { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: rgba(95, 242, 255, .18); color: #5ff2ff; }
 .ch-badge.perfect { background: rgba(255, 210, 62, .2); color: #ffd23e; }
 .ch-badge.crystal { background: rgba(185, 166, 255, .25); color: #d9ccff; }
+/* Épreuve « chapitre d'une traite » (COMPLETE-014) : bouton du chapitre, liste des manches, temps cumulé */
+.chapter-head .chain-btn { margin-left: auto; }
+.chain-legs { margin: 6px 0 10px; padding-left: 22px; }
+.chain-legs li { display: flex; justify-content: space-between; gap: 12px; }
+.chain-legs li em { font-style: normal; font-variant-numeric: tabular-nums; }
+.chain-total { font-size: 18px; font-variant-numeric: tabular-nums; }
+.chain-total .ok { color: #5ff2a0; }
+.chain-total .ko { color: #ff8a8a; }
 
 /* =====================================================================================================================================
    0.9.13 · Lot 2 : refonte des menus (jeu d'écrans : accueil, circuits, mes circuits, communauté).

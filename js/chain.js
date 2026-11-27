@@ -14,11 +14,11 @@
 import { BUILTIN_TRACKS, buildBuiltin } from './tracks.js';
 import { hashString } from './track.js';
 import { CHAPTER_KEYS } from './themes.js';
-import { DT, MAX_RUN_SECONDS } from './constants.js';
+import { DT, MAX_RUN_SECONDS, MAX_CHAIN_SECONDS } from './constants.js';
 import { splitKey, parseVariant } from './variants.js';
 
 export const CHAIN_LEGS = 6;                    // = CHAPTER_SIZE de career.js (module avec stockage, hors de la fermeture serveur) : tools/test-chain.mjs vérifie l'égalité
-export const MAX_CHAIN_SECONDS = 1200;          // durée totale maximale (2,3 × la plus grande somme des temps bronze d'un chapitre, 530 s ; < 3 600 s de scores.time)
+export { MAX_CHAIN_SECONDS };                   // durée totale maximale, 1 200 s (constants.js : le stockage la lit aussi) : 2,3 × la plus grande somme des temps bronze d'un chapitre (530 s), < 3 600 s de scores.time
 export const MAX_LEG_SECONDS = MAX_RUN_SECONDS; // une manche : comme une course seule (600 s)
 export const MAX_CHAIN_INPUTS_CHARS = 400000;   // les 6 commandes jointes par « , » (scores.inputs ≤ 400 000 caractères)
 export const CHAIN_SEP = ',';                   // absent de l'alphabet base64 : la jonction se relit sans ambiguïté

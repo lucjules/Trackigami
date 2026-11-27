@@ -160,7 +160,11 @@ export function renderWorldBoard(el, desc, ctx) {
       send.disabled = true; send.textContent = 'Vérification…';
       try {
         if (profile().title) online.setTitle(profile().title).catch(() => { /* sans l'étape 8 : le titre reste local */ });
-        await online.submitScore({ trackKey: key, code: key.startsWith('u-') ? (desc.official || desc).track.encode() : '', inputs: rec.inputs, time: rec.time, physVer: PHYS_VER }, app ? app.settings.playerName : '');
+        if (desc.chain) {      // enchaînement « chapitre d'une traite » (COMPLETE-014) : les 6 manches du record, rejouées par le serveur (action submit-chain)
+          const sub = app && app.chainSubmissionOf(key);
+          if (!sub) throw new Error('Ce record n’a plus ses commandes : refais l’enchaînement.');
+          await online.submitChain(sub, app.settings.playerName);
+        } else await online.submitScore({ trackKey: key, code: key.startsWith('u-') ? (desc.official || desc).track.encode() : '', inputs: rec.inputs, time: rec.time, physVer: PHYS_VER }, app ? app.settings.playerName : '');
         renderWorldBoard(el, desc, ctx);
         if (ctx.onChange) ctx.onChange();
       } catch (e) { send.textContent = e.message; }

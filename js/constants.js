@@ -48,6 +48,7 @@ export const DT = 1 / 120;
 // Limites partagées par le jeu, les salons multijoueurs et la fonction serveur de vérification (un seul endroit pour les changer).
 export const MAX_RUN_SECONDS = 600;                        // une course dure 10 minutes au plus : au-delà, un enregistrement ou un temps est refusé
 export const MAX_RUN_STEPS = Math.round(MAX_RUN_SECONDS / DT);
+export const MAX_CHAIN_SECONDS = 1200;                     // un enchaînement « chapitre d'une traite » (js/chain.js, COMPLETE-014) : 6 manches de 600 s au plus chacune, 1 200 s en tout
 export const MAX_TRACK_CODE_CHARS = 400000;                // taille maximale d'un code de circuit reçu ou transmis
 export const MAX_PUBLISH_CHARS = 100000;                    // limites de la base (supabase/etape1-communaute.sql) : code d'un circuit publié, nombre de pièces
 export const MAX_PUBLISH_PIECES = 5000;
