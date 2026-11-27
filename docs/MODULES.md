@@ -69,6 +69,7 @@ La vue d'ensemble (principes, déterminisme, flux d'une course) est dans [ARCHIT
 | `hudMessages.js` | Messages au centre de l'écran en course : courts, triés par importance, jamais empilés. Minimaliste. |
 | `hudProfile.js` | Profils de HUD (Trackigami Evolution, E5) et réglages du HUD d'entraînement. Un profil choisit ce qui s'affiche PAR-DESSUS la personnalisation du joueur (lot 11 : un élément caché par le joueur reste caché) ; « Entraînement » ajoute les outils d'analyse en direct (race/training.js). |
 | `i18n.js` | Internationalisation (français / anglais) : noyau, sans aucune dépendance au navigateur (testé sous Node). |
+| `inbox.js` | Boîte de réception (COMPLETE-015) : ce qui s'est passé depuis la dernière fois que le joueur l'a ouverte. « X a battu ton temps sur Y », duels qui l'attendent ou réglés, nouvelle saison et fin de saison, circuits publiés par les auteurs qu'il suit. Le client de la fonction inbox_summary (supabase/etape23-amorces.sql). |
 | `input.js` | Entrées : clavier (codes physiques => QWERTY et AZERTY), manette, tactile. |
 | `inspector.js` | Mode Inspection de l'éditeur : sélection d'une pièce ou d'une décoration, panneau de propriétés généré selon l'objet, et gizmos 3D (TransformControls : flèches de déplacement, cercles de rotation). |
 | `joins.js` | Raccords d'orientation (0.9.3) : une route sur un mur ne se raccorde pas directement au sol, il faut une transition. |
@@ -165,6 +166,7 @@ La vue d'ensemble (principes, déterminisme, flux d'une course) est dans [ARCHIT
 | `editorFlow.js` | Passages entre le menu et l'éditeur : ouverture, aide, retour, essai d'un circuit. |
 | `ending.js` | Fin de carrière dans l'application (COMPLETE-013) : l'écran de conclusion (épreuve finale, bilan exact, générique), montré UNE fois à la première visite de l'écran des circuits après la dernière médaille, puis rouvert à volonté (écran des circuits et Progression › Records et médailles). Les règles et les calculs sont dans ending.js (pur) ; ici on lit les records et le profil de CET appareil et on dessine. Aucun appel réseau. |
 | `feedback.js` | Avis des testeurs dans le jeu (phase 4 de la 1.0) : la fenêtre « Donner mon avis » (questions : js/feedback.js ; serveur : supabase/etape19-avis.sql), ouverte depuis Paramètres et la barre du bas de l'accueil, et proposée UNE fois après quelques courses aux joueurs qui ont accepté les statistiques. |
+| `inbox.js` | Boîte de réception (COMPLETE-015) : le bouton « 📬 » du menu principal et sa fenêtre. Les données et les textes : js/inbox.js (une requête à l'ouverture du jeu, cache de quelques minutes, AUCUNE requête sans session). Ces méthodes s'ajoutent au prototype de App (voir main.js) : `this` est l'instance. |
 | `lab.js` | Laboratoire de comparaison (Trackigami Evolution, E20) : depuis la fiche d'un circuit, rejoue les commandes du record personnel sous deux réglages physiques (profils, véhicules v1 / v2, adhérence, pluie) et affiche l'écart secteur par secteur et le long du circuit. Le calcul est dans analysis/lab.js ; le circuit n'est jamais modifié. Ces méthodes s'ajoutent au prototype de App. |
 | `legal.js` | Pages légales dans le jeu (0.12.4) : confidentialité, mentions légales, règles de la communauté, crédits et licences (textes : js/legal.js), et export des données du joueur (js/dataExport.js). Ces méthodes s'ajoutent au prototype de App (voir main.js) : `this` est l'instance. |
 | `mechanics.js` | Mécaniques de jeu (COMPLETE-007), côté écrans : la carte « Nouveau » de la fiche d'un circuit (Race Hub) et l'index « Mécaniques découvertes » du profil (Progression › Mécaniques). |
@@ -262,6 +264,7 @@ La vue d'ensemble (principes, déterminisme, flux d'une course) est dans [ARCHIT
 | --- | --- |
 | `community.js` | Communauté 2 (Trackigami Evolution, E21) : le client des fonctions de supabase/etape13-communaute.sql. Commentaires, playlists, sélection, découverte au hasard, recommandations, statistiques de circuit (depuis run_stats), modes publiés. Tout passe par des fonctions de la base, qui vérifient les droits, le débit et la modération : ce module ne fait que les appeler et remettre en forme leurs réponses. |
 | `moderation.js` | Modération (COMPLETE-004) : le client des fonctions de supabase/etape22-moderation.sql. Réservé aux modérateurs. |
+| `officials.js` | Amorces officielles et rival juste devant (COMPLETE-010) : le client de supabase/etape23-amorces.sql. |
 
 ## `js/physics/`
 
