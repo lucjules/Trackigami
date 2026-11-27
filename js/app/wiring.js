@@ -131,6 +131,7 @@ export const wiringMethods = {
     const from = this._menuSubOpen;
     this._menuSubOpen = names.includes(name) ? name : null;
     $('menu-tiles').classList.toggle('hidden', !!this._menuSubOpen);
+    if ($('menu-inbox')) $('menu-inbox').classList.toggle('hidden', !!this._menuSubOpen);          // (la boîte de réception suit les six tuiles)
     for (const n of names) {
       $('menu-sub-' + n).classList.toggle('hidden', n !== this._menuSubOpen);
       const t = document.querySelector(`#menu [data-action="sub-${n}"]`);
@@ -168,6 +169,7 @@ export const wiringMethods = {
       case 'tutorial': this.tutorial(); break;
       case 'academy': this.academyMenu(); break;
       case 'competition': this.competitionMenu(); break;
+      case 'inbox': this.openInbox(); break;
       case 'editor': this.openEditor(); break;
       case 'mytracks': this.showScreen('mytracks'); break;
       case 'import': this.importModal(false); break;

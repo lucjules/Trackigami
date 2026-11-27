@@ -3,7 +3,7 @@
 Jeu de course contre-la-montre **low-poly** dans le navigateur, avec éditeur de circuits.
 C'est un jeu original : décors, véhicules, pièces, musique et circuits ont été conçus pour ce projet.
 
-Version actuelle : **bêta 0.22.0** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
+Version actuelle : **bêta 0.23.0** · [historique des versions](CHANGELOG.md) · [architecture](docs/ARCHITECTURE.md) · [index des modules](docs/MODULES.md)
 
 ## Jouer
 
@@ -166,8 +166,9 @@ Le jeu marche entièrement hors ligne ; les fonctions en ligne utilisent un proj
 20. **Droits suivis et règles alignées** : `supabase/etape20-droits-et-regles.sql` (suppose les étapes 1 à 19 ; à lancer **avant** de redéployer `submit-score`).
 21. **Code de secours** : `supabase/etape21-recuperation.sql` (suppose les étapes 1 à 20), puis la fonction serveur `account-recovery` (`npm run build:function`, ou le workflow `deploiement.yml`) : récupérer un compte sans courriel. Détail : `supabase/COMPTES.md`.
 22. **Modération** : `supabase/etape22-moderation.sql` (suppose les étapes 1 à 21 ; relançable, ne supprime rien en s'appliquant, **à lancer À LA MAIN**, procédure et vérifications dans `supabase/MIGRATIONS.md`) : la file des contenus signalés, masquer / rétablir un circuit ou un commentaire, suspendre / réactiver un compte (publier et commenter seulement), journal des décisions ; chaque fonction `mod_*` refuse d'abord tout non-modérateur. Les modérateurs sont ajoutés à la main (`supabase/COMPTES.md`, « Modérateurs »). Le jeu 0.22.0 fonctionne sans elle (l'écran n'apparaît alors pour personne). Facultatif : redéployer `submit-score` pour que le refus d'un compte suspendu qui publie soit expliqué.
+23. **Amorces officielles, rival juste devant, boîte de réception** : `supabase/etape23-amorces.sql` (suppose les étapes 1 à 22 ; relançable, ne supprime rien, **à lancer À LA MAIN**, procédure dans `supabase/MIGRATIONS.md`) : la table `official_runs` (temps et fantômes du pilote automatique par médaille, à part des temps des joueurs : aucune place, aucun point, aucune division ne les voit), `rival_ahead` (le record juste devant un temps, avec son fantôme) et `inbox_summary` (la boîte de réception). Puis **le propriétaire** produit et envoie les amorces : `node tools/seed-officiels.mjs --out amorces.json`, puis `SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… node tools/seed-officiels.mjs --send amorces.json`. Le jeu 0.23.0 fonctionne sans elle (ni amorce ni boîte de réception).
 
-Étapes suivantes (21 étapes numérotées en tout, détail, ordre, preuves et retour arrière : **`supabase/MIGRATIONS.md`** ; chacune se joue à la main dans le SQL Editor, puis `supabase/verify-prod.sql` en prouve l'état) :
+Étapes suivantes (23 étapes numérotées en tout, détail, ordre, preuves et retour arrière : **`supabase/MIGRATIONS.md`** ; chacune se joue à la main dans le SQL Editor, puis `supabase/verify-prod.sql` en prouve l'état) :
 
 - **`etape16-durcissement.sql`** : retire les droits de table accordés par défaut par Supabase (uniquement des `revoke`).
 - **`etape18-maintenance.sql`** : `search_path` fixé, un index par clé étrangère, règles RLS réécrites, clés primaires, tables `client_errors`, `maintenance_log`, `scores_archive`, fonctions `log_errors`, `health_report`, `purge_expired`, `archive_old_scores`.

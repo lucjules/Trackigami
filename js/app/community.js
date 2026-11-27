@@ -20,7 +20,7 @@ import { encodeGhost, decodeGhost, ghostLink, GHOST_LINK_MAX } from '../replay.j
 import { estimateDifficulty, starsText, STAR_LABELS } from '../difficulty.js';
 import { getRecord, medalTime, saveMyTrack, newId, formatTime, setImportedGhost, wroteOk } from '../storage.js';
 import { describeUser, describeCommunity } from '../trackDescriptor.js';
-import { renderWorldBoard } from '../ui/leaderboardPanel.js';
+import { renderWorldBoard, rivalGhost } from '../ui/leaderboardPanel.js';
 import { trackIdOf } from '../telemetry.js';
 import { locale } from '../i18n.js';
 import { comments, addComment, deleteComment, reportComment, playlists, savePlaylist, deletePlaylist, tracksByIds, picks, randomTrack, recommended, trackStats } from '../online/community.js';
@@ -115,7 +115,7 @@ export const communityMethods = {
     renderWorldBoard(body, { key: trackKey, track, recordKeys: [trackKey] }, {
       app: this,
       onRival: async (row, rank) => {
-        const g = await online.ghost(trackKey, rank, PHYS_VER);
+        const g = await rivalGhost({ key: trackKey }, row, rank);          // joueur du top 10, rival juste devant, ou amorce officielle (COMPLETE-010)
         if (!g) throw new Error('Pas de fantôme pour ce temps (record d’avant cette fonction : son auteur doit le renvoyer).');
         this.ui.closeModal();
         this.raceWithRivals(trackKey, track, [g]);

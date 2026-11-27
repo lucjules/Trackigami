@@ -30,7 +30,7 @@ import { createTrackMap } from '../ui/trackMap.js';
 import { isTraining } from '../hudProfile.js';
 import { ghostTarget } from '../ghostTarget.js';
 import { SURFACES } from '../pieces.js';
-import { mountLeaderboard } from '../ui/leaderboardPanel.js';
+import { mountLeaderboard, rivalGhost, rivalLabel } from '../ui/leaderboardPanel.js';
 import { thumbnail } from '../editorTools.js';
 import { BUILTIN_MODES, sanitizeRules } from '../rules.js';
 import { listModes } from '../storage.js';
@@ -51,6 +51,8 @@ export function favRefOf(desc) {
 
 // Les commandes enregistrées d'un record se décodent-elles ? (le décodage lève sur du base64 invalide ou un enregistrement trop long)
 const readableInputs = (s) => { try { decodeInputs(s); return true; } catch { return false; } };
+// Les rivaux choisis, du plus rapide au plus lent. Clés : le rang du classement (top 10), « p:place » (rival juste devant, plus bas), « o:source:niveau » (amorce officielle).
+const sortedRivals = (h) => [...h.rivals.entries()].sort((a, b) => a[1].time - b[1].time || String(a[0]).localeCompare(String(b[0])));
 
 // Le nom de la puce du fantôme de médaille selon la médaille visée (écrit en entier : les textes du jeu se cherchent dans le code pour être traduits).
 const GHOST_CHIP = { bronze: 'Fantôme bronze', argent: 'Fantôme argent', or: 'Fantôme or', cristal: 'Fantôme cristal' };
@@ -201,13 +203,13 @@ export const raceHubMethods = {
     const gt = d.track.path && d.medals ? ghostTarget({ trackKey: d.key, medals: d.medals, best: rec ? medalTime(rec) : null, mode: s.ghostMedal }) : null;
     if (gt) chips.push(['ghostGold', GHOST_CHIP[gt.medal], s.ghostGold !== false, true]);
     if (d.key && getImportedGhost(d.key)) chips.push(['ghostImported', 'Fantôme importé', s.ghostImported !== false, true]);
-    const rivals = [...h.rivals.entries()].sort((a, b) => a[0] - b[0]);
+    const rivals = sortedRivals(h);
     const cats = hubCategories(h.base);
     const train = isTraining(s.hudProfile);
     $('hub-launch').innerHTML = `${d.source === 'daily' ? this._hubDailyBox(d) : ''}<div class="hub-pb">${rec ? `<span class="meta">Mon record</span><b>${medal ? medalIcon(medal) + ' ' : ''}${formatTime(rec.time)}</b>` : '<span class="meta">Pas encore de temps : à toi d’ouvrir la voie.</span>'}</div>
       <div class="hub-ghosts" role="group" aria-label="Fantômes"><span class="meta">Fantômes</span>
         ${chips.map(([k, l, on, ok]) => `<button class="chip${on ? ' on' : ''}" data-ghost="${k}" aria-pressed="${on}"${ok ? '' : ' disabled title="Pas encore de record sur ce circuit"'}>${esc(l)}</button>`).join('')}
-        ${rivals.map(([rank, g]) => `<button class="chip on rival" data-rival="${rank}" aria-pressed="true" title="Retirer ce rival">👻 ${rank}. <span${OFF}>${esc(g.name)}</span> · ${formatTime(g.time)} ✕</button>`).join('')}
+        ${rivals.map(([key, g], i) => `<button class="chip on rival" data-rival="${i}" aria-pressed="true" title="Retirer ce rival">👻 ${typeof key === 'number' ? `${key}. <span${OFF}>${esc(g.name)}</span>` : g.official ? `<span>${esc(g.name)}</span>` : `<span${OFF}>${esc(g.name)}</span>`} · ${formatTime(g.time)} ✕</button>`).join('')}
         <button class="chip${train ? ' on' : ''}" data-hudtrain aria-pressed="${train}" title="Écart en direct, secteurs, courbes, ligne et freinages de la référence (Paramètres › Interface)">🎯 HUD d’entraînement</button>
       </div>
       ${rivals.length < MAX_RIVALS && h.board && h.board.boards.some((b) => b.id === 'world') ? '<p class="meta hub-hint">Ajoute jusqu’à 3 rivaux en ligne avec 👻 dans le classement mondial.</p>' : ''}
@@ -228,7 +230,7 @@ export const raceHubMethods = {
       this.saveSettings();
       this._renderHubLaunch();
     };
-    for (const b of $('hub-launch').querySelectorAll('[data-rival]')) b.onclick = () => { this.audio.click(); h.rivals.delete(+b.dataset.rival); this._renderHubLaunch(); if (h.board) h.board.refresh(); };
+    for (const b of $('hub-launch').querySelectorAll('[data-rival]')) b.onclick = () => { this.audio.click(); const r = rivals[+b.dataset.rival]; if (r) h.rivals.delete(r[0]); this._renderHubLaunch(); if (h.board) h.board.refresh(); };
     for (const b of $('hub-launch').querySelectorAll('[data-cat]')) b.onclick = () => {
       this.audio.click();
       if (b.dataset.cat === '__cur') return;                // catégorie d'un mode publié (E21) : déjà choisie
@@ -290,7 +292,7 @@ export const raceHubMethods = {
     if (h.rivals.has(rank)) h.rivals.delete(rank);
     else {
       if (h.rivals.size >= MAX_RIVALS) throw new Error('Trois rivaux au plus : retires-en un d’abord.');
-      const g = await online.ghost(h.desc.key, rank, PHYS_VER);
+      const g = await rivalGhost(h.desc, row, rank);          // joueur du top 10, rival juste devant, ou amorce officielle (COMPLETE-010)
       if (!g) throw new Error('Pas de fantôme pour ce temps (record d’avant cette fonction : son auteur doit le renvoyer).');
       if (this._hub !== h) return;
       h.rivals.set(rank, g);
@@ -303,7 +305,7 @@ export const raceHubMethods = {
     const h = this._hub;
     if (!h || h.desc.locked) { this.audio.error(); return; }
     this.audio.click();
-    const rivals = [...h.rivals.entries()].sort((a, b) => a[0] - b[0]).map(([, g]) => g);
+    const rivals = sortedRivals(h).map(([, g]) => g);
     if (h.map) { h.map.dispose(); h.map = null; }
     this.launchDesc(h.desc, { fromHub: h.from, ...(rivals.length ? { rivals } : {}) });
     if (h.desc.variant) { const c = hubCategories(h.base).find((x) => h.desc.key.endsWith('~v1.' + x.id)); if (c) this.ui.flash(`Catégorie : ${c.label} · classement à part`, 2.2); }
@@ -335,7 +337,7 @@ export const raceHubMethods = {
     const h = this._hub, from = h ? h.from : 'tracks';
     const compare = [];
     if (cmp === 'gold') compare.push({ kind: 'gold', label: 'Fantôme or' });
-    if (cmp === 'rivals' && h) for (const [rank, g] of [...h.rivals.entries()].sort((a, b) => a[0] - b[0])) compare.push({ kind: 'ghost', label: `${rank}. ${g.name}`, ghost: g.ghost, veh: g.veh, time: g.time });
+    if (cmp === 'rivals' && h) for (const [key, g] of sortedRivals(h)) compare.push({ kind: 'ghost', label: rivalLabel(key, g), ghost: g.ghost, veh: g.veh, time: g.time });
     if (cmp === 'world') {
       try {
         const g = await online.ghost(desc.key, 1, PHYS_VER);

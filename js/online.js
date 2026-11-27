@@ -28,7 +28,7 @@ import { PHYS_VER } from './version.js';
 export const ONLINE = CONFIG.supabase;      // { url, key } : voir js/config.js
 
 // Fonctions de la base appelables SANS session (droit execute de anon : voir verify-prod.sql et tools/test-securite-sql.sh, qui comparent cette liste à la base).
-export const PUBLIC_RPC = ['follower_count', 'get_ghost', 'modes_list', 'playlists_list', 'random_track', 'recommended_tracks', 'season_standings', 'sector_board', 'track_comments_list', 'track_stats', 'trending_tracks'];
+export const PUBLIC_RPC = ['follower_count', 'get_ghost', 'modes_list', 'playlists_list', 'random_track', 'recommended_tracks', 'rival_ahead', 'season_standings', 'sector_board', 'track_comments_list', 'track_stats', 'trending_tracks'];
 
 export class OnlineError extends Error {
   constructor(message, code = '', status = 0) { super(message); this.code = code; this.status = status; }
@@ -619,6 +619,17 @@ class OnlineClient {
   async tournamentCreate(name, trackKey, trackName, days, playerName) { await this.ensurePlayer(playerName); const r = await this.rpc('tournament_create', { tname: name, track: trackKey, trackname: String(trackName || '').slice(0, 60), days }); return Array.isArray(r) ? r[0] : r; }
   async tournamentJoin(code, playerName) { await this.ensurePlayer(playerName); return +(await this.rpc('tournament_join', { jcode: String(code || '').trim() })); }
   async tournamentBoard(id) { const r = await this.rpc('tournament_board', { tid: id }); return Array.isArray(r) ? r : []; }
+
+  // Boîte de réception (COMPLETE-015, étape SQL 23) : une requête, avec la session de l'appareil SEULEMENT si elle existe. null : aucune session, rien n'est parti (jamais
+  // d'inscription anonyme pour lire). Voir js/inbox.js (cache, date de dernière consultation).
+  hasStoredSession() { const st = this.session && this.session.refresh_token ? this.session : this._stored(); return !!(st && st.refresh_token && st.user && st.user.id); }
+  async inbox(since) {
+    if (!this.hasStoredSession()) return null;
+    const s = await this._optionalSession();
+    if (!s) return null;
+    const r = await this._fetch('/rest/v1/rpc/inbox_summary', { method: 'POST', body: { depuis: since }, auth: 'optional' });
+    return Array.isArray(r) ? r : [];
+  }
 
   async myLikes() {
     const s = await this._optionalSession();

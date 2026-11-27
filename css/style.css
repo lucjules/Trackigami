@@ -1532,6 +1532,24 @@ body.hud-editing > section, body.hud-editing #touch { display: none !important; 
 .lb-splits ol { list-style: none; margin: 4px 0 10px; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 4px 12px; font-size: 14px; }
 .lb-splits li { display: flex; justify-content: space-between; gap: 8px; }
 .lb-off { color: var(--amber); }
+.board.with-off li b { color: inherit; }
+.board.with-off li.r1 b { color: #ffd23e; }
+.board.with-off li.r2 b { color: #d8dce8; }
+.board.with-off li.r3 b { color: #e0a070; }
+.board li.lb-official { background: rgba(127, 233, 255, 0.05); border: 1px dashed rgba(127, 233, 255, 0.35); }
+.board li.lb-official b { color: var(--muted); }
+.board li.lb-official .lb-official-tag { background: rgba(127, 233, 255, 0.14); color: #7fe9ff; }
+.lb-ahead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 0; }
+.lb-ahead em { font-style: normal; font-variant-numeric: tabular-nums; font-weight: 700; }
+.lb-season-off { margin-top: 10px; }
+.comp-official .row { flex-wrap: wrap; }
+.inbox-btn { margin-top: 10px; align-self: center; display: inline-flex; align-items: center; gap: 8px; }
+.inbox-btn.has-news { border-color: #7fe9ff; box-shadow: 0 0 0 1px rgba(127, 233, 255, 0.35); }
+.inbox-n { min-width: 1.6em; padding: 1px 6px; border-radius: 999px; background: #ff4f9a; color: #fff; font-size: 12px; text-align: center; }
+.inbox-list { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 6px; }
+.inbox-item { display: grid; grid-template-columns: 1.6em minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 6px 10px; border-radius: 8px; background: rgba(255,255,255,0.04); }
+.inbox-item.new { outline: 1px solid rgba(127, 233, 255, 0.5); }
+.inbox-list.old .inbox-item { opacity: 0.75; }
 .fav-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
 .fav-card h3 { font-size: 16px; }
 .fav-online { display: flex; align-items: center; justify-content: center; font-size: 34px; }

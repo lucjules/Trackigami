@@ -129,7 +129,7 @@ DEF2="$($P -d $DB -At -c "$DEF")"
 NFUNC="$($P -d $DB -At -c "select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace and (p.proname like 'mod\_%' or p.proname like 'moderation\_%')")"
 
 # verify-prod.sql sur la base COMPLÈTE (étapes 1 à 22), avant tout objet d'essai de la suite.
-$P -d $DB -At -F'|' -f supabase/verify-prod.sql > "$TMP/vp.txt"
+$P -d $DB -At -F'|' -f supabase/verify-prod.sql | grep -vE '^étape 23' > "$TMP/vp.txt"          # (les lignes de l'étape 23, appliquée après, sont éprouvées par test-etape23-sql.sh)
 
 cat > "$TMP/apres.sql" <<'SQL'
 \set ON_ERROR_STOP off

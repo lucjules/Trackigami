@@ -32,6 +32,9 @@ device('A');
 //                   avec les MÊMES règles que la base : un non-modérateur reçoit 403 « Réservé aux modérateurs. » (mod_status répond faux), motif de 3 à 300 caractères, « déjà masqué », pas de
 //                   suspension d'un modérateur ni de soi-même, journal tenu ; absentes sans l'option (PGRST202). L'état est `srv.mod` (voir resetModeration).
 //   autoconfirm     /auth/v1/settings : « Confirm email » désactivé (vrai par défaut, comme le demande supabase/COMPTES.md).
+//   social          étape 23 (supabase/etape23-amorces.sql) : lecture de official_runs (sans les commandes), rpc rival_ahead (sans session ; le plus proche STRICTEMENT devant, fantôme
+//                   compris, jamais l'appelant), rpc inbox_summary (session exigée, 20 éléments au plus), et la lecture publique du classement (scores : lignes, place, nombre, get_ghost)
+//                   d'après `srv.social` (voir resetSocial) ; sans l'option, official_runs et ces fonctions sont absentes (PGRST205 / PGRST202), comme une base sans l'étape 23.
 // Données en ligne simulées : scores (clé circuit:joueur), circuits publiés (par code), j'aime (joueur:circuit), via la fonction submit-score et les RPC.
 export const srv = { users: new Map(), tokens: new Map(), refresh: new Map(), saves: new Map(), accounts: new Map(), players: new Map(), calls: [], refreshFails: false, refreshStatus: 0, offline: false, beforeNextPatch: null, n: 0, delay: {},
   singleUse: false, reuseRevokes: false, convertSupport: false, autoconfirm: true, scores: new Map(), tracks: new Map(), likes: new Set(), revoked: new Set(),
@@ -43,6 +46,55 @@ export function resetModeration({ moderators = [], items = [], suspensions = [] 
   srv.mod = { moderators: new Set(moderators), items: items.map((i) => ({ reports: 0, counted: 0, hidden: false, seen: 0, created_at: '2026-11-20T10:00:00Z', last_report_at: null, plays: 0, likes: 0, report_dates: [], description: '', ...i })),
     log: [], suspensions: suspensions.map((x, n) => ({ id: n + 1, created_at: '2026-11-21T10:00:00Z', until: null, lifted_at: null, ...x })), calls: [], seq: 100 };
   return srv.mod;
+}
+// État du « monde » social simulé (étape 23). scores : [{ track_key, player, name, time, phys_ver, updated_at, ghost, ghost_veh }] ; officials : [{ track_key, phys_ver, source, level,
+// pilot, time, ghost, ghost_veh }] ; inbox : les lignes que renvoie inbox_summary pour chaque joueur ({ [uid]: [...] }). calls : les appels reçus ({ fn | path, auth }).
+export function resetSocial({ scores = [], officials = [], inbox = {} } = {}) {
+  srv.social = { scores: scores.map((x) => ({ phys_ver: 39, updated_at: '2026-11-20T10:00:00Z', ghost: null, ghost_veh: [], ...x })), officials: officials.map((o) => ({ phys_ver: 39, pilot: null, ghost: 'AAAA', ghost_veh: [], ...o })), inbox, calls: [] };
+  return srv.social;
+}
+const eqOf = (q, k) => { const v = q.get(k); return v && v.startsWith('eq.') ? decodeURIComponent(v.slice(3)) : null; };
+function socialRest(path, q, method, body, user, auth, headers) {
+  const S = srv.social;
+  if (path === '/rest/v1/official_runs') {
+    if (!S) return json(404, { code: 'PGRST205', message: 'Could not find the table \'public.official_runs\' in the schema cache' });
+    S.calls.push({ path, auth: !!auth, query: q.toString() });
+    const sel = (q.get('select') || '').split(',');
+    if (sel.includes('inputs') || sel.includes('*')) return json(403, { code: '42501', message: 'permission denied for table official_runs' });
+    const rows = S.officials.filter((o) => o.track_key === eqOf(q, 'track_key') && String(o.phys_ver) === eqOf(q, 'phys_ver') && (!eqOf(q, 'source') || o.source === eqOf(q, 'source')) && (!eqOf(q, 'level') || o.level === eqOf(q, 'level')))
+      .sort((a, b) => a.time - b.time).slice(0, +(q.get('limit') || 20))
+      .map((o) => Object.fromEntries(sel.map((c) => [c, c === 'has_ghost' ? o.ghost != null : o[c] ?? null])));
+    return json(200, rows);
+  }
+  if (path === '/rest/v1/rpc/rival_ahead') {
+    if (!S) return json(404, { code: 'PGRST202', message: 'Could not find the function public.rival_ahead in the schema cache' });
+    S.calls.push({ fn: 'rival_ahead', auth: !!auth, body });
+    const all = S.scores.filter((x) => x.track_key === body.k && x.phys_ver === body.pv);
+    const ahead = all.filter((x) => x.time < body.t && x.ghost && (!user || x.player !== user.id)).sort((a, b) => b.time - a.time || (b.updated_at > a.updated_at ? 1 : -1))[0];
+    return json(200, ahead ? [{ place: all.filter((x) => x.time < ahead.time).length + 1, name: ahead.name, time: ahead.time, ghost: ahead.ghost, ghost_veh: ahead.ghost_veh }] : []);
+  }
+  if (path === '/rest/v1/rpc/inbox_summary') {
+    if (!S) return json(404, { code: 'PGRST202', message: 'Could not find the function public.inbox_summary in the schema cache' });
+    S.calls.push({ fn: 'inbox_summary', auth: !!auth, body });
+    if (!user) return json(401, { code: '42501', message: 'permission denied for function inbox_summary' });
+    return json(200, (S.inbox[user.id] || []).filter((r) => !body.depuis || r.kind === 'duel' || r.at > body.depuis).slice(0, 20));
+  }
+  if (!S) return null;
+  if (path === '/rest/v1/rpc/season_standings') { S.calls.push({ fn: 'season_standings', auth: !!auth, body }); return json(200, []); }
+  if (path === '/rest/v1/rpc/get_ghost') {
+    S.calls.push({ fn: 'get_ghost', auth: !!auth, body });
+    const r = S.scores.filter((x) => x.track_key === body.k && x.phys_ver === body.pv).sort((a, b) => a.time - b.time || (a.updated_at > b.updated_at ? 1 : -1))[body.r - 1];
+    return json(200, r && r.ghost ? [{ name: r.name, time: r.time, ghost: r.ghost, ghost_veh: r.ghost_veh }] : []);
+  }
+  if (path === '/rest/v1/scores' && method === 'GET') {
+    S.calls.push({ path, auth: !!auth, query: q.toString() });
+    let rows = S.scores.filter((x) => x.track_key === eqOf(q, 'track_key') && String(x.phys_ver) === eqOf(q, 'phys_ver') && (!eqOf(q, 'player') || x.player === eqOf(q, 'player')));
+    const lt = q.get('time'); if (lt && lt.startsWith('lt.')) rows = rows.filter((x) => x.time < +lt.slice(3));
+    rows.sort((a, b) => a.time - b.time || (a.updated_at > b.updated_at ? 1 : -1));
+    if ((headers.Prefer || '').includes('count=exact')) return new Response('[]', { status: 206, headers: { 'content-range': `0-0/${rows.length}`, 'content-type': 'application/json' } });
+    return json(200, rows.slice(0, +(q.get('limit') || 1000)).map((x) => ({ time: x.time, player: x.player, updated_at: x.updated_at, has_ghost: !!x.ghost, ghost_veh: x.ghost_veh, players: { name: x.name, title: null } })));
+  }
+  return null;
 }
 const WHY = 'Un motif de 3 à 300 caractères est obligatoire.';
 function moderationRpc(fn, body, user) {
@@ -194,6 +246,7 @@ globalThis.fetch = async (url, init = {}) => {
     srv.recoveryCodes.set(user.id, code); srv.recoveryUsed.delete(user.id);
     return json(200, code.replace(/(.{4})(?=.)/g, '$1-'));
   }
+  { const r = socialRest(path, q, method, body, user, auth, init.headers || {}); if (r) return r; }
   if (path === '/rest/v1/rpc/delete_account') { srv.users.delete(user.email); srv.saves.delete(user.id); srv.accounts.delete(user.id); return json(200, null); }
   if (!user) return json(401, { message: 'JWT expired' });
   if (path.startsWith('/rest/v1/rpc/mod_')) {
