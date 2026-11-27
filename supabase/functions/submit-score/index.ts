@@ -36,6 +36,7 @@ var LOOP_LANE = HALF;
 var DT = 1 / 120;
 var MAX_RUN_SECONDS = 600;
 var MAX_RUN_STEPS = Math.round(MAX_RUN_SECONDS / DT);
+var MAX_CHAIN_SECONDS = 1200;
 var MAX_TRACK_CODE_CHARS = 4e5;
 var MAX_PUBLISH_CHARS = 1e5;
 var MAX_PUBLISH_PIECES = 5e3;
@@ -20679,7 +20680,6 @@ function seasonOpen(n, t = Date.now()) {
 
 // js/chain.js
 var CHAIN_LEGS = 6;
-var MAX_CHAIN_SECONDS = 1200;
 var MAX_LEG_SECONDS = MAX_RUN_SECONDS;
 var MAX_CHAIN_INPUTS_CHARS = 4e5;
 var CHAIN_SEP = ",";
@@ -21504,4 +21504,4 @@ Deno.serve(createHandler({
   serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   allowedOrigin: Deno.env.get("ALLOWED_ORIGIN") ?? "*"
 }));
-globalThis.__COPYTRACK_BUILD__ = "9f2bd24960fd8b32";
+globalThis.__COPYTRACK_BUILD__ = "169ea858b841c02a";

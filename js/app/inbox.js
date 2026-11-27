@@ -5,6 +5,7 @@ import { online } from '../online.js';
 import { locale } from '../i18n.js';
 import { splitKey, parseVariant } from '../variants.js';
 import { seasonTracks } from '../seasons.js';
+import { CHAPTER_KEYS } from '../themes.js';
 import { loadInbox, cachedInbox, markInboxSeen, unread, inboxText, INBOX_ICONS } from '../inbox.js';
 
 const when = (d) => { const t = new Date(d); return Number.isFinite(t.getTime()) ? t.toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''; };
@@ -38,6 +39,9 @@ export const inboxMethods = {
     const { base, variant } = splitKey(it.trackKey || '');
     const i = base ? this.builtins.findIndex((x) => x.key === base) : -1;
     if (it.kind === 'duel' || it.kind.startsWith('duel_')) return { label: it.kind === 'duel' ? 'Répondre' : 'Voir', run: () => this.competitionMenu() };
+    // Enchaînement « chapitre d'une traite » (COMPLETE-014, clé ch-<chapitre>-…) : son classement dédié.
+    const chm = it.kind === 'beaten' ? /^ch-([a-z]+)-/.exec(base || '') : null;
+    if (chm && CHAPTER_KEYS.indexOf(chm[1]) >= 0) return { label: 'Voir le classement', run: () => this.chainBoard(it.trackKey, CHAPTER_KEYS.indexOf(chm[1])) };
     if (it.kind === 'beaten' && i >= 0) {
       let sea = null;
       try { sea = variant ? +parseVariant(variant).sea || null : null; } catch { sea = null; }

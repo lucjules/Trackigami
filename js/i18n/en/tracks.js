@@ -118,5 +118,6 @@ export default {
   '🌍 Meilleur temps en ligne : {t:w} ({r:w} sur {n:w})': '🌍 Best time online: {t} ({r} of {n})',
   '🌍 Le serveur n’accepte pas encore les enchaînements (mise à jour en attente) : ton temps reste sur l’appareil.': '🌍 The server doesn’t accept runs yet (update pending): your time stays on this device.',
   '🌍 Classement : {m:t}': '🌍 Leaderboard: {m}',
+  'Voir le classement': 'See the leaderboard',
   'Ce record n’a plus ses commandes : refais l’enchaînement.': 'This record no longer has its inputs: do the run again.',
 };

@@ -220,6 +220,10 @@ try {
     await page.waitForTimeout(300);
     assert.deepEqual(await frenchLeft(page, '#modal'), []);
     assert.match(await page.locator('#modal-body').innerText(), /new record!/);
+    // Boîte de réception : « ton temps a été battu » sur un enchaînement mène à son classement dédié.
+    const label = await page.evaluate((k) => { const A = window.copytrack; A.ui.closeModal(); const a = A._inboxAction({ kind: 'beaten', trackKey: k }); if (a) a.run(); return a && a.label; }, chainKey(0));
+    assert.equal(label, 'Voir le classement');
+    await page.waitForFunction(() => /🏆 Chapter 1 · .* · in one go/.test(document.getElementById('modal-title').innerText), null, { timeout: 5000 });
     await ctx.close();
   });
 } finally {
