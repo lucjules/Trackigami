@@ -13,6 +13,7 @@ import { MAX_RUN_STEPS, MAX_INPUTS_CHARS, DT } from './constants.js';
 import { encodeFloats } from './ghostFormat.js';
 import { splitKey, parseVariant, applyVariant } from './variants.js';
 import { seasonOpen, seasonTracks } from './seasons.js';
+import { isOfficialCircuit, COPY_PUBLISH_REFUSAL } from './officialCopy.js';
 import { chainForKey, chainShapeError, chainTime, chainSplits, CHAIN_SEP } from './chain.js';
 
 // Un circuit écrit par une version PLUS RÉCENTE du jeu peut contenir des pièces que ce code ne connaît pas : la lecture les saute (Track.decode, `lost.unknown`) et la signature ne
@@ -121,6 +122,7 @@ export function verifyPublish({ code, inputs, time, physVer }) {
   let track;
   try { track = Track.decode(String(code || '')); } catch (e) { return { ok: false, error: 'Code de circuit invalide : ' + e.message }; }
   if (unknownPieces(track)) return { ok: false, error: UNKNOWN_MSG };
+  if (isOfficialCircuit(track)) return { ok: false, error: COPY_PUBLISH_REFUSAL };      // une copie NON MODIFIÉE d'un circuit officiel ne se publie pas (COMPLETE-019, js/officialCopy.js)
   if (!track.verified) return { ok: false, error: 'Circuit non vérifié : termine-le d’abord depuis l’éditeur (« ✔ Vérifier »).' };
   const run = replayRun(track, inputs);
   if (run == null) return { ok: false, error: 'La course de vérification rejouée n’atteint pas l’arrivée.' };

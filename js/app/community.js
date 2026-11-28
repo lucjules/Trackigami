@@ -24,6 +24,7 @@ import { renderWorldBoard, rivalGhost } from '../ui/leaderboardPanel.js';
 import { trackIdOf } from '../telemetry.js';
 import { locale } from '../i18n.js';
 import { comments, addComment, deleteComment, reportComment, playlists, savePlaylist, deletePlaylist, tracksByIds, picks, randomTrack, recommended, trackStats } from '../online/community.js';
+import { isOfficialCircuit, COPY_PUBLISH_REFUSAL } from '../officialCopy.js';
 
 const when = (d) => { const t = new Date(d); return Number.isFinite(t.getTime()) ? t.toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''; };
 export const communityMethods = {
@@ -140,6 +141,7 @@ export const communityMethods = {
   // ---- Communauté (circuits publiés en ligne) ----------------------------------
   // Publication : c'est ici (et seulement ici) qu'on choisit le nom et la description du circuit.
   publishTrack(track) {
+    if (isOfficialCircuit(track)) { this.ui.flash(COPY_PUBLISH_REFUSAL, 6); return Promise.resolve(false); }      // copie non modifiée d'un circuit officiel (COMPLETE-019) : le serveur la refuse aussi
     if (!track.verified) { this.ui.flash('Vérifie d’abord ton circuit (« ✔ Vérifier » dans l’éditeur) pour pouvoir le publier.' + (track.vt > 0 ? ' ' + UNVERIFIED_SINCE : ''), track.vt > 0 ? 6 : 2.4); return Promise.resolve(false); }
     // Le serveur REJOUE la course de vérification pour confirmer le temps de l'auteur : sans elle (circuit vérifié sur un autre appareil), il faut la refaire.
     const proof = loadProof(track);

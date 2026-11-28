@@ -119,6 +119,14 @@ export const raceHubMethods = {
       const bar = this._hubPlaylistBar(d);
       if (bar) $('hub-sub').append(' ', bar);
     }
+    // Copie d'un circuit officiel dans l'éditeur (COMPLETE-019) : les circuits de la carrière sont les meilleurs exemples de level design.
+    if (d.source === 'builtin' && !d.variant && d.track) {
+      const cb = document.createElement('button');
+      cb.className = 'btn small'; cb.type = 'button'; cb.textContent = '✎ Copier dans l’éditeur'; cb.dataset.hub = 'copy';
+      cb.title = 'Ouvre une copie modifiable dans l’éditeur (Mes circuits) ; le circuit officiel ne change pas.';
+      cb.onclick = () => { if (h.map) { h.map.dispose(); h.map = null; } this.copyOfficialToEditor(d.track); };
+      $('hub-sub').append(' ', cb);
+    }
     this._renderHubFav();
     this._renderHubNew();
     this._renderHubFacts();

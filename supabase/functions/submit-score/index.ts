@@ -20678,6 +20678,14 @@ function seasonOpen(n, t = Date.now()) {
   return "";
 }
 
+// js/officialCopy.js
+var COPY_PUBLISH_REFUSAL = "Ce circuit est identique \xE0 un circuit officiel : modifie-le avant de le publier (une copie non modifi\xE9e n\u2019est pas ton travail).";
+var texts = null;
+function isOfficialCircuit(track) {
+  if (!texts) texts = new Set(BUILTIN_TRACKS.map((d) => buildBuiltin(d).signatureText()));
+  return texts.has(track.signatureText());
+}
+
 // js/chain.js
 var CHAIN_LEGS = 6;
 var MAX_LEG_SECONDS = MAX_RUN_SECONDS;
@@ -20916,6 +20924,10 @@ function verifyPublish({ code, inputs, time, physVer }) {
   if (unknownPieces(track)) return {
     ok: false,
     error: UNKNOWN_MSG
+  };
+  if (isOfficialCircuit(track)) return {
+    ok: false,
+    error: COPY_PUBLISH_REFUSAL
   };
   if (!track.verified) return {
     ok: false,
@@ -21504,4 +21516,4 @@ Deno.serve(createHandler({
   serviceKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
   allowedOrigin: Deno.env.get("ALLOWED_ORIGIN") ?? "*"
 }));
-globalThis.__COPYTRACK_BUILD__ = "169ea858b841c02a";
+globalThis.__COPYTRACK_BUILD__ = "2094b8726ad7aa56";

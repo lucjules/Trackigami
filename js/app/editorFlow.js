@@ -5,9 +5,22 @@ import { medalIcon } from '../ui.js';
 import { esc } from '../dom.js';
 import { MEDALS } from '../medals.js';
 import { Track, hashString } from '../track.js';
-import { getEditorDraft, formatTime } from '../storage.js';
+import { getEditorDraft, formatTime, saveMyTrack, newId, wroteOk } from '../storage.js';
 import { saveProof } from '../authorProof.js';
+import { officialCopy } from '../officialCopy.js';
 export const editorFlowMethods = {
+  // « ✎ Copier dans l'éditeur » (fiche d'un circuit officiel, COMPLETE-019) : une COPIE dans « Mes circuits » (clé u-… propre, mention « Dérivé de … »), ouverte dans l'éditeur ;
+  // l'original n'est jamais touché (js/officialCopy.js). Même avec un chapitre fermé : la carte est déjà visible sur la fiche, la copie ne donne ni médaille ni pièce.
+  copyOfficialToEditor(track) {
+    let copy;
+    try { copy = officialCopy(track); } catch { this.ui.flash('Copie impossible : le circuit n’a pas pu être relu.', 4); return; }
+    const entry = saveMyTrack({ id: newId(), name: copy.name, code: copy.encode() });
+    if (!wroteOk()) { this.ui.flash('Copie impossible : le stockage du navigateur est plein ou bloqué.', 5); return; }
+    this.audio.click();
+    this.openEditor({ code: entry.code, entryId: entry.id, name: entry.name });
+    this.ui.flash('Copie ouverte dans l’éditeur : le circuit officiel reste intact (tu la retrouves dans « Mes circuits »).', 4);
+  },
+
   // L'éditeur (et l'inspecteur, les outils de remplissage, les familles de pièces…) pèse un quart du code du jeu : il n'est chargé qu'à la première
   // ouverture, pas au démarrage. Un second appel pendant le chargement est ignoré.
   async openEditor(state) {

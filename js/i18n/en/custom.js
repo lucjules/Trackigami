@@ -254,4 +254,10 @@ export default {
   'Huile chaude': 'Hot oil',
   'Boulons': 'Bolts',
   'Jantes de laiton': 'Brass rims',
+  // Copie d'un circuit officiel dans l'éditeur (COMPLETE-019) — à FAIRE RELIRE par un locuteur natif
+  'Copie impossible : le circuit n’a pas pu être relu.': 'Copy failed: the track could not be read.',
+  'Copie ouverte dans l’éditeur : le circuit officiel reste intact (tu la retrouves dans « Mes circuits »).': 'Copy opened in the editor: the official track stays untouched (you will find it in “My tracks”).',
+  '✎ Copier dans l’éditeur': '✎ Copy to the editor',
+  'Ouvre une copie modifiable dans l’éditeur (Mes circuits) ; le circuit officiel ne change pas.': 'Opens an editable copy in the editor (My tracks); the official track does not change.',
+  'Ce circuit est identique à un circuit officiel : modifie-le avant de le publier (une copie non modifiée n’est pas ton travail).': 'This track is identical to an official track: change it before publishing (an unmodified copy is not your own work).',
 };
